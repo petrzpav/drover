@@ -11,11 +11,17 @@ Rectangle {
     signal moved(real dx, real dy)
     signal moveFinished()
 
-    color: mouse.containsMouse ? Qt.tint(theme.background, Qt.alpha(theme.foreground, 0.08)) : theme.background
+    color: pill.expanded ? Qt.tint(theme.background, Qt.alpha(theme.foreground, 0.18))
+         : mouse.containsMouse ? Qt.tint(theme.background, Qt.alpha(theme.foreground, 0.08))
+         : theme.background
     radius: theme.radius
-    border.width: 1
-    border.color: backend.error !== "" || backend.blocked > 0 ? theme.urgent
-                : theme.border
+    border.width: 2
+    border.color: backend.error !== "" || backend.blocked > 0 ? theme.urgent : theme.border
+
+    function countFor(status) {
+        return status === "working" ? backend.working : status === "blocked" ? backend.blocked
+             : status === "done" ? backend.done : backend.idle
+    }
 
     // A press that moves a few pixels is a drag, anything else a click.
     // Positions are taken in window coordinates, which stay put while the
@@ -25,7 +31,7 @@ Rectangle {
         anchors.fill: parent
         hoverEnabled: true
         preventStealing: true
-        cursorShape: dragging ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+        cursorShape: pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
 
         property point start
         property bool dragging: false
@@ -57,30 +63,31 @@ Rectangle {
         onCanceled: dragging = false
     }
 
+    Hint {
+        visible: mouse.containsMouse && !mouse.pressed
+        text: backend.error !== "" ? backend.error : qsTr("Click to open, drag to move")
+    }
+
     Row {
         anchors.centerIn: parent
         visible: backend.error === ""
 
         Repeater {
-            model: [
-                { status: "working", count: backend.working },
-                { status: "blocked", count: backend.blocked },
-                { status: "done", count: backend.done },
-                { status: "idle", count: backend.idle }
-            ]
+            model: ["working", "blocked", "done", "idle"]
             delegate: Item {
-                required property var modelData
+                required property string modelData
+                readonly property int count: pill.countFor(modelData)
                 width: 40
                 height: pill.height
-                opacity: modelData.count > 0 ? 1 : 0.35
+                opacity: count > 0 ? 1 : 0.5
 
                 Row {
                     anchors.centerIn: parent
                     spacing: 6
-                    StatusDot { anchors.verticalCenter: parent.verticalCenter; status: modelData.status }
+                    StatusDot { anchors.verticalCenter: parent.verticalCenter; status: modelData }
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: modelData.count.toLocaleString(Qt.locale(translator.language), 'f', 0)
+                        text: count.toLocaleString(Qt.locale(translator.language), 'f', 0)
                         color: theme.foreground
                     }
                 }

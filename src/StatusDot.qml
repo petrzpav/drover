@@ -23,11 +23,12 @@ Item {
         border.width: dot.hollow ? 1.5 : 0
         border.color: dot.tint
 
+        // Pulses gently, never so far that it reads as an empty slot.
         SequentialAnimation on opacity {
             running: dot.status === "working"
             loops: Animation.Infinite
             alwaysRunToEnd: true
-            NumberAnimation { to: 0.3; duration: 700; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.6; duration: 700; easing.type: Easing.InOutSine }
             NumberAnimation { to: 1; duration: 700; easing.type: Easing.InOutSine }
         }
     }

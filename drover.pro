@@ -10,6 +10,7 @@ LIBS += -lLayerShellQtInterface
 
 HEADERS += \
     src/agentmodel.h \
+    src/ansi.h \
     src/backend.h \
     src/surface.h \
     src/terminalfont.h \
@@ -19,6 +20,7 @@ HEADERS += \
 SOURCES += \
     src/main.cpp \
     src/agentmodel.cpp \
+    src/ansi.cpp \
     src/backend.cpp \
     src/surface.cpp \
     src/terminalfont.cpp \

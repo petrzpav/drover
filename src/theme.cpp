@@ -89,6 +89,19 @@ QHash<QString, QString> Theme::readColors(const QString &path) {
     return colors;
 }
 
+QStringList Theme::terminalPalette() const {
+    static const char *names[16] = {"dark_background", "red", "green", "yellow", "blue", "magenta", "cyan",
+                                    "light_foreground", "muted", "bright_red", "bright_green", "bright_yellow",
+                                    "bright_blue", "bright_magenta", "bright_cyan", "bright_foreground"};
+    static const QStringList fallback = {"#000000", "#cd3131", "#0dbc79", "#e5e510", "#2472c8", "#bc3fbc",
+                                         "#11a8cd", "#e5e5e5", "#666666", "#f14c4c", "#23d18b", "#f5f543",
+                                         "#3b8eea", "#d670d6", "#29b8db", "#ffffff"};
+    QStringList palette;
+    for (int i = 0; i < 16; ++i)
+        palette << m_colors.value(QString::fromLatin1(names[i]), m_colors.value(QStringLiteral("color%1").arg(i), fallback.at(i)));
+    return palette;
+}
+
 // Black or white, whichever reads on the accent (WCAG relative luminance).
 QString Theme::accentForeground() const {
     const QColor c(m_accent);

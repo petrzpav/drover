@@ -36,6 +36,10 @@ public:
     QString urgent() const { return color("red", "#a55555"); }
     QString success() const { return color("green", "#8ab27a"); }
 
+    // The terminal's 16 basic colors from the theme's named colors, over
+    // xterm's where the theme has none.
+    QStringList terminalPalette() const;
+
     static QString readAccent(const QString &path);
     static QHash<QString, QString> readColors(const QString &path);
 

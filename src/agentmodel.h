@@ -11,14 +11,15 @@ struct Agent {
     QString kind;       // claude, codex, ...
     QString status;     // working, blocked, done, idle, unknown
     QString workspace;  // the herdr workspace label
+    QString workspaceId;
     QString cwd;        // with the home directory shortened to ~
 
     bool operator==(const Agent &other) const = default;
 };
 
-// The live agent list for QML. Updates keep rows in place when the same panes
-// are still there, so the list doesn't flicker or lose its scroll position on
-// every poll.
+// The live agent list for QML. Updates are applied row by row (removed,
+// moved, inserted, changed), so the list doesn't flicker or lose its scroll
+// position on any poll.
 class AgentModel : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY countChanged)

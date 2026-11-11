@@ -12,11 +12,17 @@ Rectangle {
     required property string workspace
     required property string cwd
     property bool selected: false
+    property string statusText: ""
     signal picked()
     signal opened()
 
+    // The workspace is shown only when it says more than the folder does.
+    readonly property bool workspaceIsFolder: cwd === "~/" + workspace || cwd.endsWith("/" + workspace)
+                                              || cwd === "~" || workspace === ""
+    readonly property string place: workspaceIsFolder ? cwd : workspace + " · " + cwd
+
     height: rowContent.implicitHeight + 18
-    radius: Math.min(4, theme.radius)
+    radius: theme.radius
     color: selected || hover.hovered ? Qt.alpha(theme.foreground, 0.08) : "transparent"
     border.width: selected ? 1 : 0
     border.color: Qt.alpha(theme.border, 0.25)
@@ -47,8 +53,8 @@ Rectangle {
             }
             Text {
                 Layout.fillWidth: true
-                text: row.workspace + " · " + row.cwd
-                color: theme.muted
+                text: row.statusText + " · " + row.place
+                color: Qt.alpha(theme.foreground, 0.55)
                 elide: Text.ElideMiddle
             }
         }

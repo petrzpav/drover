@@ -19,6 +19,7 @@ opens or hides the panel of the one that is already running.
 drover            # start with the panel closed (autostart), or open/hide it
 drover toggle     # open or hide the panel, starting drover if needed
 drover open       # open the panel, starting drover if needed
+drover pick       # open the panel with the workspace picker
 drover quit       # stop it
 ```
 
@@ -28,25 +29,50 @@ A global shortcut is one line in `~/.config/hypr/bindings.lua`:
 o.bind("SUPER + H", "Herdr agents", "drover toggle")
 ```
 
-| Key / action        | Does                                                  |
-| ------------------- | ----------------------------------------------------- |
-| Click the pill      | Show or hide the panel                                |
-| Drag the pill       | Move it; the panel opens on the side with room        |
-| `Alt+↑` `Alt+↓`     | Pick an agent (plain `↑` `↓` outside the message box) |
-| `Enter`             | Send the message; with an empty box, open the agent   |
-| `Shift+Enter`       | New line in the message                               |
-| Double-click a row  | Open the agent in herdr                               |
-| `Ctrl+O`            | Open the agent in herdr                               |
-| `1`–`9`, `Enter`    | Answer an agent that asks you (and the key buttons)   |
-| `Esc`               | Hide the panel                                        |
-| `?` / `Space` / `Q` | Help / hide / quit, outside the message box           |
+| Key / action        | Does                                                       |
+| ------------------- | ---------------------------------------------------------- |
+| Click the pill      | Show or hide the panel                                     |
+| Drag the pill       | Move it; the panel opens on the side with room             |
+| `Enter`             | Send the message; with an empty box, open the agent        |
+| `Shift+Enter`       | New line in the message                                    |
+| `Alt+↑` `Alt+↓`     | Pick an agent                                              |
+| `Ctrl+P`            | Pick a workspace and start the default agent there         |
+| `Ctrl+O`            | Open the agent in herdr (or double-click its row)          |
+| `Tab`               | Move to the answer keys when an agent asks you something   |
+| `1`–`9` `↑` `↓` `Enter` | Answer, while the answer keys have the keyboard        |
+| `Shift+Esc`         | Send Esc to the agent                                      |
+| `Esc`               | Close the picker or help, then hide the panel              |
+| `F1`                | Show or hide the shortcuts                                 |
+| `Ctrl+Q`            | Quit                                                       |
 
-The panel opens with the message box focused, so `Space`, `?`, `Q` and the
-arrows type into it; they work as shortcuts once you pick an agent with the
-mouse. `Esc` always hides the panel.
+When an agent starts asking something while you type, the keyboard doesn't
+follow it: no key you meant for the message box answers the agent. Answer
+with the keycaps, or press `Tab` to answer from the keyboard.
+
+The agent's screen keeps the terminal's colors and lines. Scroll up or select
+text and it holds still; "New output ↓" brings it back to the newest lines.
 
 Opening an agent focuses it in herdr (`herdr agent focus`) and brings the
 herdr window forward, wherever it is.
+
+### The default agent
+
+`Ctrl+P` opens a new tab in the chosen workspace, in the folder it already
+works in, and starts the agent kind set in `~/.config/drover/config`
+(`claude` when there is none):
+
+```ini
+agent = codex
+```
+
+Hyprland setups that bind `Ctrl+P` globally swallow the key before drover
+sees it. Such a binding can hand it on while the panel is open, which drover
+marks with `$XDG_RUNTIME_DIR/drover.open`:
+
+```lua
+local open = io.open((os.getenv("XDG_RUNTIME_DIR") or "") .. "/drover.open")
+if open then open:close(); hl.exec_cmd("drover pick") end
+```
 
 ## How it works
 
@@ -59,8 +85,11 @@ place is kept in `~/.local/state/drover/position`.
 
 It polls `herdr agent list` and `herdr workspace list` once a second (a few
 milliseconds each) and reads the selected agent's screen with `herdr agent
-read` while the panel is open: its scrollback while it is idle, its visible
-screen while it works (herdr can't scroll a busy agent's history). Only the local herdr session is shown; saved
+read --format ansi` while the panel is open: its scrollback while it is idle,
+its visible screen while it works (herdr can't scroll a busy agent's history).
+A failed poll keeps the last list and says it is out of date; if the selected
+agent's pane closes, nothing is selected until you pick another, so a draft
+never goes to an agent you didn't choose. Only the local herdr session is shown; saved
 SSH machines (`herdr --machine`) take seconds per call and are left out.
 
 It looks like the Omarchy shell: the theme's colors from `colors.toml`, the
@@ -81,7 +110,7 @@ o.launch_on_start("drover")
 
 ```sh
 bin/build      # build/drover
-bin/test       # Qt Test, offscreen
+bin/test       # Qt Test, offscreen: the backend, and the real QML driven against a fake herdr
 bin/install    # makepkg -fsi: installs the binary, launcher entry, and icon
 ```
 

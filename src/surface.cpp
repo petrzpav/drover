@@ -7,6 +7,8 @@
 #include <QRegion>
 #include <QSaveFile>
 #include <QScreen>
+#include <QStandardPaths>
+#include <QTimer>
 #include <QWindow>
 
 Surface::Surface(const QString &stateFile, QObject *parent)
@@ -25,6 +27,8 @@ Surface::Surface(const QString &stateFile, QObject *parent)
 bool Surface::attach(QWindow *window) {
     m_window = window;
     m_layer = QGuiApplication::platformName().startsWith("wayland");
+    if (m_layer)
+        m_openFlag = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation) + "/drover.open";
     if (!m_layer) {
         if (auto *screen = QGuiApplication::primaryScreen())
             window->resize(screen->availableSize());
@@ -44,6 +48,21 @@ bool Surface::attach(QWindow *window) {
     layer->setKeyboardInteractivity(LayerShellQt::Window::KeyboardInteractivityNone);
     layer->setActivateOnShow(false);
     layer->setWantsToBeOnActiveScreen(true);
+    // When the compositor drops the surface (its output went away: a monitor
+    // unplugged, phone mode), keep the window and show it again on a screen
+    // that is still there, rather than letting the app quit.
+    layer->setCloseOnDismissed(false);
+    auto reshow = [this] {
+        QTimer::singleShot(500, m_window, [this] {
+            m_window->hide();
+            m_window->show();
+        });
+    };
+    connect(qGuiApp, &QGuiApplication::screenRemoved, this, reshow);
+    connect(qGuiApp, &QGuiApplication::screenAdded, this, [this] {
+        if (!m_window->isVisible())
+            m_window->show();
+    });
     return true;
 }
 
@@ -55,7 +74,23 @@ void Surface::setOffset(const QPointF &offset) {
     emit offsetChanged();
 }
 
+Surface::~Surface() {
+    if (!m_openFlag.isEmpty())
+        QFile::remove(m_openFlag);
+}
+
 void Surface::setExpanded(bool expanded) {
+    // While the panel is open this file exists, so a compositor key binding
+    // (Ctrl+P in Hyprland) can hand the key to drover instead of a window.
+    if (!m_openFlag.isEmpty()) {
+        if (expanded) {
+            QFile flag(m_openFlag);
+            if (!flag.open(QIODevice::WriteOnly))
+                qWarning("drover: can't write %s", qPrintable(m_openFlag));
+        } else {
+            QFile::remove(m_openFlag);
+        }
+    }
     if (!m_layer || !m_window)
         return;
     LayerShellQt::Window::get(m_window)->setKeyboardInteractivity(

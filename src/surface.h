@@ -24,6 +24,7 @@ class Surface : public QObject {
 
 public:
     explicit Surface(const QString &stateFile = {}, QObject *parent = nullptr);
+    ~Surface() override;
 
     // Must run before the window is first shown. Off Wayland (tests,
     // offscreen) the window stays an ordinary window.
@@ -42,7 +43,7 @@ signals:
     void offsetChanged();
 
 private:
-    QString m_stateFile;
+    QString m_stateFile, m_openFlag;
     QWindow *m_window = nullptr;
     bool m_layer = false;
     QPointF m_offset{12, 12};

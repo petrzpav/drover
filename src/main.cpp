@@ -5,6 +5,9 @@
 #include <QIcon>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QLockFile>
+#include <QStandardPaths>
+#include <QThread>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -34,30 +37,44 @@ int main(int argc, char *argv[]) {
     // with the panel closed; `open` or `toggle` start with it open.
     const bool bare = argc < 2;
     const QString command = bare ? QStringLiteral("toggle") : QString::fromLocal8Bit(argv[1]);
-    if (command != "toggle" && command != "quit" && command != "open") {
-        fprintf(stderr, "usage: drover [open|toggle|quit]\n");
+    if (command != "toggle" && command != "quit" && command != "open" && command != "pick") {
+        fprintf(stderr, "usage: drover [open|toggle|pick|quit]\n");
         return 1;
     }
+    const QString runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
     const QString serverName = QStringLiteral("drover-%1").arg(getuid());
-    {
-        QLocalSocket socket;
-        socket.connectToServer(serverName);
-        if (socket.waitForConnected(300)) {
-            socket.write(command.toUtf8() + '\n');
-            socket.waitForBytesWritten(300);
-            return 0;
+
+    // The lock decides which start becomes the indicator, so two starts at the
+    // same moment (autostart and a key press) can't both end up running.
+    QLockFile lock(runtime + "/drover.lock");
+    if (!lock.tryLock(0)) {
+        // Another drover runs or is starting; hand it the command once its
+        // server listens.
+        for (int attempt = 0; attempt < 30; ++attempt) {
+            QLocalSocket socket;
+            socket.connectToServer(serverName);
+            if (socket.waitForConnected(200)) {
+                socket.write(command.toUtf8() + '\n');
+                socket.waitForBytesWritten(300);
+                return 0;
+            }
+            QThread::msleep(100);
         }
+        fprintf(stderr, "drover: another drover holds %s but doesn't answer\n", qPrintable(lock.fileName()));
+        return 1;
     }
     if (command == "quit")
         return 0;
     QLocalServer::removeServer(serverName);
     QLocalServer server;
     if (!server.listen(serverName))
-        fprintf(stderr, "drover: can't listen on %s, a second start will open a second indicator\n",
+        fprintf(stderr, "drover: can't listen on %s, so starting drover again won't reach this one\n",
                 qPrintable(serverName));
 
-    // Basic keeps Qt's controls out of the way; the look is drawn in QML to match
-    // the Omarchy shell rather than Material.
+    // The indicator is the whole app; losing its window for a moment (an
+    // output going away) must not end it.
+    app.setQuitOnLastWindowClosed(false);
+
     QQuickStyle::setStyle("Basic");
 
     // All text in the terminal's font and size, like the agents' own screens.
@@ -70,6 +87,8 @@ int main(int argc, char *argv[]) {
 
     Theme theme;
     Backend backend;
+    backend.setPalette(theme.terminalPalette());
+    QObject::connect(&theme, &Theme::changed, &backend, [&] { backend.setPalette(theme.terminalPalette()); });
     Surface surface;
 
     QQmlApplicationEngine engine;
@@ -87,7 +106,9 @@ int main(int argc, char *argv[]) {
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
     surface.attach(window);
     window->show();
-    if (!bare)
+    if (command == "pick")
+        QMetaObject::invokeMethod(window, "openPicker");
+    else if (!bare)
         QMetaObject::invokeMethod(window, "setExpanded", Q_ARG(QVariant, true));
 
     QObject::connect(&server, &QLocalServer::newConnection, &server, [&server, window] {
@@ -98,6 +119,8 @@ int main(int argc, char *argv[]) {
                     QGuiApplication::quit();
                 else if (message == "open")
                     QMetaObject::invokeMethod(window, "setExpanded", Q_ARG(QVariant, true));
+                else if (message == "pick")
+                    QMetaObject::invokeMethod(window, "openPicker");
                 else
                     QMetaObject::invokeMethod(window, "setExpanded", Q_ARG(QVariant, !window->property("expanded").toBool()));
             });

@@ -2,9 +2,10 @@
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-mkdir -p "$ROOT/build/tests"
-cd "$ROOT/build/tests"
-
-qmake6 "$ROOT/tests/drover_tests.pro"
-make -j"$(nproc)"
-QT_QPA_PLATFORM=offscreen ./drover_tests
+for suite in drover_tests drover_ui_tests; do
+  mkdir -p "$ROOT/build/tests/$suite"
+  cd "$ROOT/build/tests/$suite"
+  qmake6 "$ROOT/tests/$suite.pro" >/dev/null
+  make -j"$(nproc)" >/dev/null
+  QT_QPA_PLATFORM=offscreen ./"$suite"
+done
