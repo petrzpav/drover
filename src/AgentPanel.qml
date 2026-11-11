@@ -5,7 +5,8 @@ import QtQuick.Layouts
 // The open panel, laid out like a chat: every agent of the herdr session on
 // the left, the selected agent's screen on the right with a box to talk to it,
 // or keys to answer it when it asks. Drawn like an Omarchy shell popup: the
-// theme background, an accent border, the system monospace font. Everything
+// theme background and the Hyprland active border, in the system font at its
+// own size; the agent's screen and the message box are monospace. Everything
 // has a fixed size, so nothing shifts as agents change state.
 Rectangle {
     id: panel
@@ -57,15 +58,11 @@ Rectangle {
                 Text {
                     text: qsTr("herdr agents")
                     color: theme.foreground
-                    font.family: "monospace"
-                    font.pixelSize: 14
                 }
                 Text {
                     Layout.fillWidth: true
                     text: qsTr("%n agents", "", backend.agents.count)
                     color: theme.muted
-                    font.family: "monospace"
-                    font.pixelSize: 12
                     elide: Text.ElideRight
                 }
             }
@@ -104,8 +101,6 @@ Rectangle {
                     wrapMode: Text.Wrap
                     text: backend.error !== "" ? backend.error : qsTr("No agents are running in herdr.")
                     color: backend.error !== "" ? theme.urgent : theme.muted
-                    font.family: "monospace"
-                    font.pixelSize: 12
                 }
             }
         }
@@ -130,16 +125,12 @@ Rectangle {
                     Layout.fillWidth: true
                     text: backend.selectedTitle
                     color: theme.foreground
-                    font.family: "monospace"
-                    font.pixelSize: 14
                     elide: Text.ElideRight
                 }
                 Text {
                     visible: backend.selected !== ""
                     text: panel.statusLabel(backend.selectedStatus)
                     color: panel.statusColor(backend.selectedStatus)
-                    font.family: "monospace"
-                    font.pixelSize: 12
                 }
                 IconButton {
                     icon: ""
@@ -197,7 +188,6 @@ Rectangle {
                         selectionColor: Qt.alpha(theme.foreground, 0.35)
                         selectedTextColor: theme.foreground
                         font.family: "monospace"
-                        font.pixelSize: 12
                     }
                 }
 
@@ -211,8 +201,6 @@ Rectangle {
                     visible: backend.selected === ""
                     text: qsTr("Pick an agent to see its screen.")
                     color: theme.muted
-                    font.family: "monospace"
-                    font.pixelSize: 12
                 }
 
                 // Results of an action sit over the screen rather than
@@ -234,8 +222,6 @@ Rectangle {
                         width: parent.width - 20
                         text: backend.notice
                         color: backend.noticeIsError ? theme.urgent : theme.foreground
-                        font.family: "monospace"
-                        font.pixelSize: 12
                         elide: Text.ElideRight
                     }
                 }
@@ -281,7 +267,6 @@ Rectangle {
                                 selectionColor: Qt.alpha(theme.foreground, 0.35)
                                 selectedTextColor: theme.foreground
                                 font.family: "monospace"
-                                font.pixelSize: 13
                                 selectByMouse: true
                                 onCursorRectangleChanged: {
                                     if (cursorRectangle.y + cursorRectangle.height > messageScroll.contentY + messageScroll.height)
@@ -348,8 +333,6 @@ Rectangle {
                         Text {
                             text: qsTr("The agent asks you something. Answer with the keys it offers:")
                             color: theme.urgent
-                            font.family: "monospace"
-                            font.pixelSize: 12
                             Layout.fillWidth: true
                             elide: Text.ElideRight
                         }
@@ -391,8 +374,6 @@ Rectangle {
             Text {
                 text: qsTr("Keyboard shortcuts")
                 color: theme.foreground
-                font.family: "monospace"
-                font.pixelSize: 15
             }
             Grid {
                 columns: 2
@@ -414,8 +395,6 @@ Rectangle {
                         required property int index
                         text: modelData
                         color: index % 2 === 0 ? theme.accent : theme.foreground
-                        font.family: "monospace"
-                        font.pixelSize: 13
                         width: index % 2 === 0 ? implicitWidth : 420
                         wrapMode: Text.Wrap
                     }
@@ -425,8 +404,6 @@ Rectangle {
                 width: 560
                 text: qsTr("Space, arrows, ? and Q work when the message box isn't focused; Esc always hides the panel.")
                 color: theme.muted
-                font.family: "monospace"
-                font.pixelSize: 12
                 wrapMode: Text.Wrap
             }
         }

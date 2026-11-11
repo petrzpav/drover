@@ -15,7 +15,7 @@ Rectangle {
     signal picked()
     signal opened()
 
-    height: 52
+    height: rowContent.implicitHeight + 18
     radius: Math.min(4, theme.radius)
     color: selected || hover.hovered ? Qt.alpha(theme.foreground, 0.08) : "transparent"
     border.width: selected ? 1 : 0
@@ -28,6 +28,7 @@ Rectangle {
     }
 
     RowLayout {
+        id: rowContent
         anchors.fill: parent
         anchors.leftMargin: 12
         anchors.rightMargin: 10
@@ -42,16 +43,12 @@ Rectangle {
                 Layout.fillWidth: true
                 text: row.title
                 color: row.selected ? theme.accent : theme.foreground
-                font.family: "monospace"
-                font.pixelSize: 13
                 elide: Text.ElideRight
             }
             Text {
                 Layout.fillWidth: true
                 text: row.workspace + " · " + row.cwd
                 color: theme.muted
-                font.family: "monospace"
-                font.pixelSize: 11
                 elide: Text.ElideMiddle
             }
         }

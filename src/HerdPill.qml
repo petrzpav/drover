@@ -82,8 +82,6 @@ Rectangle {
                         anchors.verticalCenter: parent.verticalCenter
                         text: modelData.count.toLocaleString(Qt.locale(translator.language), 'f', 0)
                         color: theme.foreground
-                        font.family: "monospace"
-                        font.pixelSize: 13
                     }
                 }
             }
@@ -95,8 +93,6 @@ Rectangle {
         visible: backend.error !== ""
         text: qsTr("herdr unavailable")
         color: theme.urgent
-        font.family: "monospace"
-        font.pixelSize: 12
         elide: Text.ElideRight
         width: Math.min(implicitWidth, pill.width - 16)
     }

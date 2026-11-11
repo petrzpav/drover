@@ -12,7 +12,7 @@ Rectangle {
     signal clicked()
 
     implicitWidth: label === "" ? 30 : content.implicitWidth + 20
-    implicitHeight: 30
+    implicitHeight: Math.max(30, content.implicitHeight + 10)
     radius: Math.min(4, theme.radius)
     opacity: enabled ? 1 : 0.4
     color: !enabled ? "transparent"
@@ -41,15 +41,13 @@ Rectangle {
             text: button.icon
             color: button.tint
             font.family: "monospace"
-            font.pixelSize: 15
+            font.pointSize: Qt.application.font.pointSize * 1.1
         }
         Text {
             visible: button.label !== ""
             anchors.verticalCenter: parent.verticalCenter
             text: button.label
             color: button.tint
-            font.family: "monospace"
-            font.pixelSize: 13
-        }
+                    }
     }
 }
