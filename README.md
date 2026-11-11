@@ -83,9 +83,10 @@ It polls `herdr agent list` and `herdr workspace list` once a second (a few
 milliseconds each). A failed poll keeps the last list and says it is out of
 date; if the selected agent's pane closes, nothing is selected until you pick
 another, so the terminal never attaches to an agent you didn't choose. The
-terminal is [qmltermwidget](https://github.com/Swordfish90/qmltermwidget)
-with a color scheme drover writes from the Omarchy theme (in
-`~/.local/share/drover/qml`). Only the local herdr session is shown; saved
+terminal is drover's own: [libvterm](https://www.leonerd.org.uk/code/libvterm/)
+(the engine of Neovim's terminal) parses the output, and drover draws it on
+the next frame with no buffering in between, in the theme's 16 colors, so
+typing is as quick as in a standalone terminal. Only the local herdr session is shown; saved
 SSH machines (`herdr --machine`) take seconds per call and are left out.
 
 It looks like the Omarchy shell: the theme's colors from `colors.toml`, the
