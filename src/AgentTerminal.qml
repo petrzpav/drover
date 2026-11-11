@@ -5,8 +5,8 @@ import Drover
 // key works as in herdr itself: Shift+Tab, Esc, Ctrl+C, the agent's own
 // menus. While attached, the pane takes this terminal's size; it goes back to
 // herdr's when the terminal goes away (the panel closes, another agent is
-// picked). Ctrl+Shift+C and Ctrl+Shift+V copy and paste; the wheel and
-// Shift+PageUp/PageDown scroll back.
+// picked). The wheel and clicks go to herdr, which scrolls the agent's
+// history; Shift+drag selects, Ctrl+Shift+C and Ctrl+Shift+V copy and paste.
 Item {
     id: root
     required property string terminalId

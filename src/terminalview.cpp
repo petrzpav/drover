@@ -72,7 +72,7 @@ VTermKey specialKey(int key) {
 
 TerminalView::TerminalView(QQuickItem *parent) : QQuickPaintedItem(parent) {
     setFlag(ItemAcceptsInputMethod, true);
-    setAcceptedMouseButtons(Qt::LeftButton);
+    setAcceptedMouseButtons(Qt::LeftButton | Qt::RightButton);
     setOpaquePainting(true);
 
     m_vt = vterm_new(m_rows, m_cols);
@@ -328,6 +328,10 @@ int TerminalView::onSetTermProp(VTermProp prop, VTermValue *value, void *user) {
         self->m_cursorVisible = value->boolean;
     else if (prop == VTERM_PROP_CURSORSHAPE)
         self->m_cursorShape = value->number;
+    else if (prop == VTERM_PROP_MOUSE) {
+        self->m_mouseMode = value->number;
+        self->setAcceptHoverEvents(value->number == VTERM_PROP_MOUSE_MOVE);
+    }
     self->update();
     return 1;
 }
@@ -647,15 +651,43 @@ QPoint TerminalView::cellUnder(const QPointF &position) const {
     return {column, firstVisibleLine() + row};
 }
 
+// A program that asked for mouse events (herdr's attach does) gets them, as
+// in any terminal: it scrolls its own history on the wheel and handles
+// clicks. Shift+drag still selects text here, as in Ghostty.
+bool TerminalView::forwardsMouse(Qt::KeyboardModifiers modifiers) const {
+    return m_mouseMode != VTERM_PROP_MOUSE_NONE && !(modifiers & Qt::ShiftModifier);
+}
+
+void TerminalView::sendMousePosition(const QPointF &position, Qt::KeyboardModifiers modifiers) {
+    const int column = qBound(0, int(position.x() / m_cellWidth), m_cols - 1);
+    const int row = qBound(0, int(position.y() / m_cellHeight), m_rows - 1);
+    vterm_mouse_move(m_vt, row, column, modifiersOf(modifiers));
+}
+
+static int mouseButton(Qt::MouseButton button) {
+    return button == Qt::LeftButton ? 1 : button == Qt::MiddleButton ? 2 : button == Qt::RightButton ? 3 : 0;
+}
+
 void TerminalView::mousePressEvent(QMouseEvent *event) {
     forceActiveFocus(Qt::MouseFocusReason);
-    m_selecting = true;
     m_hasSelection = false;
+    m_forwardingPress = forwardsMouse(event->modifiers()) && mouseButton(event->button());
+    if (m_forwardingPress) {
+        sendMousePosition(event->position(), event->modifiers());
+        vterm_mouse_button(m_vt, mouseButton(event->button()), true, modifiersOf(event->modifiers()));
+        update();
+        return;
+    }
+    m_selecting = true;
     m_selectionStart = m_selectionEnd = cellUnder(event->position());
     update();
 }
 
 void TerminalView::mouseMoveEvent(QMouseEvent *event) {
+    if (m_forwardingPress) {
+        sendMousePosition(event->position(), event->modifiers());
+        return;
+    }
     if (!m_selecting)
         return;
     m_selectionEnd = cellUnder(event->position());
@@ -664,8 +696,19 @@ void TerminalView::mouseMoveEvent(QMouseEvent *event) {
 }
 
 void TerminalView::mouseReleaseEvent(QMouseEvent *event) {
+    if (m_forwardingPress) {
+        sendMousePosition(event->position(), event->modifiers());
+        vterm_mouse_button(m_vt, mouseButton(event->button()), false, modifiersOf(event->modifiers()));
+        m_forwardingPress = false;
+        return;
+    }
     mouseMoveEvent(event);
     m_selecting = false;
+}
+
+void TerminalView::hoverMoveEvent(QHoverEvent *event) {
+    if (m_mouseMode == VTERM_PROP_MOUSE_MOVE)
+        sendMousePosition(event->position(), event->modifiers());
 }
 
 void TerminalView::scrollBy(int lines) {
@@ -677,10 +720,21 @@ void TerminalView::scrollBy(int lines) {
 }
 
 void TerminalView::wheelEvent(QWheelEvent *event) {
-    const int steps = event->angleDelta().y() / 40;
-    if (steps != 0)
-        scrollBy(steps);
     event->accept();
+    m_wheel += event->angleDelta().y();
+    const int steps = m_wheel / 120;
+    if (steps == 0)
+        return;
+    m_wheel -= steps * 120;
+    if (forwardsMouse(event->modifiers())) {
+        // Buttons 4 and 5 are the wheel; one notch, three lines, as usual.
+        sendMousePosition(event->position(), event->modifiers());
+        for (int i = 0; i < qAbs(steps); ++i) {
+            vterm_mouse_button(m_vt, steps > 0 ? 4 : 5, true, modifiersOf(event->modifiers()));
+        }
+        return;
+    }
+    scrollBy(steps * 3);
 }
 
 void TerminalView::focusInEvent(QFocusEvent *event) {

@@ -89,6 +89,7 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
+    void hoverMoveEvent(QHoverEvent *event) override;
     void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
     void focusInEvent(QFocusEvent *event) override;
     void focusOutEvent(QFocusEvent *event) override;
@@ -113,6 +114,8 @@ private:
     bool cellAt(int line, int column, VTermScreenCell *cell) const;
     QColor resolve(VTermColor color, bool foreground) const;
     QPoint cellUnder(const QPointF &position) const;
+    bool forwardsMouse(Qt::KeyboardModifiers modifiers) const;
+    void sendMousePosition(const QPointF &position, Qt::KeyboardModifiers modifiers);
     int firstVisibleLine() const;
     bool selected(int line, int column) const;
     QString lineText(int line, int from, int to) const;
@@ -133,9 +136,13 @@ private:
     VTermPos m_cursor{0, 0};
     bool m_cursorVisible = true;
     int m_cursorShape = VTERM_PROP_CURSORSHAPE_BLOCK;
+    // What mouse events the program asked for (VTERM_PROP_MOUSE_*).
+    int m_mouseMode = VTERM_PROP_MOUSE_NONE;
+    bool m_forwardingPress = false;
 
     std::deque<QVector<VTermScreenCell>> m_scrollback;
     int m_scrollOffset = 0;
+    int m_wheel = 0;  // wheel movement not yet a whole notch
 
     // Selection, in lines counted from the oldest line of scrollback.
     bool m_selecting = false, m_hasSelection = false;

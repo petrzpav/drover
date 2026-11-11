@@ -318,6 +318,33 @@ echo ok
         QTRY_COMPARE(keys(), expected);
     }
 
+    void terminalHandsTheWheelToAProgramThatWantsTheMouse()
+    {
+        QTemporaryDir dir;
+        TerminalView view;
+        view.setSize({800, 400});
+        view.setProgram("/bin/sh");
+        // Like herdr's attach: ask for clicks in SGR encoding, then log every byte.
+        view.setArguments({"-c", QString("printf '\\033[?1000h\\033[?1006h'; stty raw -echo; "
+                                         "while b=$(dd bs=1 count=1 2>/dev/null); [ -n \"$b\" ]; do printf %s \"$b\" >> '%1'; done")
+                                     .arg(dir.filePath("mouse"))});
+        view.start();
+        QTest::qWait(300);
+        const QPointF at(3 * 8 + 1, 2 * 16 + 1);  // inside cell row 2, column 3 for an 8x16 cell or bigger
+        QWheelEvent up(at, at, {}, {0, 120}, Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(&view, &up);
+        QWheelEvent down(at, at, {}, {0, -120}, Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(&view, &down);
+        auto bytes = [&] {
+            QFile file(dir.filePath("mouse"));
+            return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
+        };
+        // Wheel up is button 64 and wheel down 65 in SGR mouse reports.
+        QTRY_VERIFY(QRegularExpression("^\\x1b\\[<64;\\d+;\\d+M\\x1b\\[<65;\\d+;\\d+M$").match(bytes()).hasMatch());
+        // Nothing went into drover's own scrollback view instead.
+        QVERIFY(view.screenText().isEmpty());
+    }
+
     void terminalKeepsReservedShortcuts()
     {
         TerminalView view;

@@ -34,8 +34,9 @@ o.bind("SUPER + H", "Herdr agents", "drover toggle")
 | Click the pill      | Show or hide the panel                                     |
 | Drag the pill       | Move it; the panel opens on the side with room             |
 | Any key             | Goes to the agent's terminal, as in herdr                  |
+| Wheel, clicks       | Go to herdr, which scrolls the agent's history         |
+| `Shift`+drag        | Select text                                                |
 | `Ctrl+Shift+C` `Ctrl+Shift+V` | Copy the selection, paste (bracketed)            |
-| Wheel, `Shift+PageUp` `Shift+PageDown` | Scroll back                             |
 | `Alt+↑` `Alt+↓`     | Pick an agent                                              |
 | `Ctrl+P`            | Pick a workspace and start the default agent there         |
 | `Ctrl+Shift+O`      | Open the agent in herdr (or double-click its row)          |
