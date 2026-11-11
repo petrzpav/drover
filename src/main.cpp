@@ -26,10 +26,12 @@ int main(int argc, char *argv[]) {
     app.setDesktopFileName("drover");
     app.setWindowIcon(QIcon::fromTheme("drover"));
 
-    // One indicator per session: starting drover again (from the launcher, or
-    // `drover toggle`) opens or closes the running one's panel, and
-    // `drover quit` stops it.
-    const QString command = argc > 1 ? QString::fromLocal8Bit(argv[1]) : QStringLiteral("toggle");
+    // One indicator per session: starting drover again (from the launcher, a
+    // key binding, or `drover toggle`) opens or closes the running one's
+    // panel, and `drover quit` stops it. A bare `drover` (autostart) starts
+    // with the panel closed; `open` or `toggle` start with it open.
+    const bool bare = argc < 2;
+    const QString command = bare ? QStringLiteral("toggle") : QString::fromLocal8Bit(argv[1]);
     if (command != "toggle" && command != "quit" && command != "open") {
         fprintf(stderr, "usage: drover [open|toggle|quit]\n");
         return 1;
@@ -80,7 +82,7 @@ int main(int argc, char *argv[]) {
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
     surface.attach(window);
     window->show();
-    if (command == "open")
+    if (!bare)
         QMetaObject::invokeMethod(window, "setExpanded", Q_ARG(QVariant, true));
 
     QObject::connect(&server, &QLocalServer::newConnection, &server, [&server, window] {

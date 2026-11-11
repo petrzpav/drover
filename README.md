@@ -16,9 +16,16 @@ Start **Drover** from the app launcher (`Super + Space`). Starting it again
 opens or hides the panel of the one that is already running.
 
 ```sh
-drover            # start, or open/hide the running one's panel
-drover open       # start with the panel open, or open it
+drover            # start with the panel closed (autostart), or open/hide it
+drover toggle     # open or hide the panel, starting drover if needed
+drover open       # open the panel, starting drover if needed
 drover quit       # stop it
+```
+
+A global shortcut is one line in `~/.config/hypr/bindings.lua`:
+
+```lua
+o.bind("SUPER + H", "Herdr agents", "drover toggle")
 ```
 
 | Key / action        | Does                                                  |
