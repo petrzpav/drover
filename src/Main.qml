@@ -17,9 +17,11 @@ ApplicationWindow {
     readonly property int gap: 8
     readonly property int edge: 12
 
-    // The indicator keeps its distance from the right and bottom edges.
-    readonly property real pillX: clamp(width - pillWidth - surface.offset.x, 0, width - pillWidth)
-    readonly property real pillY: clamp(height - pillHeight - surface.offset.y, 0, height - pillHeight)
+    // The indicator keeps its distance from the right and bottom edges, on
+    // whole pixels: anything drawn at a fraction of one (the terminal above
+    // all) comes out blurred.
+    readonly property int pillX: Math.round(clamp(width - pillWidth - surface.offset.x, 0, width - pillWidth))
+    readonly property int pillY: Math.round(clamp(height - pillHeight - surface.offset.y, 0, height - pillHeight))
     readonly property rect panelRect: placePanel(width, height, pillX, pillY)
 
     function clamp(value, low, high) {
@@ -45,7 +47,7 @@ ApplicationWindow {
         const room = lower ? py - gap - edge : h - edge - (py + pillHeight + gap)
         const height = Math.max(240, Math.min(fullHeight, room))
         const x = clamp(px + pillWidth / 2 - fullWidth / 2, edge, w - fullWidth - edge)
-        return Qt.rect(x, lower ? py - gap - height : py + pillHeight + gap, fullWidth, height)
+        return Qt.rect(Math.round(x), lower ? py - gap - height : py + pillHeight + gap, fullWidth, height)
     }
 
     readonly property var inputRegion: [pillX, pillY, panelRect, expanded]
@@ -62,30 +64,25 @@ ApplicationWindow {
         panel.picker.show()
     }
 
-    // The keyboard goes to the message box, or for an agent that asks
-    // something, to its answer keys, but only after the user chose that
-    // agent. Otherwise it rests on `keys`, where typing does nothing.
+    // The keyboard goes to the agent's terminal whenever the panel opens or
+    // an agent is picked; the terminal is created a moment later.
     function focusForAgent() {
-        if (panel.blocked)
-            panel.answerBar.forceActiveFocus()
-        else
-            panel.messageField.forceActiveFocus()
+        Qt.callLater(panel.focusTerminal)
     }
 
     onExpandedChanged: {
         surface.setExpanded(expanded)
-        backend.active = expanded
         panel.helpVisible = false
         panel.picker.close()
-        if (expanded && !panel.blocked)
-            panel.messageField.forceActiveFocus()
-        else
-            keys.forceActiveFocus()
+        if (expanded)
+            focusForAgent()
     }
 
-    readonly property bool resting: keys.activeFocus
-
-    Shortcut { sequence: "Esc"; enabled: win.expanded; context: Qt.ApplicationShortcut
+    // Esc belongs to the agent while its terminal has the keyboard (it
+    // interrupts Claude, closes menus); otherwise it closes drover's own
+    // layers, then the panel.
+    Shortcut { sequence: "Esc"; context: Qt.ApplicationShortcut
+               enabled: win.expanded && (panel.picker.open || panel.helpVisible || !panel.terminalFocused)
                onActivated: {
                    if (panel.picker.open) {
                        panel.picker.close()
@@ -99,48 +96,30 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+P"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: win.openPicker() }
     Shortcut { sequence: "Ctrl+Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
     Shortcut { sequence: "F1"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: panel.helpVisible = !panel.helpVisible }
-    Shortcut { sequence: "?"; enabled: win.expanded && win.resting; context: Qt.ApplicationShortcut; onActivated: panel.helpVisible = !panel.helpVisible }
     Shortcut { sequence: "Alt+Up"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: { backend.selectNext(-1); win.focusForAgent() } }
     Shortcut { sequence: "Alt+Down"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: { backend.selectNext(1); win.focusForAgent() } }
-    Shortcut { sequence: "Up"; enabled: win.expanded && win.resting; context: Qt.ApplicationShortcut; onActivated: backend.selectNext(-1) }
-    Shortcut { sequence: "Down"; enabled: win.expanded && win.resting; context: Qt.ApplicationShortcut; onActivated: backend.selectNext(1) }
-    Shortcut { sequence: "Ctrl+O"; enabled: win.expanded; autoRepeat: false; context: Qt.ApplicationShortcut; onActivated: backend.jump() }
+    Shortcut { sequence: "Ctrl+Shift+O"; enabled: win.expanded; autoRepeat: false; context: Qt.ApplicationShortcut; onActivated: backend.jump() }
 
     Connections {
         target: backend
         function onJumped() { win.expanded = false }
-        // The agent the picker started is selected; talk to it right away.
+        // A newly selected agent (picked, or started from the picker) gets
+        // the keyboard, unless the picker is still open.
         function onSelectedChanged() {
-            if (win.expanded && !panel.picker.open && win.resting)
+            if (win.expanded && !panel.picker.open)
                 win.focusForAgent()
         }
-        // An agent that starts asking while the user types takes nothing
-        // from the keyboard: it rests until the user moves to the answer
-        // keys. Once the agent stops asking, the message box gets it back.
-        function onSelectedInfoChanged() {
-            if (!win.expanded)
-                return
-            if (panel.blocked && !panel.answerBar.activeFocus)
-                keys.forceActiveFocus()
-            else if (!panel.blocked && (panel.answerBar.activeFocus || win.resting))
-                panel.messageField.forceActiveFocus()
-        }
-    }
-
-    Item {
-        id: keys
-        objectName: "restingFocus"
-        focus: true
-        Keys.onTabPressed: win.focusForAgent()
     }
 
     AgentPanel {
         id: panel
+        objectName: "panel"
         visible: win.expanded
         x: win.panelRect.x
         y: win.panelRect.y
         width: win.panelRect.width
         height: win.panelRect.height
+        attached: win.expanded
         onQuitRequested: Qt.quit()
         onAgentPicked: win.focusForAgent()
 

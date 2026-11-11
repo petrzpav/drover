@@ -22,6 +22,11 @@
 #include "translator.h"
 
 int main(int argc, char *argv[]) {
+    // herdr talks to the session of the pane it runs in. Started from inside a
+    // herdr pane, drover must still see, and attach to, the whole session.
+    for (const char *name : {"HERDR_ENV", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID"})
+        qunsetenv(name);
+
     QGuiApplication app(argc, argv);
     app.setApplicationName("drover");
     app.setApplicationVersion("0.1.0");
@@ -85,13 +90,19 @@ int main(int argc, char *argv[]) {
     Translator translator;
     app.installTranslator(&translator);
 
+    // The panel's terminal finds color schemes under its import paths, so
+    // drover's own scheme, in the theme's colors, lives under one of them.
+    const QString qmlDirectory = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/drover/qml";
+    QDir().mkpath(qmlDirectory);
+    qputenv("QML_IMPORT_PATH", qmlDirectory.toLocal8Bit());
+
     Theme theme;
+    theme.setSchemeDirectory(qmlDirectory);
     Backend backend;
-    backend.setPalette(theme.terminalPalette());
-    QObject::connect(&theme, &Theme::changed, &backend, [&] { backend.setPalette(theme.terminalPalette()); });
     Surface surface;
 
     QQmlApplicationEngine engine;
+    engine.addImportPath(qmlDirectory);
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);
     engine.rootContext()->setContextProperty("theme", &theme);

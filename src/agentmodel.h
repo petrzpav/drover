@@ -12,6 +12,7 @@ struct Agent {
     QString status;     // working, blocked, done, idle, unknown
     QString workspace;  // the herdr workspace label
     QString workspaceId;
+    QString terminalId; // herdr's id of the pane's terminal, for attaching
     QString cwd;        // with the home directory shortened to ~
 
     bool operator==(const Agent &other) const = default;

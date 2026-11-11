@@ -1,13 +1,10 @@
 #include "backend.h"
 
-#include "ansi.h"
 
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QFont>
-#include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -24,9 +21,6 @@ Backend::Backend(const QString &herdr, const QString &hyprctl, QObject *parent)
     connect(&m_poll, &QTimer::timeout, this, &Backend::refresh);
     m_poll.start();
 
-    m_readPoll.setInterval(1000);
-    connect(&m_readPoll, &QTimer::timeout, this, &Backend::readSelected);
-
     m_noticeTimer.setSingleShot(true);
     m_noticeTimer.setInterval(5000);
     connect(&m_noticeTimer, &QTimer::timeout, this, [this] { setNotice({}, false); });
@@ -35,11 +29,11 @@ Backend::Backend(const QString &herdr, const QString &hyprctl, QObject *parent)
 }
 
 // Looked up on every use, so installing herdr or Hyprland later needs no restart.
-QString Backend::herdr() {
+QString Backend::herdr() const {
     return m_herdrOverride.isEmpty() ? QStandardPaths::findExecutable("herdr") : m_herdrOverride;
 }
 
-QString Backend::hyprctl() {
+QString Backend::hyprctl() const {
     return m_hyprctlOverride.isEmpty() ? QStandardPaths::findExecutable("hyprctl") : m_hyprctlOverride;
 }
 
@@ -48,22 +42,14 @@ QString Backend::selectedTitle() const {
     return row < 0 ? QString() : m_model.agents().at(row).title;
 }
 
+QString Backend::selectedTerminal() const {
+    const int row = selectedIndex();
+    return row < 0 ? QString() : m_model.agents().at(row).terminalId;
+}
+
 QString Backend::selectedStatus() const {
     const int row = selectedIndex();
     return row < 0 ? QString() : m_model.agents().at(row).status;
-}
-
-void Backend::setActive(bool active) {
-    if (active == m_active)
-        return;
-    m_active = active;
-    if (active) {
-        readSelected();
-        m_readPoll.start();
-    } else {
-        m_readPoll.stop();
-    }
-    emit activeChanged();
 }
 
 void Backend::run(const QString &program, const QStringList &arguments, Done done, int timeout) {
@@ -177,7 +163,6 @@ void Backend::applyAgents(const QList<Agent> &agents) {
         // which would receive whatever is in the message box.
         m_selected.clear();
         m_selectionLost = true;
-        setOutput({});
         emit selectedChanged();
         emit selectedInfoChanged();
         return;
@@ -202,11 +187,8 @@ void Backend::select(const QString &paneId) {
         return;
     m_selected = paneId;
     m_selectionLost = false;
-    setOutput({});
     emit selectedChanged();
     emit selectedInfoChanged();
-    if (m_active)
-        readSelected();
 }
 
 void Backend::selectNext(int step) {
@@ -215,103 +197,6 @@ void Backend::selectNext(int step) {
         return;
     const int row = selectedIndex();
     select(m_model.agents().at(qBound(0, row < 0 ? 0 : row + step, count - 1)).paneId);
-}
-
-void Backend::readSelected() {
-    if (m_selected.isEmpty() || m_reading)
-        return;
-    // herdr can only scroll back through an agent's history while it is idle;
-    // while it works, its visible screen is what there is.
-    const bool busy = selectedStatus() == "working" || selectedStatus() == "blocked";
-    readScreen(m_selected, busy ? "visible" : "recent");
-}
-
-void Backend::readScreen(const QString &pane, const QString &source) {
-    const QString program = herdr();
-    if (program.isEmpty())
-        return;
-    m_reading = true;
-    // With its colors, so the panel shows the agent as the terminal does.
-    QStringList arguments{"agent", "read", pane, "--source", source, "--format", "ansi"};
-    if (source == "recent")
-        arguments << "--lines" << "400";
-    run(program, arguments, [this, pane, source](int code, const QByteArray &out, const QByteArray &err) {
-        m_reading = false;
-        // Another agent was picked meanwhile: read that one now rather than
-        // leaving its screen empty until the next poll.
-        if (pane != m_selected) {
-            if (m_active)
-                readSelected();
-            return;
-        }
-        const QString error = commandError(out, err, code);
-        if (!error.isEmpty()) {
-            // The agent started working between the listing and the read.
-            if (source == "recent" && errorCode(out, err) == "agent_not_idle") {
-                readScreen(pane, "visible");
-                return;
-            }
-            // A failed read keeps the last screen, and says it is stale.
-            if (m_output.isEmpty())
-                setOutput(tr("Couldn't read the agent: %1").arg(error));
-            else
-                setNotice(tr("The screen isn't updating: %1").arg(error), true);
-            return;
-        }
-        // The CLI prints the screen as plain text, or wrapped in JSON.
-        const auto result = QJsonDocument::fromJson(out).object().value("result").toObject();
-        const QString text = result.isEmpty() ? QString::fromUtf8(out)
-                                              : result.value("text").toString(result.value("output").toString());
-        setOutput(cleanOutput(text, 400));
-    });
-}
-
-void Backend::prompt(const QString &text) {
-    if (!m_busy.isEmpty() || m_selected.isEmpty() || text.trimmed().isEmpty())
-        return;
-    const QString program = herdr();
-    if (program.isEmpty()) {
-        setNotice(tr("herdr is not installed."), true);
-        return;
-    }
-    // herdr reads a message starting with "--" as an option of its own; a
-    // leading space keeps it a message.
-    QString message = text.trimmed();
-    if (message.startsWith('-'))
-        message.prepend(' ');
-    const QString title = selectedTitle();
-    setBusy("send");
-    run(program, {"agent", "prompt", m_selected, message},
-        [this, title, text](int code, const QByteArray &out, const QByteArray &err) {
-            setBusy({});
-            const QString error = commandError(out, err, code);
-            if (error.isEmpty()) {
-                setNotice(tr("Sent to %1.").arg(title), false);
-                emit promptSent(text);
-            } else {
-                setNotice(tr("Not sent: %1").arg(error), true);
-            }
-            readSelected();
-        });
-}
-
-void Backend::sendKeys(const QStringList &keys) {
-    if (!m_busy.isEmpty() || m_selected.isEmpty() || keys.isEmpty())
-        return;
-    const QString program = herdr();
-    if (program.isEmpty()) {
-        setNotice(tr("herdr is not installed."), true);
-        return;
-    }
-    setBusy("keys");
-    run(program, QStringList{"agent", "send-keys", m_selected} + keys,
-        [this](int code, const QByteArray &out, const QByteArray &err) {
-            setBusy({});
-            const QString error = commandError(out, err, code);
-            if (!error.isEmpty())
-                setNotice(tr("Keys not sent: %1").arg(error), true);
-            readSelected();
-        });
 }
 
 void Backend::jump() {
@@ -518,6 +403,7 @@ QList<Agent> Backend::parseAgents(const QByteArray &json, const QHash<QString, Q
         agent.paneId = object.value("pane_id").toString();
         agent.kind = object.value("agent").toString();
         agent.status = object.value("agent_status").toString("unknown");
+        agent.terminalId = object.value("terminal_id").toString();
         agent.workspaceId = object.value("workspace_id").toString();
         agent.workspace = workspaces.value(agent.workspaceId, agent.workspaceId);
         QString cwd = object.value("foreground_cwd").toString(object.value("cwd").toString());
@@ -537,30 +423,6 @@ QList<Agent> Backend::parseAgents(const QByteArray &json, const QHash<QString, Q
     return agents;
 }
 
-QString Backend::cleanOutput(const QString &screen, int maxLines) {
-    // Agent TUIs draw rules and boxes across the full terminal width; they
-    // carry nothing outside the terminal, so lines that are only drawing go.
-    // The screen keeps its color codes; they are ignored for that test.
-    static const QRegularExpression drawing(QStringLiteral("^[\\s─━═│┃╭╮╰╯┌┐└┘├┤┬┴┼▔▁-]*$"));
-    static const QRegularExpression trailing(QStringLiteral("(?:\\s|\\x1b\\[[0-9;:]*m)+$"));
-    QStringList lines;
-    bool lastBlank = true;
-    for (QString line : screen.split('\n')) {
-        line.remove('\r');
-        line.remove(trailing);
-        const bool blank = drawing.match(Ansi::strip(line)).hasMatch();
-        if (blank && lastBlank)
-            continue;
-        lines.append(blank ? QString() : line);
-        lastBlank = blank;
-    }
-    while (!lines.isEmpty() && lines.last().isEmpty())
-        lines.removeLast();
-    if (lines.size() > maxLines)
-        lines = lines.mid(lines.size() - maxLines);
-    return lines.join('\n');
-}
-
 void Backend::setError(const QString &error) {
     if (error == m_error)
         return;
@@ -574,23 +436,6 @@ void Backend::setNotice(const QString &notice, bool isError) {
     if (!notice.isEmpty())
         m_noticeTimer.start();
     emit noticeChanged();
-}
-
-void Backend::setOutput(const QString &output) {
-    if (output == m_outputRaw)
-        return;
-    m_outputRaw = output;
-    m_output = Ansi::strip(output);
-    m_outputHtml = Ansi::toHtml(output, m_palette, QGuiApplication::font().family());
-    emit outputChanged();
-}
-
-void Backend::setPalette(const QStringList &palette) {
-    if (palette == m_palette)
-        return;
-    m_palette = palette;
-    m_outputHtml = Ansi::toHtml(m_outputRaw, m_palette, QGuiApplication::font().family());
-    emit outputChanged();
 }
 
 void Backend::setBusy(const QString &busy) {

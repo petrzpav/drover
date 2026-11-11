@@ -5,7 +5,6 @@
 #include <QtTest>
 
 #include "agentmodel.h"
-#include "ansi.h"
 #include "backend.h"
 #include "terminalfont.h"
 #include "theme.h"
@@ -70,13 +69,6 @@ private slots:
         QVERIFY(Backend::commandError(R"({"result":{}})", {}, 0).isEmpty());
     }
 
-    void cleansTheScreen()
-    {
-        const QString screen = "\n\nfirst   \n────────────\n\n\nsecond\n╭──╮\n❯ \n\n";
-        QCOMPARE(Backend::cleanOutput(screen), QString("first\n\nsecond\n\n❯"));
-        QCOMPARE(Backend::cleanOutput("a\nb\nc", 2), QString("b\nc"));
-    }
-
     void modelKeepsRowsInPlace()
     {
         AgentModel model;
@@ -120,23 +112,15 @@ private slots:
         QCOMPARE(backend.idle(), 1);
         QCOMPARE(backend.agents()->agents().first().workspace, QString("garden"));
 
-        // The first agent is picked; its screen is read while the panel is open.
+        // The first agent is picked, with its terminal to attach to.
         QCOMPARE(backend.selected(), QString("w1:p1"));
-        backend.setActive(true);
-        QTRY_COMPARE(backend.output(), QString("line one\n\nline two"));
-        // A working agent has no history to scroll; its visible screen is read.
-        QVERIFY(log(dir).contains("agent read w1:p1 --source visible --format ansi\n"));
+        QCOMPARE(backend.selectedTerminal(), QString("term_1"));
 
         backend.selectNext(1);
         QCOMPARE(backend.selectedStatus(), QString("blocked"));
         backend.selectNext(5);
         QCOMPARE(backend.selected(), QString("w3:p2"));
-
-        backend.prompt("  water them  ");
-        QTRY_VERIFY(backend.notice().startsWith("Sent to"));
-        QVERIFY(log(dir).contains("agent prompt w3:p2 water them\n"));
-        backend.sendKeys({"1"});
-        QTRY_VERIFY(log(dir).contains("agent send-keys w3:p2 1\n"));
+        QCOMPARE(backend.selectedTerminal(), QString("term_3"));
     }
 
     void keepsTheListWhenAPollFails()
@@ -162,57 +146,28 @@ private slots:
         write(dir.filePath("agents.json"), agentsJson().replace("\"pane_id\":\"w3:p2\"", "\"pane_id\":\"w3:p9\""));
         QTRY_VERIFY(backend.selected().isEmpty());
         QVERIFY(backend.selectionLost());
-        // Later polls don't pick another agent on their own, and a draft has
-        // nowhere to go.
+        // Later polls don't pick another agent on their own, so the
+        // terminal never attaches to an agent the user didn't choose.
         QTest::qWait(1200);
         QVERIFY(backend.selected().isEmpty());
-        backend.prompt("water");
-        QTest::qWait(200);
-        QVERIFY(!log(dir).contains("agent prompt"));
+        QVERIFY(backend.selectedTerminal().isEmpty());
         backend.select("w1:p1");
         QVERIFY(!backend.selectionLost());
     }
 
-    void reportsARejectedPrompt()
+    void doesOneThingAtATime()
     {
         QTemporaryDir dir;
         Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
         QTRY_COMPARE(backend.selected(), QString("w1:p1"));
-        write(dir.filePath("agent-prompt.fail"), R"({"error":{"code":"agent_blocked","message":"agent is blocked"}})");
-        QSignalSpy sent(&backend, &Backend::promptSent);
-        backend.prompt("water");
-        QTRY_VERIFY(backend.notice().startsWith("Not sent"));
-        QVERIFY(backend.noticeIsError());
-        QCOMPARE(sent.count(), 0);
-    }
-
-    void sendsOneThingAtATime()
-    {
-        QTemporaryDir dir;
-        Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
-        QTRY_COMPARE(backend.selected(), QString("w1:p1"));
-        write(dir.filePath("agent-prompt.sleep"), "0.4");
-        QSignalSpy sent(&backend, &Backend::promptSent);
-        backend.prompt("water");
-        QCOMPARE(backend.busy(), QString("send"));
-        backend.prompt("water");
-        backend.sendKeys({"1"});
+        write(dir.filePath("agent-focus.sleep"), "0.4");
         backend.jump();
-        QTRY_COMPARE(sent.count(), 1);
-        QCOMPARE(sent.first().first().toString(), QString("water"));
-        QCOMPARE(backend.busy(), QString());
-        QCOMPARE(log(dir).count("agent prompt"), 1);
-        QVERIFY(!log(dir).contains("send-keys"));
-        QVERIFY(!log(dir).contains("agent focus"));
-    }
-
-    void keepsADashMessageAMessage()
-    {
-        QTemporaryDir dir;
-        Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
-        QTRY_COMPARE(backend.selected(), QString("w1:p1"));
-        backend.prompt("--help me");
-        QTRY_VERIFY(log(dir).contains("agent prompt w1:p1  --help me\n"));
+        QCOMPARE(backend.busy(), QString("open"));
+        backend.jump();
+        backend.startAgent("w1");
+        QTRY_COMPARE(backend.busy(), QString());
+        QCOMPARE(log(dir).count("agent focus"), 1);
+        QVERIFY(!log(dir).contains("tab create"));
     }
 
     void saysWhenACommandHangs()
@@ -221,23 +176,10 @@ private slots:
         Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
         QTRY_COMPARE(backend.selected(), QString("w1:p1"));
         backend.setTimeout(300);
-        write(dir.filePath("agent-prompt.sleep"), "2");
-        backend.prompt("water");
+        write(dir.filePath("agent-focus.sleep"), "2");
+        backend.jump();
         QTRY_VERIFY(backend.notice().contains("no answer"));
         QCOMPARE(backend.busy(), QString());
-    }
-
-    void readsTheVisibleScreenWhenHistoryIsBusy()
-    {
-        QTemporaryDir dir;
-        Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
-        QTRY_COMPARE(backend.agents()->count(), 3);
-        backend.select("w3:p2");  // idle, so its history is read first
-        write(dir.filePath("recent.fail"), R"({"error":{"code":"agent_not_idle","message":"working"}})");
-        backend.setActive(true);
-        QTRY_COMPARE(backend.output(), QString("line one\n\nline two"));
-        QVERIFY(log(dir).contains("agent read w3:p2 --source recent --format ansi --lines 400\n"));
-        QVERIFY(log(dir).contains("agent read w3:p2 --source visible --format ansi\n"));
     }
 
     void bringsHerdrForward()
@@ -318,19 +260,6 @@ echo ok
         QCOMPARE(Backend::readAgentKind(dir.filePath("config")), QString("codex"));
     }
 
-    void keepsTerminalColors()
-    {
-        const QStringList palette = Ansi::defaultPalette();
-        const QString screen = "\x1b[0m\x1b[38;2;255;193;7mauto <on>\x1b[0m plain \x1b[1;31mbold red\x1b[0m\r";
-        QCOMPARE(Ansi::strip(screen), QString("auto <on> plain bold red"));
-        const QString html = Ansi::toHtml(screen, palette, "Mono");
-        QVERIFY(html.contains("<span style=\"color:#ffc107\">auto &lt;on&gt;</span> plain "));
-        QVERIFY(html.contains("<span style=\"color:" + palette.at(1) + ";font-weight:bold\">bold red</span>"));
-        QVERIFY(html.startsWith("<pre style=\"margin:0; font-family:'Mono'\">"));
-        // Rules drawn in color are still dropped as drawing.
-        QCOMPARE(Backend::cleanOutput("a\n\x1b[38;2;1;2;3m────\x1b[0m\nb   \x1b[0m"), QString("a\n\nb"));
-    }
-
     void themeGivesTheTerminalPalette()
     {
         QTemporaryDir dir;
@@ -341,7 +270,15 @@ echo ok
         QCOMPARE(palette.size(), 16);
         QCOMPARE(palette.at(1), QString("#ff6188"));
         QCOMPARE(palette.at(14), QString("#95e5ee"));
-        QCOMPARE(palette.at(2), Ansi::defaultPalette().at(2));
+        QCOMPARE(palette.at(2), QString("#0dbc79"));
+        // As a terminal color scheme, red is Color1 and bright cyan Color6Intense.
+        const QString scheme = Theme::colorScheme(palette, "#2d2a2e", "#fcfcfa");
+        QVERIFY(scheme.contains("[Color1]\nBold=false\nColor=255,97,136\n"));
+        QVERIFY(scheme.contains("[Color6Intense]\nBold=false\nColor=149,229,238\n"));
+        QVERIFY(scheme.contains("[Background]\nBold=false\nColor=45,42,46\n"));
+        theme.setSchemeDirectory(dir.filePath("qml"));
+        QVERIFY(theme.terminalScheme().startsWith("Omarchy-"));
+        QVERIFY(QFile::exists(dir.filePath("qml/QMLTermWidget/color-schemes/" + theme.terminalScheme() + ".colorscheme")));
     }
 
     void saysWhenHerdrIsMissing()
@@ -438,11 +375,11 @@ private:
     {
         return R"({"id":"cli:agent:list","result":{"type":"agent_list","agents":[
           {"agent":"claude","agent_status":"working","cwd":"/home/ann/garden","foreground_cwd":"/home/ann/garden",
-           "pane_id":"w1:p1","terminal_title_stripped":"Plant the tomatoes","workspace_id":"w1"},
+           "pane_id":"w1:p1","terminal_id":"term_1","terminal_title_stripped":"Plant the tomatoes","workspace_id":"w1"},
           {"agent":"claude","agent_status":"blocked","cwd":"/home/ann","name":"reviewer",
-           "pane_id":"w2:p1","terminal_title_stripped":"Review the fence","workspace_id":"w2"},
+           "pane_id":"w2:p1","terminal_id":"term_2","terminal_title_stripped":"Review the fence","workspace_id":"w2"},
           {"agent":"codex","agent_status":"idle","cwd":"/srv/shed",
-           "pane_id":"w3:p2","terminal_title_stripped":"","workspace_id":"w3"}]}})";
+           "pane_id":"w3:p2","terminal_id":"term_3","terminal_title_stripped":"","workspace_id":"w3"}]}})";
     }
 
     static QString fakeHerdr(QTemporaryDir &dir)

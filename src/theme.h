@@ -21,6 +21,9 @@ class Theme : public QObject {
     Q_PROPERTY(QString muted READ muted NOTIFY changed)
     Q_PROPERTY(QString urgent READ urgent NOTIFY changed)
     Q_PROPERTY(QString success READ success NOTIFY changed)
+    // The name of a terminal color scheme in the theme's colors, for the
+    // panel's terminal; empty until setSchemeDirectory() is called.
+    Q_PROPERTY(QString terminalScheme READ terminalScheme NOTIFY changed)
 
 public:
     explicit Theme(const QString &currentDirectory = {}, QObject *parent = nullptr, const QString &hyprctl = {});
@@ -39,6 +42,12 @@ public:
     // The terminal's 16 basic colors from the theme's named colors, over
     // xterm's where the theme has none.
     QStringList terminalPalette() const;
+    QString terminalScheme() const { return m_terminalScheme; }
+    // Where to write the scheme: an import path holding
+    // QMLTermWidget/color-schemes, which is where the terminal looks.
+    void setSchemeDirectory(const QString &directory);
+    // A Konsole color scheme for this palette, background, and foreground.
+    static QString colorScheme(const QStringList &palette, const QString &background, const QString &foreground);
 
     static QString readAccent(const QString &path);
     static QHash<QString, QString> readColors(const QString &path);
@@ -55,6 +64,8 @@ private:
 
     QString m_accent = "#FFD60A";
     QHash<QString, QString> m_colors;
+    QString m_schemeDirectory, m_terminalScheme;
+    void writeScheme();
     QFileSystemWatcher m_watcher;
     QTimer m_debounce;
     QString m_hyprctl;

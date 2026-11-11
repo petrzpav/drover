@@ -3,10 +3,10 @@
 A floating indicator of your [herdr](https://herdr.dev) agents, on every
 Omarchy workspace. The pill counts the agents that are working, asking you
 something, done, and idle; drag it wherever you like, and it stays there.
-Click it and a large panel opens beside it, like a chat: every agent of the
-local herdr session on the left, the selected agent's screen on the right, and
-a box to message it, or keys to answer its question, without leaving the
-workspace you're on.
+Click it and a large panel opens beside it: every agent of the local herdr
+session on the left, and on the right a real terminal attached to the selected
+agent, where you work with it exactly as in herdr (Shift+Tab, Esc, Ctrl+C, its
+menus and colors), without leaving the workspace you're on.
 
 ![Drover with four agents](docs/screenshot.png)
 
@@ -33,27 +33,20 @@ o.bind("SUPER + H", "Herdr agents", "drover toggle")
 | ------------------- | ---------------------------------------------------------- |
 | Click the pill      | Show or hide the panel                                     |
 | Drag the pill       | Move it; the panel opens on the side with room             |
-| `Enter`             | Send the message; with an empty box, open the agent        |
-| `Shift+Enter`       | New line in the message                                    |
+| Any key             | Goes to the agent's terminal, as in herdr                  |
 | `Alt+↑` `Alt+↓`     | Pick an agent                                              |
 | `Ctrl+P`            | Pick a workspace and start the default agent there         |
-| `Ctrl+O`            | Open the agent in herdr (or double-click its row)          |
-| `Tab`               | Move to the answer keys when an agent asks you something   |
-| `1`–`9` `↑` `↓` `Enter` | Answer, while the answer keys have the keyboard        |
-| `Shift+Esc`         | Send Esc to the agent                                      |
-| `Esc`               | Close the picker or help, then hide the panel              |
+| `Ctrl+Shift+O`      | Open the agent in herdr (or double-click its row)          |
+| `Super+H`           | Show or hide the panel (with the binding below)            |
+| `Esc`               | Close the picker or help; outside the terminal, hide the panel |
 | `F1`                | Show or hide the shortcuts                                 |
 | `Ctrl+Q`            | Quit                                                       |
 
-When an agent starts asking something while you type, the keyboard doesn't
-follow it: no key you meant for the message box answers the agent. Answer
-with the keycaps, or press `Tab` to answer from the keyboard.
-
-The agent's screen keeps the terminal's colors and lines. Scroll up or select
-text and it holds still; "New output ↓" brings it back to the newest lines.
-
-Opening an agent focuses it in herdr (`herdr agent focus`) and brings the
-herdr window forward, wherever it is.
+The terminal is `herdr terminal attach` on the agent's pane, so it shows and
+takes exactly what herdr's own window does. While the panel is open the pane
+takes the panel's size; closing the panel detaches, and the pane gets herdr's
+size back. Opening an agent focuses it in herdr (`herdr agent focus`) and
+brings the herdr window forward, wherever it is.
 
 ### The default agent
 
@@ -85,12 +78,12 @@ through. It takes keyboard focus only while the panel is open. The pill's
 place is kept in `~/.local/state/drover/position`.
 
 It polls `herdr agent list` and `herdr workspace list` once a second (a few
-milliseconds each) and reads the selected agent's screen with `herdr agent
-read --format ansi` while the panel is open: its scrollback while it is idle,
-its visible screen while it works (herdr can't scroll a busy agent's history).
-A failed poll keeps the last list and says it is out of date; if the selected
-agent's pane closes, nothing is selected until you pick another, so a draft
-never goes to an agent you didn't choose. Only the local herdr session is shown; saved
+milliseconds each). A failed poll keeps the last list and says it is out of
+date; if the selected agent's pane closes, nothing is selected until you pick
+another, so the terminal never attaches to an agent you didn't choose. The
+terminal is [qmltermwidget](https://github.com/Swordfish90/qmltermwidget)
+with a color scheme drover writes from the Omarchy theme (in
+`~/.local/share/drover/qml`). Only the local herdr session is shown; saved
 SSH machines (`herdr --machine`) take seconds per call and are left out.
 
 It looks like the Omarchy shell: the theme's colors from `colors.toml`, the
@@ -115,8 +108,8 @@ bin/test       # Qt Test, offscreen: the backend, and the real QML driven agains
 bin/install    # makepkg -fsi: installs the binary, launcher entry, and icon
 ```
 
-Needs `qt6-base`, `qt6-declarative`, `qt6-wayland`, `layer-shell-qt`, and
-`herdr`.
+Needs `qt6-base`, `qt6-declarative`, `qt6-wayland`, `layer-shell-qt`,
+`qmltermwidget`, and `herdr`.
 
 ## License
 

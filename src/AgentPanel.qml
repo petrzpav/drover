@@ -2,23 +2,43 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// The open panel, laid out like a chat: every agent of the herdr session on
-// the left, the selected agent's screen on the right with a box to talk to it,
-// or keys to answer it when it asks. Drawn like an Omarchy shell popup: the
-// theme background and the Hyprland active border, in the terminal's font
-// (the application font, set in main.cpp). Everything has a fixed size, and
-// messages lie over the content, so nothing shifts as agents change state.
+// The open panel: every agent of the herdr session on the left, and on the
+// right a real terminal attached to the selected agent, where you talk to it
+// as in herdr itself. Drawn like an Omarchy shell popup: the theme background
+// and the Hyprland active border, in the terminal's font (the application
+// font, set in main.cpp). Everything has a fixed size, and messages lie over
+// the content, so nothing shifts as agents change state.
 Rectangle {
     id: panel
-    property alias messageField: message
-    property alias answerBar: answer
     property alias picker: workspacePicker
     property bool helpVisible: false
+    // Whether the terminal attaches: only while the panel is open, so the
+    // pane has herdr's own size the rest of the time.
+    property bool attached: false
+    // Bumped to attach again after the terminal was detached.
+    property int attachRound: 0
+    readonly property Item terminal: terminals.count > 0 ? terminals.itemAt(0) : null
+    readonly property bool terminalFocused: terminal !== null && terminal.terminalFocused
+
+    // The terminal claims every key it gets, Esc included, so help takes the
+    // keyboard while it is shown and hands it back after.
+    onHelpVisibleChanged: {
+        if (helpVisible)
+            panel.forceActiveFocus()
+        else if (attached)
+            focusTerminal()
+    }
+
+    function focusTerminal() {
+        if (terminal)
+            terminal.focusTerminal()
+        else
+            panel.forceActiveFocus()
+    }
     signal quitRequested()
     // The user picked an agent; Main decides where the keyboard goes.
     signal agentPicked()
 
-    readonly property bool blocked: backend.selectedStatus === "blocked"
     readonly property color line: Qt.alpha(theme.foreground, 0.12)
     readonly property color dim: Qt.alpha(theme.foreground, 0.55)
     readonly property int sidebarWidth: 280
@@ -160,7 +180,7 @@ Rectangle {
                 IconButton {
                     icon: ""
                     hint: qsTr("Open the agent in herdr")
-                    shortcut: "Ctrl+O"
+                    shortcut: "Ctrl+Shift+O"
                     enabled: backend.selected !== ""
                     busy: backend.busy === "open"
                     onClicked: backend.jump()
@@ -182,324 +202,79 @@ Rectangle {
 
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: panel.line }
 
-            // The agent's screen, line for line as in its terminal. It follows
-            // new output; scrolled up or with text selected, it holds still
-            // and offers the new output instead.
+            // The terminal, attached to the selected agent.
             Item {
-                id: screenArea
+                id: terminalArea
                 Layout.fillWidth: true
                 Layout.fillHeight: true
 
-                Flickable {
-                    id: screen
-                    objectName: "screen"
-                    anchors.fill: parent
-                    anchors.margins: 4
-                    clip: true
-                    contentWidth: Math.max(width, screenText.implicitWidth)
-                    contentHeight: screenText.implicitHeight
-                    boundsBehavior: Flickable.StopAtBounds
-                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-                    ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
-
-                    property string shown: ""
-                    property bool following: true
-                    property bool pending: false
-                    property bool autoScrolling: false
-
-                    function toBottom() {
-                        autoScrolling = true
-                        contentY = Math.max(0, contentHeight - height)
-                        autoScrolling = false
-                    }
-                    function catchUp() {
-                        screenText.deselect()
-                        shown = backend.outputHtml
-                        pending = false
-                        following = true
-                        toBottom()
-                    }
-
-                    // Whatever moved the view (wheel, drag, scrollbar),
-                    // following is whether it ended at the bottom.
-                    onContentYChanged: if (!autoScrolling) following = contentY >= contentHeight - height - 4
-                    onFollowingChanged: if (following && pending) catchUp()
-                    onContentHeightChanged: if (following) toBottom()
-                    onHeightChanged: if (following) toBottom()
-
-                    TextEdit {
-                        id: screenText
-                        leftPadding: 12
-                        rightPadding: 12
-                        topPadding: 10
-                        bottomPadding: 10
-                        text: screen.shown
-                        readOnly: true
-                        selectByMouse: true
-                        activeFocusOnPress: false
-                        wrapMode: TextEdit.NoWrap
-                        textFormat: TextEdit.RichText
-                        color: theme.foreground
-                        selectionColor: Qt.alpha(theme.foreground, 0.35)
-                        selectedTextColor: theme.foreground
-                    }
-                }
-
+                property bool detached: false
                 Connections {
                     target: backend
-                    function onOutputChanged() {
-                        if (screen.following && screenText.selectedText === "") {
-                            screen.shown = backend.outputHtml
-                            screen.pending = false
-                        } else {
-                            screen.pending = true
-                        }
-                    }
-                    function onSelectedChanged() {
-                        screen.contentX = 0
-                        screen.catchUp()
+                    function onSelectedChanged() { terminalArea.detached = false }
+                }
+
+                Repeater {
+                    id: terminals
+                    model: panel.attached && !terminalArea.detached && backend.selectedTerminal !== ""
+                           && backend.herdrPath !== "" ? [backend.selectedTerminal + "#" + panel.attachRound] : []
+                    delegate: AgentTerminal {
+                        required property string modelData
+                        terminalId: modelData.split("#")[0]
+                        width: terminalArea.width
+                        height: terminalArea.height
+                        onDetached: terminalArea.detached = true
+                        Component.onCompleted: if (panel.attached) focusTerminal()
                     }
                 }
 
-                Text {
+                Column {
                     anchors.centerIn: parent
                     width: parent.width - 48
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.Wrap
-                    visible: backend.selected === "" && list.count > 0
-                    text: backend.selectionLost ? qsTr("The agent you were talking to is gone. Pick another one.")
-                                                : qsTr("Pick an agent to see its screen.")
-                    color: panel.dim
-                }
-
-                Row {
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    anchors.margins: 12
-                    spacing: 8
-                    layoutDirection: Qt.RightToLeft
-
-                    // New output waits while the view is held.
+                    spacing: 12
+                    visible: terminals.count === 0
+                    Text {
+                        width: parent.width
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.Wrap
+                        text: backend.herdrPath === "" ? qsTr("herdr is not installed.")
+                            : terminalArea.detached ? qsTr("The terminal was detached from the agent.")
+                            : backend.selectionLost ? qsTr("The agent you were talking to is gone. Pick another one.")
+                            : list.count > 0 ? qsTr("Pick an agent to talk to it.") : ""
+                        color: panel.dim
+                    }
                     IconButton {
-                        visible: screen.pending
-                        label: qsTr("New output ↓")
-                        tint: theme.accent
-                        color: theme.background
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        visible: terminalArea.detached && backend.selected !== ""
+                        label: qsTr("Attach again")
                         border.width: 1
                         border.color: theme.border
-                        onClicked: screen.catchUp()
-                    }
-
-                    // The result of an action, beside the box it came from.
-                    Rectangle {
-                        visible: backend.notice !== ""
-                        width: Math.min(noticeText.implicitWidth + 20, screenArea.width - 40)
-                        height: noticeText.implicitHeight + 12
-                        radius: theme.radius
-                        color: theme.background
-                        border.width: 1
-                        border.color: backend.noticeIsError ? theme.urgent : theme.success
-                        Text {
-                            id: noticeText
-                            anchors.centerIn: parent
-                            width: parent.width - 20
-                            text: backend.notice
-                            color: backend.noticeIsError ? theme.urgent : theme.foreground
-                            elide: Text.ElideRight
-                        }
-                    }
-                }
-            }
-
-            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: panel.line }
-
-            // Talk to the agent: a message, or keys when it asks a question.
-            StackLayout {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 96
-                Layout.fillHeight: false
-                currentIndex: panel.blocked ? 1 : 0
-
-                Item {
-                    Rectangle {
-                        anchors.fill: parent
-                        anchors.margins: 12
-                        anchors.leftMargin: 16
-                        anchors.rightMargin: 16
-                        radius: theme.radius
-                        color: Qt.alpha(theme.foreground, 0.04)
-                        border.width: 1
-                        border.color: message.activeFocus ? theme.border : Qt.alpha(theme.foreground, 0.25)
-
-                        Flickable {
-                            id: messageScroll
-                            anchors.fill: parent
-                            anchors.leftMargin: 12
-                            anchors.rightMargin: 46
-                            anchors.topMargin: 8
-                            anchors.bottomMargin: 8
-                            clip: true
-                            contentWidth: width
-                            contentHeight: message.implicitHeight
-                            boundsBehavior: Flickable.StopAtBounds
-
-                            TextEdit {
-                                id: message
-                                objectName: "messageField"
-                                width: messageScroll.width
-                                enabled: backend.selected !== ""
-                                wrapMode: TextEdit.Wrap
-                                color: theme.foreground
-                                selectionColor: Qt.alpha(theme.foreground, 0.35)
-                                selectedTextColor: theme.foreground
-                                selectByMouse: true
-                                onCursorRectangleChanged: {
-                                    if (cursorRectangle.y + cursorRectangle.height > messageScroll.contentY + messageScroll.height)
-                                        messageScroll.contentY = cursorRectangle.y + cursorRectangle.height - messageScroll.height
-                                    else if (cursorRectangle.y < messageScroll.contentY)
-                                        messageScroll.contentY = cursorRectangle.y
-                                }
-
-                                function send() {
-                                    if (backend.busy !== "")
-                                        return
-                                    if (text.trim() === "") {
-                                        backend.jump()
-                                        return
-                                    }
-                                    backend.prompt(text)
-                                }
-
-                                // Enter sends, Shift+Enter starts a new line.
-                                Keys.onReturnPressed: (event) => {
-                                    if (event.modifiers & Qt.ShiftModifier) {
-                                        event.accepted = false
-                                        return
-                                    }
-                                    if (!event.isAutoRepeat)
-                                        send()
-                                }
-                                Keys.onEnterPressed: (event) => { if (!event.isAutoRepeat) send() }
-
-                                Text {
-                                    x: 2
-                                    visible: message.text === "" && !message.inputMethodComposing
-                                    text: backend.selected === "" ? qsTr("Message")
-                                        : qsTr("Message to %1").arg(backend.selectedTitle)
-                                    color: panel.dim
-                                    width: message.width - 2
-                                    elide: Text.ElideRight
-                                }
-                            }
-                        }
-
-                        IconButton {
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            anchors.margins: 6
-                            icon: ""
-                            hint: qsTr("Send")
-                            shortcut: "Enter"
-                            tint: theme.accent
-                            busy: backend.busy === "send"
-                            enabled: backend.selected !== "" && message.text.trim() !== ""
-                            onClicked: message.send()
-                        }
-
-                        // Cleared once herdr took it, and only if it is still
-                        // what was sent, so nothing typed meanwhile is lost
-                        // and a rejected message stays in the box.
-                        Connections {
-                            target: backend
-                            function onPromptSent(text) {
-                                if (message.text === text)
-                                    message.clear()
-                            }
+                        onClicked: {
+                            terminalArea.detached = false
+                            panel.attachRound++
                         }
                     }
                 }
 
-                // Answer keys. The keyboard reaches them only when the user
-                // puts it there (Tab, a click, or picking the agent), never
-                // because an agent started asking while they typed.
-                FocusScope {
-                    id: answer
-                    objectName: "answerBar"
-                    activeFocusOnTab: true
-                    property string lastKey: ""
-
-                    function press(key) {
-                        if (backend.busy !== "")
-                            return
-                        lastKey = key
-                        backend.sendKeys([key])
-                    }
-
-                    Keys.onShortcutOverride: (event) => {
-                        const k = event.key
-                        event.accepted = (k >= Qt.Key_1 && k <= Qt.Key_9) || k === Qt.Key_Up || k === Qt.Key_Down
-                            || k === Qt.Key_Return || k === Qt.Key_Enter
-                            || (k === Qt.Key_Escape && (event.modifiers & Qt.ShiftModifier))
-                    }
-                    Keys.onPressed: (event) => {
-                        const k = event.key
-                        let key = ""
-                        if (k >= Qt.Key_1 && k <= Qt.Key_9) key = String(k - Qt.Key_0)
-                        else if (k === Qt.Key_Up) key = "up"
-                        else if (k === Qt.Key_Down) key = "down"
-                        else if (k === Qt.Key_Return || k === Qt.Key_Enter) key = "enter"
-                        else if (k === Qt.Key_Escape && (event.modifiers & Qt.ShiftModifier)) key = "esc"
-                        if (key === "")
-                            return
-                        event.accepted = true
-                        if (!event.isAutoRepeat)
-                            answer.press(key)
-                    }
-
-                    TapHandler { onTapped: answer.forceActiveFocus() }
-
-                    Rectangle {
-                        anchors.fill: parent
-                        anchors.margins: 6
-                        anchors.leftMargin: 10
-                        anchors.rightMargin: 10
-                        radius: theme.radius
-                        color: answer.activeFocus ? Qt.alpha(theme.foreground, 0.04) : "transparent"
-                        border.width: 1
-                        border.color: answer.activeFocus ? theme.border : "transparent"
-
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: 6
-                            spacing: 6
-                            Text {
-                                Layout.fillWidth: true
-                                text: answer.activeFocus
-                                      ? qsTr("Answer with 1–9, ↑ ↓ and Enter; Shift+Esc sends Esc.")
-                                      : qsTr("The agent asks you something. Press Tab or click here to answer from the keyboard.")
-                                color: theme.foreground
-                                elide: Text.ElideRight
-                            }
-                            Row {
-                                spacing: 6
-                                Repeater {
-                                    model: [
-                                        { label: "↑", key: "up" }, { label: "↓", key: "down" },
-                                        { label: "1", key: "1" }, { label: "2", key: "2" }, { label: "3", key: "3" },
-                                        { label: "Enter", key: "enter" }, { label: "Esc", key: "esc" }
-                                    ]
-                                    delegate: KeyCap {
-                                        required property var modelData
-                                        label: modelData.label
-                                        key: modelData.key
-                                        activeFocusOnTab: false
-                                        enabled: backend.busy === "" || busy
-                                        busy: backend.busy === "keys" && answer.lastKey === key
-                                        onClicked: answer.press(key)
-                                    }
-                                }
-                            }
-                        }
+                // The result of an action, over the terminal's bottom corner.
+                Rectangle {
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.margins: 16
+                    visible: backend.notice !== ""
+                    width: Math.min(noticeText.implicitWidth + 20, terminalArea.width - 40)
+                    height: noticeText.implicitHeight + 12
+                    radius: theme.radius
+                    color: theme.background
+                    border.width: 1
+                    border.color: backend.noticeIsError ? theme.urgent : theme.success
+                    Text {
+                        id: noticeText
+                        anchors.centerIn: parent
+                        width: parent.width - 20
+                        text: backend.notice
+                        color: backend.noticeIsError ? theme.urgent : theme.foreground
+                        elide: Text.ElideRight
                     }
                 }
             }
@@ -538,15 +313,12 @@ Rectangle {
                 rowSpacing: 8
                 Repeater {
                     model: [
-                        "Enter", qsTr("Send the message; with an empty box, open the agent"),
-                        "Shift+Enter", qsTr("New line in the message"),
+                        qsTr("Any key"), qsTr("Goes to the agent's terminal, as in herdr"),
                         "Alt+↑ Alt+↓", qsTr("Pick an agent"),
                         "Ctrl+P", qsTr("Start an agent in a workspace"),
-                        "Ctrl+O", qsTr("Open the agent in herdr"),
-                        "Tab", qsTr("Move to the answer keys when an agent asks you"),
-                        "1–9 ↑ ↓ Enter", qsTr("Answer, while the answer keys have the keyboard"),
-                        "Shift+Esc", qsTr("Send Esc to the agent"),
-                        "Esc", qsTr("Hide the panel"),
+                        "Ctrl+Shift+O", qsTr("Open the agent in herdr"),
+                        "Super+H", qsTr("Show or hide the panel"),
+                        "Esc", qsTr("Close the picker or help; outside the terminal, hide the panel"),
                         "F1", qsTr("Show or hide this help"),
                         "Ctrl+Q", qsTr("Quit drover")
                     ]

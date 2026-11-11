@@ -2,6 +2,7 @@
 
 #include <LayerShellQt/window.h>
 #include <QDir>
+#include <cmath>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QRegion>
@@ -20,7 +21,7 @@ Surface::Surface(const QString &stateFile, QObject *parent)
         bool okX = false, okY = false;
         const double x = parts.value(0).toDouble(&okX), y = parts.value(1).toDouble(&okY);
         if (okX && okY && x >= 0 && y >= 0)
-            m_offset = {x, y};
+            m_offset = {std::round(x), std::round(y)};
     }
 }
 
@@ -68,7 +69,8 @@ bool Surface::attach(QWindow *window) {
 }
 
 void Surface::setOffset(const QPointF &offset) {
-    const QPointF clamped(qMax(0.0, offset.x()), qMax(0.0, offset.y()));
+    // Whole pixels only, so nothing placed from it lands between two.
+    const QPointF clamped(qMax(0.0, std::round(offset.x())), qMax(0.0, std::round(offset.y())));
     if (clamped == m_offset)
         return;
     m_offset = clamped;

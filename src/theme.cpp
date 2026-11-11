@@ -2,6 +2,8 @@
 #include "theme.h"
 
 #include <QColor>
+#include <QCryptographicHash>
+#include <QSaveFile>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -102,6 +104,49 @@ QStringList Theme::terminalPalette() const {
     return palette;
 }
 
+QString Theme::colorScheme(const QStringList &palette, const QString &background, const QString &foreground) {
+    auto section = [](const QString &name, const QString &color, bool bold = false) {
+        const QColor c(color);
+        return QStringLiteral("[%1]\nBold=%2\nColor=%3,%4,%5\nTransparency=false\n\n")
+            .arg(name, bold ? "true" : "false")
+            .arg(c.red()).arg(c.green()).arg(c.blue());
+    };
+    QString scheme = section("Background", background) + section("BackgroundIntense", background);
+    for (int i = 0; i < 8; ++i)
+        scheme += section(QStringLiteral("Color%1").arg(i), palette.value(i))
+                + section(QStringLiteral("Color%1Intense").arg(i), palette.value(i + 8));
+    scheme += section("Foreground", foreground) + section("ForegroundIntense", foreground, true);
+    return scheme + "[General]\nDescription=Omarchy\nOpacity=1\n";
+}
+
+void Theme::setSchemeDirectory(const QString &directory) {
+    m_schemeDirectory = directory;
+    writeScheme();
+}
+
+// The terminal caches schemes by name, so each palette gets its own name and
+// a theme switch shows up as a new scheme rather than a stale cached one.
+void Theme::writeScheme() {
+    if (m_schemeDirectory.isEmpty())
+        return;
+    const QString scheme = colorScheme(terminalPalette(), background(), foreground());
+    const QString name = "Omarchy-" + QCryptographicHash::hash(scheme.toUtf8(), QCryptographicHash::Sha1).toHex().left(8);
+    if (name == m_terminalScheme)
+        return;
+    const QString folder = m_schemeDirectory + "/QMLTermWidget/color-schemes";
+    QDir().mkpath(folder);
+    for (const auto &old : QDir(folder).entryList({"Omarchy-*.colorscheme"}))
+        QFile::remove(folder + "/" + old);
+    QSaveFile file(folder + "/" + name + ".colorscheme");
+    if (!file.open(QIODevice::WriteOnly))
+        return;
+    file.write(scheme.toUtf8());
+    if (!file.commit())
+        return;
+    m_terminalScheme = name;
+    emit changed();
+}
+
 // Black or white, whichever reads on the accent (WCAG relative luminance).
 QString Theme::accentForeground() const {
     const QColor c(m_accent);
@@ -134,6 +179,7 @@ void Theme::reload() {
     if (accent != m_accent || colors != m_colors) {
         m_accent = accent;
         m_colors = colors;
+        writeScheme();
         emit changed();
     }
 }

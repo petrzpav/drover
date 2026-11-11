@@ -25,8 +25,8 @@ void write(const QString &path, const QByteArray &data) {
 
 QByteArray agents(const char *first, const char *second) {
     return QByteArray(R"({"result":{"agents":[
-      {"agent":"claude","agent_status":")") + first + R"(","cwd":"/a","pane_id":"w1:p1","terminal_title_stripped":"Plant the beds","workspace_id":"w1"},
-      {"agent":"claude","agent_status":")" + second + R"(","cwd":"/b","pane_id":"w2:p1","terminal_title_stripped":"Fix the gate","workspace_id":"w2"}]}})";
+      {"agent":"claude","agent_status":")") + first + R"(","cwd":"/a","pane_id":"w1:p1","terminal_id":"term_1","terminal_title_stripped":"Plant the beds","workspace_id":"w1"},
+      {"agent":"claude","agent_status":")" + second + R"(","cwd":"/b","pane_id":"w2:p1","terminal_id":"term_2","terminal_title_stripped":"Fix the gate","workspace_id":"w2"}]}})";
 }
 
 // One drover with a fake herdr in a temporary directory.
@@ -49,7 +49,14 @@ echo "$@" >> '%1/log'
 case "$1 $2" in
   "workspace list") cat '%1/ws.json' ;;
   "agent list") cat '%1/agents.json' ;;
-  "agent read") printf 'line one\nline two\n' ;;
+  "terminal attach")
+    trap 'echo "detached $3" >> "%1/log"; exit 0' HUP TERM INT
+    stty raw -echo 2>/dev/null
+    # Every byte the agent would get, in hex.
+    while byte=$(dd bs=1 count=1 2>/dev/null | od -An -tx1); [ -n "$byte" ]; do
+      echo "key$byte" >> "%1/log"
+    done
+    echo "detached $3" >> "%1/log" ;;
   *) echo '{"result":{"type":"ok"}}' ;;
 esac
 )sh").arg(dir.path()).toUtf8());
@@ -79,7 +86,16 @@ esac
         QFile file(dir.filePath("log"));
         return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
     }
-    template <typename T = QQuickItem> T *find(const char *name) { return window->findChild<T *>(name); }
+    // Items by objectName in the visual tree, where Repeater delegates live.
+    QQuickItem *find(const char *name) { return find(window->contentItem(), QString::fromLatin1(name)); }
+    static QQuickItem *find(QQuickItem *item, const QString &name) {
+        if (item->objectName() == name)
+            return item;
+        for (auto *child : item->childItems())
+            if (auto *found = find(child, name))
+                return found;
+        return nullptr;
+    }
     void expand() {
         QMetaObject::invokeMethod(window, "setExpanded", Q_ARG(QVariant, true));
         QTest::qWait(50);
@@ -98,53 +114,6 @@ class DroverUiTests : public QObject {
 private slots:
     void initTestCase() { QQuickStyle::setStyle("Basic"); }
 
-    void anAgentThatStartsAskingTakesNoKeys()
-    {
-        Rig rig(agents("working", "idle"));
-        rig.expand();
-        auto *message = rig.find("messageField");
-        QVERIFY(message->hasActiveFocus());
-        rig.type("ab");
-
-        // The agent asks something mid-typing: the next keys answer nothing.
-        write(rig.dir.filePath("agents.json"), agents("blocked", "idle"));
-        QTRY_COMPARE(rig.backend->selectedStatus(), QString("blocked"));
-        QTest::qWait(50);
-        rig.type("1q ");
-        QTest::keyClick(rig.window, Qt::Key_Return);
-        QTest::qWait(300);
-        QVERIFY(!rig.log().contains("send-keys"));
-        QCOMPARE(rig.quits, 0);
-        QVERIFY(rig.window->property("expanded").toBool());
-
-        // Tab hands the keyboard to the answer keys on purpose.
-        QTest::keyClick(rig.window, Qt::Key_Tab);
-        QVERIFY(rig.find("answerBar")->hasActiveFocus());
-        rig.type("2");
-        QTRY_VERIFY(rig.log().contains("agent send-keys w1:p1 2\n"));
-
-        // Once it stops asking, the message box has the keyboard again, with
-        // the draft still there.
-        write(rig.dir.filePath("agents.json"), agents("working", "idle"));
-        QTRY_VERIFY(message->hasActiveFocus());
-        QCOMPARE(message->property("text").toString(), QString("ab"));
-    }
-
-    void aDraftNeverMovesToAnotherAgent()
-    {
-        Rig rig(agents("idle", "idle"));
-        rig.expand();
-        rig.backend->select("w2:p1");
-        rig.find("messageField")->forceActiveFocus();
-        rig.type("water");
-        write(rig.dir.filePath("agents.json"),
-              R"({"result":{"agents":[{"agent":"claude","agent_status":"idle","cwd":"/a","pane_id":"w1:p1","terminal_title_stripped":"Plant the beds","workspace_id":"w1"}]}})");
-        QTRY_VERIFY(rig.backend->selected().isEmpty());
-        QTest::keyClick(rig.window, Qt::Key_Return);
-        QTest::qWait(300);
-        QVERIFY(!rig.log().contains("agent prompt"));
-    }
-
     void helpCoversWhatIsBehindIt()
     {
         Rig rig(agents("blocked", "idle"));
@@ -152,33 +121,71 @@ private slots:
         QTest::keyClick(rig.window, Qt::Key_F1);
         auto *help = rig.find("help");
         QTRY_VERIFY(help->isVisible());
-        // A click where the answer keys are only closes the help.
+        // A click where the terminal is only closes the help.
         const QPointF bottom = help->mapToScene(QPointF(help->width() / 2, help->height() - 40));
         QTest::mouseClick(rig.window, Qt::LeftButton, {}, bottom.toPoint());
         QTest::qWait(300);
         QVERIFY(!help->isVisible());
-        QVERIFY(!rig.log().contains("send-keys"));
         QCOMPARE(rig.quits, 0);
     }
 
-    void escapeClosesOneThingAtATime()
+    void escapeBelongsToTheTerminal()
     {
         Rig rig(agents("idle", "idle"));
         rig.expand();
+        QTRY_VERIFY(rig.find("agentTerminal"));
+        QTRY_VERIFY(rig.find("agentTerminal")->hasActiveFocus());
+        // Esc goes to the agent, and the panel stays.
+        QTest::keyClick(rig.window, Qt::Key_Escape);
+        QVERIFY(rig.window->property("expanded").toBool());
+        // Help and the picker close first.
         QTest::keyClick(rig.window, Qt::Key_F1);
+        QVERIFY(rig.find("help")->isVisible());
         QTest::keyClick(rig.window, Qt::Key_Escape);
         QVERIFY(!rig.find("help")->isVisible());
         QVERIFY(rig.window->property("expanded").toBool());
+        // Outside the terminal, Esc hides the panel.
+        rig.find("panel")->forceActiveFocus();
         QTest::keyClick(rig.window, Qt::Key_Escape);
         QVERIFY(!rig.window->property("expanded").toBool());
+    }
+
+    void attachesWhileThePanelIsOpen()
+    {
+        Rig rig(agents("idle", "working"));
+        QTest::qWait(300);
+        QVERIFY(!rig.log().contains("terminal attach"));
+        rig.expand();
+        QTRY_VERIFY(rig.log().contains("terminal attach term_1 --takeover\n"));
+        // Another agent: the terminal moves to it.
+        QTest::keyClick(rig.window, Qt::Key_Down, Qt::AltModifier);
+        QTRY_VERIFY(rig.log().contains("terminal attach term_2 --takeover\n"));
+        QTRY_VERIFY(rig.log().contains("detached term_1\n"));
+        // Closing the panel detaches, so the pane gets herdr's size back.
+        QMetaObject::invokeMethod(rig.window, "setExpanded", Q_ARG(QVariant, false));
+        QTRY_VERIFY(rig.log().contains("detached term_2\n"));
+    }
+
+    void keysReachTheAgent()
+    {
+        Rig rig(agents("idle", "idle"));
+        rig.expand();
+        QTRY_VERIFY(rig.find("agentTerminal") && rig.find("agentTerminal")->hasActiveFocus());
+        QTest::qWait(300);
+        // Shift+Tab (Claude's mode switch) is ESC [ Z, Ctrl+C is 0x03, Esc is 0x1b.
+        QTest::keyClick(rig.window, Qt::Key_Backtab, Qt::ShiftModifier);
+        QTest::keyClick(rig.window, Qt::Key_C, Qt::ControlModifier);
+        QTest::keyClick(rig.window, Qt::Key_Escape);
+        QTRY_VERIFY(rig.log().contains("key 1b\nkey 5b\nkey 5a\nkey 03\nkey 1b\n"));
+        QVERIFY(rig.find("agentTerminal")->hasActiveFocus());
+        QVERIFY(rig.window->property("expanded").toBool());
     }
 
     void quitNeedsControl()
     {
         Rig rig(agents("idle", "idle"));
         rig.expand();
-        QTest::keyClick(rig.window, Qt::Key_Escape);
-        rig.expand();
+        rig.find("panel")->forceActiveFocus();
         QTest::keyClick(rig.window, Qt::Key_Q);
         QCOMPARE(rig.quits, 0);
         QTest::keyClick(rig.window, Qt::Key_Q, Qt::ControlModifier);
@@ -189,7 +196,6 @@ private slots:
     {
         Rig rig(agents("idle", "idle"));
         rig.backend->setAgentKind("claude");
-        write(rig.dir.filePath("tab.json"), "");
         rig.expand();
         QTest::keyClick(rig.window, Qt::Key_P, Qt::ControlModifier);
         auto *field = rig.find("pickerField");
