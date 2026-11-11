@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Drover
+Name[cs]=Drover
+Comment=A floating indicator of your herdr agents, on every workspace
+Comment[cs]=Plovoucí ukazatel agentů herdr na každé ploše
+Exec=drover toggle
+Icon=drover
+Terminal=false
+Categories=Utility;Development;
+Keywords=herdr;agents;claude;codex;
+StartupWMClass=drover

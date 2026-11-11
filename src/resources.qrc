@@ -1,0 +1,11 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="Main.qml">Main.qml</file>
+        <file alias="AgentPanel.qml">AgentPanel.qml</file>
+        <file alias="AgentRow.qml">AgentRow.qml</file>
+        <file alias="HerdPill.qml">HerdPill.qml</file>
+        <file alias="StatusDot.qml">StatusDot.qml</file>
+        <file alias="i18n/en.json">i18n/en.json</file>
+        <file alias="i18n/cs.json">i18n/cs.json</file>
+    </qresource>
+</RCC>
