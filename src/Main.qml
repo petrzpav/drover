@@ -1,9 +1,10 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Controls.Material
+import QtQuick.Window
 
-// A layer surface in the bottom-right corner of every workspace: the
-// indicator alone, or the indicator with the agent panel opened beside it.
+// A transparent layer surface over every workspace, with the indicator where
+// the user dragged it (the bottom-right corner at first) and the agent panel
+// opened beside it, on whichever side has room. Only those two take input.
 ApplicationWindow {
     id: win
     visible: false
@@ -11,21 +12,36 @@ ApplicationWindow {
     color: "transparent"
     flags: Qt.FramelessWindowHint
 
-    Material.theme: Material.Dark
-    Material.accent: theme.accent
-    Material.roundedScale: theme.radius
-
     property bool expanded: false
     readonly property int pillWidth: 176
     readonly property int pillHeight: 36
-    readonly property int panelWidth: 460
-    readonly property int panelHeight: 540
     readonly property int gap: 8
+    readonly property int edge: 12
 
-    // The surface is anchored to the corner, so growing it opens the panel to
-    // the left of the indicator without moving the indicator.
-    width: expanded ? pillWidth + gap + panelWidth : pillWidth
-    height: expanded ? panelHeight : pillHeight
+    // The indicator keeps its distance from the right and bottom edges.
+    readonly property real pillX: Math.max(0, Math.min(width - pillWidth, width - pillWidth - surface.offset.x))
+    readonly property real pillY: Math.max(0, Math.min(height - pillHeight, height - pillHeight - surface.offset.y))
+
+    // Big enough to follow an agent's work, and never past the screen.
+    readonly property int panelWidth: Math.max(560, Math.min(1180, width - pillWidth - gap - 2 * edge))
+    readonly property int panelHeight: Math.max(400, Math.min(820, height - 2 * edge))
+    // Beside the indicator, on the side with room, and level with it: bottoms
+    // aligned in the lower half of the screen, tops in the upper half.
+    readonly property bool panelOnLeft: pillX - gap - panelWidth >= edge
+                                        || pillX + pillWidth / 2 > width / 2
+    readonly property real panelX: clamp(panelOnLeft ? pillX - gap - panelWidth : pillX + pillWidth + gap,
+                                         edge, width - panelWidth - edge)
+    readonly property real panelY: clamp(pillY + pillHeight / 2 > height / 2 ? pillY + pillHeight - panelHeight : pillY,
+                                         edge, height - panelHeight - edge)
+
+    function clamp(value, low, high) {
+        return Math.max(low, Math.min(high, value))
+    }
+
+    readonly property var inputRegion: [pillX, pillY, panelX, panelY, panelWidth, panelHeight, expanded]
+    onInputRegionChanged: surface.setInputRegion(Qt.rect(pillX, pillY, pillWidth, pillHeight),
+                                                 expanded ? Qt.rect(panelX, panelY, panelWidth, panelHeight)
+                                                          : Qt.rect(0, 0, 0, 0))
 
     function setExpanded(value) {
         expanded = value
@@ -41,15 +57,20 @@ ApplicationWindow {
             keys.forceActiveFocus()
     }
 
-    Shortcut { sequence: "Esc"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: win.expanded = false }
-    Shortcut { sequence: "Space"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: win.expanded = false }
-    Shortcut { sequence: "?"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: panel.helpVisible = !panel.helpVisible }
-    Shortcut { sequence: "Q"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
-    Shortcut { sequence: "Up"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: backend.selectNext(-1) }
-    Shortcut { sequence: "Down"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: backend.selectNext(1) }
+    readonly property bool typing: panel.messageField.activeFocus
+
+    Shortcut { sequence: "Esc"; enabled: win.expanded; context: Qt.ApplicationShortcut
+               onActivated: panel.helpVisible ? panel.helpVisible = false : win.expanded = false }
+    Shortcut { sequence: "Space"; enabled: win.expanded && !win.typing; context: Qt.ApplicationShortcut; onActivated: win.expanded = false }
+    Shortcut { sequence: "?"; enabled: win.expanded && !win.typing; context: Qt.ApplicationShortcut; onActivated: panel.helpVisible = !panel.helpVisible }
+    Shortcut { sequence: "Q"; enabled: win.expanded && !win.typing; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
+    Shortcut { sequence: "Alt+Up"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: backend.selectNext(-1) }
+    Shortcut { sequence: "Alt+Down"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: backend.selectNext(1) }
+    Shortcut { sequence: "Up"; enabled: win.expanded && !win.typing; context: Qt.ApplicationShortcut; onActivated: backend.selectNext(-1) }
+    Shortcut { sequence: "Down"; enabled: win.expanded && !win.typing; context: Qt.ApplicationShortcut; onActivated: backend.selectNext(1) }
     Shortcut { sequence: "Ctrl+O"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: backend.jump() }
-    Shortcut { sequence: "Return"; enabled: win.expanded && !panel.messageField.activeFocus; context: Qt.ApplicationShortcut
-               onActivated: panel.blocked ? backend.sendKeys(["enter"]) : backend.jump() }
+    Shortcut { sequence: "Return"; enabled: win.expanded && !win.typing; context: Qt.ApplicationShortcut
+               onActivated: panel.blocked ? backend.sendKeys(["enter"]) : panel.messageField.forceActiveFocus() }
 
     // Digits answer the question of a blocked agent.
     Instantiator {
@@ -57,7 +78,7 @@ ApplicationWindow {
         delegate: Shortcut {
             required property int index
             sequence: String(index + 1)
-            enabled: win.expanded && panel.blocked && !panel.messageField.activeFocus
+            enabled: win.expanded && panel.blocked && !win.typing
             context: Qt.ApplicationShortcut
             onActivated: backend.sendKeys([String(index + 1)])
         }
@@ -66,10 +87,12 @@ ApplicationWindow {
     Connections {
         target: backend
         function onJumped() { win.expanded = false }
-        // The message field hides while the agent asks something; keep the
-        // keys working by moving focus off it.
+        // The message box hides while the agent asks something; keep the
+        // keys working by moving focus off it, and come back to it after.
         function onSelectionChanged() {
-            if (panel.blocked && panel.messageField.activeFocus)
+            if (!win.expanded)
+                return
+            if (panel.blocked && win.typing)
                 keys.forceActiveFocus()
         }
     }
@@ -79,8 +102,8 @@ ApplicationWindow {
     AgentPanel {
         id: panel
         visible: win.expanded
-        x: 0
-        y: 0
+        x: win.panelX
+        y: win.panelY
         width: win.panelWidth
         height: win.panelHeight
         onQuitRequested: Qt.quit()
@@ -92,11 +115,19 @@ ApplicationWindow {
     }
 
     HerdPill {
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
+        x: win.pillX
+        y: win.pillY
         width: win.pillWidth
         height: win.pillHeight
         expanded: win.expanded
         onToggled: win.expanded = !win.expanded
+
+        property point startOffset
+        onMoveStarted: startOffset = Qt.point(win.width - win.pillWidth - win.pillX,
+                                              win.height - win.pillHeight - win.pillY)
+        onMoved: (dx, dy) => surface.offset = Qt.point(
+                     win.clamp(startOffset.x - dx, 0, win.width - win.pillWidth),
+                     win.clamp(startOffset.y - dy, 0, win.height - win.pillHeight))
+        onMoveFinished: surface.save()
     }
 }

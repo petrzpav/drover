@@ -62,6 +62,7 @@ public:
                                     const QString &home, QString *error = nullptr);
     static QString cleanOutput(const QString &screen, int maxLines = 60);
     static QString commandError(const QByteArray &out, const QByteArray &err, int code);
+    static QString errorCode(const QByteArray &out, const QByteArray &err);
 
 signals:
     void countsChanged();
@@ -80,6 +81,7 @@ private:
     void setNotice(const QString &notice, bool isError);
     void setOutput(const QString &output);
     void readSelected();
+    void readScreen(const QString &pane, const QString &source);
     void applyAgents(const QList<Agent> &agents);
 
     QString m_herdr, m_hyprctl;

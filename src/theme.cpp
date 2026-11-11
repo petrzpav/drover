@@ -73,6 +73,22 @@ QString Theme::readAccent(const QString &path) {
     return "#FFD60A";
 }
 
+// Every `name = "#rrggbb"` line of colors.toml.
+QHash<QString, QString> Theme::readColors(const QString &path) {
+    QHash<QString, QString> colors;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return colors;
+    static const QRegularExpression line(R"re(^\s*([a-z_]+)\s*=\s*["'](#[0-9a-fA-F]{6})["'])re",
+                                         QRegularExpression::MultilineOption);
+    auto matches = line.globalMatch(QString::fromUtf8(file.readAll()));
+    while (matches.hasNext()) {
+        const auto match = matches.next();
+        colors.insert(match.captured(1), match.captured(2));
+    }
+    return colors;
+}
+
 // Black or white, whichever reads on the accent (WCAG relative luminance).
 QString Theme::accentForeground() const {
     const QColor c(m_accent);
@@ -101,8 +117,10 @@ void Theme::reload() {
             m_watcher.addPath(path);
 
     const auto accent = readAccent(m_directory + "/theme/colors.toml");
-    if (accent != m_accent) {
+    const auto colors = readColors(m_directory + "/theme/colors.toml");
+    if (accent != m_accent || colors != m_colors) {
         m_accent = accent;
+        m_colors = colors;
         emit changed();
     }
 }

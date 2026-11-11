@@ -41,6 +41,9 @@ private slots:
         QCOMPARE(Backend::commandError(R"({"error":{"code":"agent_blocked","message":"agent is blocked"}})", {}, 0),
                  QString("agent is blocked"));
         QCOMPARE(Backend::commandError({}, "no server\nmore", 1), QString("no server"));
+        const QByteArray busy = R"({"error":{"code":"agent_not_idle","message":"cannot read 400 lines"},"id":"x"})";
+        QCOMPARE(Backend::commandError({}, busy, 1), QString("cannot read 400 lines"));
+        QCOMPARE(Backend::errorCode({}, busy), QString("agent_not_idle"));
         QVERIFY(Backend::commandError(R"({"result":{}})", {}, 0).isEmpty());
     }
 
@@ -84,6 +87,8 @@ private slots:
         QCOMPARE(backend.selected(), QString("w1:p1"));
         backend.setActive(true);
         QTRY_COMPARE(backend.output(), QString("line one\n\nline two"));
+        // A working agent has no history to scroll; its visible screen is read.
+        QVERIFY(log(dir).contains("agent read w1:p1 --source visible\n"));
 
         backend.selectNext(1);
         QCOMPARE(backend.selectedStatus(), QString("blocked"));
@@ -119,12 +124,16 @@ private slots:
         QDir(dir.path()).mkpath("theme");
         QFile colors(dir.path() + "/theme/colors.toml");
         QVERIFY(colors.open(QIODevice::WriteOnly));
-        colors.write("accent = \"#112233\"\n");
+        colors.write("accent = \"#112233\"\nbackground = \"#2d2a2e\"\nred = \"#ff6188\"\n");
         colors.close();
 
         Theme theme(dir.path());
         QCOMPARE(theme.accent(), QString("#112233"));
         QCOMPARE(theme.accentForeground(), QString("white"));
+        QCOMPARE(theme.background(), QString("#2d2a2e"));
+        QCOMPARE(theme.urgent(), QString("#ff6188"));
+        QCOMPARE(theme.foreground(), QString("#cacccc"));
+        QCOMPARE(theme.border(), QString("#112233"));
     }
 
     void themeFollowsHyprlandRounding()

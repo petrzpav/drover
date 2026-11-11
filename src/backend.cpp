@@ -80,9 +80,23 @@ void Backend::run(const QString &program, const QStringList &arguments, Done don
     timer->start(timeout);
 }
 
+// herdr reports failures as {"error": {"code", "message"}} on stdout or
+// stderr, depending on the command.
+static QJsonObject errorObject(const QByteArray &out, const QByteArray &err) {
+    for (const auto &stream : {out, err}) {
+        const auto error = QJsonDocument::fromJson(stream.trimmed()).object().value("error").toObject();
+        if (!error.isEmpty())
+            return error;
+    }
+    return {};
+}
+
+QString Backend::errorCode(const QByteArray &out, const QByteArray &err) {
+    return errorObject(out, err).value("code").toString();
+}
+
 QString Backend::commandError(const QByteArray &out, const QByteArray &err, int code) {
-    const auto object = QJsonDocument::fromJson(out).object();
-    const auto error = object.value("error").toObject();
+    const auto error = errorObject(out, err);
     if (!error.isEmpty())
         return error.value("message").toString(error.value("code").toString());
     if (code == 0)
@@ -164,26 +178,39 @@ void Backend::selectNext(int step) {
 void Backend::readSelected() {
     if (m_selected.isEmpty() || m_herdr.isEmpty() || m_reading)
         return;
+    // herdr can only scroll back through an agent's history while it is idle;
+    // while it works, its visible screen is what there is.
+    const bool busy = selectedStatus() == "working" || selectedStatus() == "blocked";
+    readScreen(m_selected, busy ? "visible" : "recent");
+}
+
+void Backend::readScreen(const QString &pane, const QString &source) {
     m_reading = true;
-    const QString pane = m_selected;
-    run(m_herdr, {"agent", "read", pane, "--source", "recent", "--lines", "80"},
-        [this, pane](int code, const QByteArray &out, const QByteArray &err) {
-            m_reading = false;
-            if (pane != m_selected)
-                return;
-            // The CLI wraps the screen in JSON when asked for it, but prints
-            // plain text by default; take either.
-            const auto object = QJsonDocument::fromJson(out).object();
-            const QString error = commandError(out, err, code);
-            if (!error.isEmpty()) {
-                setOutput(tr("Couldn't read the agent: %1").arg(error));
+    QStringList arguments{"agent", "read", pane, "--source", source};
+    if (source == "recent")
+        arguments << "--lines" << "400";
+    run(m_herdr, arguments, [this, pane, source](int code, const QByteArray &out, const QByteArray &err) {
+        m_reading = false;
+        if (pane != m_selected)
+            return;
+        const QString error = commandError(out, err, code);
+        if (!error.isEmpty()) {
+            // The agent started working between the listing and the read.
+            if (source == "recent" && errorCode(out, err) == "agent_not_idle") {
+                readScreen(pane, "visible");
                 return;
             }
-            const auto result = object.value("result").toObject();
-            const QString text = result.isEmpty() ? QString::fromUtf8(out)
-                                                  : result.value("text").toString(result.value("output").toString());
-            setOutput(cleanOutput(text));
-        });
+            // A failed read keeps the last screen rather than replacing it.
+            if (m_output.isEmpty())
+                setOutput(tr("Couldn't read the agent: %1").arg(error));
+            return;
+        }
+        // The CLI prints the screen as plain text, or wrapped in JSON.
+        const auto result = QJsonDocument::fromJson(out).object().value("result").toObject();
+        const QString text = result.isEmpty() ? QString::fromUtf8(out)
+                                              : result.value("text").toString(result.value("output").toString());
+        setOutput(cleanOutput(text, 400));
+    });
 }
 
 void Backend::prompt(const QString &text) {

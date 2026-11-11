@@ -1,7 +1,8 @@
 import QtQuick
 
-// One agent state as a small mark: a pulsing accent dot while working, red
-// while it waits for an answer, green when done, a hollow ring when idle.
+// One agent state as a small mark: a pulsing accent dot while working, the
+// theme's red while it waits for an answer, green when done, a hollow ring
+// when idle.
 Item {
     id: dot
     property string status: "idle"
@@ -9,16 +10,17 @@ Item {
     implicitWidth: size
     implicitHeight: size
 
+    readonly property bool hollow: status !== "working" && status !== "blocked" && status !== "done"
     readonly property color tint: status === "working" ? theme.accent
-                                : status === "blocked" ? "#ff6b6b"
-                                : status === "done" ? "#7bd88f"
-                                : "#7a7a85"
+                                : status === "blocked" ? theme.urgent
+                                : status === "done" ? theme.success
+                                : theme.muted
 
     Rectangle {
         anchors.fill: parent
         radius: width / 2
-        color: dot.status === "idle" || dot.status === "unknown" ? "transparent" : dot.tint
-        border.width: dot.status === "idle" || dot.status === "unknown" ? 1.5 : 0
+        color: dot.hollow ? "transparent" : dot.tint
+        border.width: dot.hollow ? 1.5 : 0
         border.color: dot.tint
 
         SequentialAnimation on opacity {

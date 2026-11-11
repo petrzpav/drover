@@ -4,7 +4,6 @@
     "few": "%n agenti",
     "other": "%n agentů"
   },
-  "Answer:": "Odpověď:",
   "Answer an agent that asks you": "Odpovědět agentovi, který se ptá",
   "asks you": "ptá se",
   "Couldn't open the agent: %1": "Agenta nejde otevřít: %1",
@@ -24,9 +23,7 @@
   "No agents are running in herdr.": "V herdr neběží žádní agenti.",
   "No herdr window is open.": "Okno herdr není otevřené.",
   "Not sent: %1": "Neodesláno: %1",
-  "Open": "Otevřít",
   "Open the agent in herdr": "Otevřít agenta v herdr",
-  "Pick an agent": "Vybrat agenta",
   "Pick an agent to see its screen.": "Vyberte agenta a uvidíte jeho obrazovku.",
   "Quit drover": "Ukončit drover",
   "Send the message, or open the agent when it's empty": "Odeslat zprávu, nebo otevřít agenta, když je prázdná",
@@ -35,5 +32,9 @@
   "unexpected answer from herdr agent list.": "nečekaná odpověď z herdr agent list.",
   "unknown": "neznámý",
   "working": "pracuje",
-  "Space, ? and Q work when the message box isn't focused; Esc always hides the panel.": "Mezerník, ? a Q fungují, když není aktivní pole zprávy; Esc panel skryje vždy."
+  "New line in the message": "Nový řádek ve zprávě",
+  "Send": "Odeslat",
+  "The agent asks you something. Answer with the keys it offers:": "Agent se na něco ptá. Odpovězte klávesami, které nabízí:",
+  "Pick an agent": "Vybrat agenta",
+  "Space, arrows, ? and Q work when the message box isn't focused; Esc always hides the panel.": "Mezerník, šipky, ? a Q fungují, když není aktivní pole zprávy; Esc panel skryje vždy."
 }

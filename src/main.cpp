@@ -52,7 +52,9 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "drover: can't listen on %s, a second start will open a second indicator\n",
                 qPrintable(serverName));
 
-    QQuickStyle::setStyle("Material");
+    // Basic keeps Qt's controls out of the way; the look is drawn in QML to match
+    // the Omarchy shell rather than Material.
+    QQuickStyle::setStyle("Basic");
 
     // Installed before anything is translated, and every qsTr() binding is
     // re-evaluated when the Omarchy language changes.
