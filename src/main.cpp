@@ -10,6 +10,7 @@
 #include <QThread>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QtQml/qqml.h>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QUrl>
@@ -17,6 +18,7 @@
 
 #include "backend.h"
 #include "surface.h"
+#include "terminalview.h"
 #include "terminalfont.h"
 #include "theme.h"
 #include "translator.h"
@@ -90,19 +92,13 @@ int main(int argc, char *argv[]) {
     Translator translator;
     app.installTranslator(&translator);
 
-    // The panel's terminal finds color schemes under its import paths, so
-    // drover's own scheme, in the theme's colors, lives under one of them.
-    const QString qmlDirectory = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/drover/qml";
-    QDir().mkpath(qmlDirectory);
-    qputenv("QML_IMPORT_PATH", qmlDirectory.toLocal8Bit());
+    qmlRegisterType<TerminalView>("Drover", 1, 0, "TerminalView");
 
     Theme theme;
-    theme.setSchemeDirectory(qmlDirectory);
     Backend backend;
     Surface surface;
 
     QQmlApplicationEngine engine;
-    engine.addImportPath(qmlDirectory);
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);
     engine.rootContext()->setContextProperty("theme", &theme);

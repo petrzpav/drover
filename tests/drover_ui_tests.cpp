@@ -12,6 +12,7 @@
 
 #include "backend.h"
 #include "surface.h"
+#include "terminalview.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -112,7 +113,11 @@ class DroverUiTests : public QObject {
     Q_OBJECT
 
 private slots:
-    void initTestCase() { QQuickStyle::setStyle("Basic"); }
+    void initTestCase()
+    {
+        QQuickStyle::setStyle("Basic");
+        qmlRegisterType<TerminalView>("Drover", 1, 0, "TerminalView");
+    }
 
     void helpCoversWhatIsBehindIt()
     {

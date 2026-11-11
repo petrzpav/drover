@@ -7,6 +7,7 @@
 #include "agentmodel.h"
 #include "backend.h"
 #include "terminalfont.h"
+#include "terminalview.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -271,14 +272,91 @@ echo ok
         QCOMPARE(palette.at(1), QString("#ff6188"));
         QCOMPARE(palette.at(14), QString("#95e5ee"));
         QCOMPARE(palette.at(2), QString("#0dbc79"));
-        // As a terminal color scheme, red is Color1 and bright cyan Color6Intense.
-        const QString scheme = Theme::colorScheme(palette, "#2d2a2e", "#fcfcfa");
-        QVERIFY(scheme.contains("[Color1]\nBold=false\nColor=255,97,136\n"));
-        QVERIFY(scheme.contains("[Color6Intense]\nBold=false\nColor=149,229,238\n"));
-        QVERIFY(scheme.contains("[Background]\nBold=false\nColor=45,42,46\n"));
-        theme.setSchemeDirectory(dir.filePath("qml"));
-        QVERIFY(theme.terminalScheme().startsWith("Omarchy-"));
-        QVERIFY(QFile::exists(dir.filePath("qml/QMLTermWidget/color-schemes/" + theme.terminalScheme() + ".colorscheme")));
+    }
+
+    void terminalShowsWhatTheProgramPrints()
+    {
+        TerminalView view;
+        view.setSize({800, 400});
+        view.setColors(Ansi16());
+        view.setForeground(QColor("#fcfcfa"));
+        view.setProgram("/bin/sh");
+        view.setArguments({"-c", "printf 'hello \\033[31mred\\033[0m \\033[38;2;1;2;3mrgb\\033[0m čaj\\n'; sleep 5"});
+        view.start();
+        QVERIFY(view.running());
+        QTRY_COMPARE(view.screenText(), QString("hello red rgb čaj"));
+        QCOMPARE(view.textColorAt(0, 0), QColor("#fcfcfa"));
+        QCOMPARE(view.textColorAt(0, 6), QColor("#ff6188"));
+        QCOMPARE(view.textColorAt(0, 10), QColor(1, 2, 3));
+    }
+
+    void terminalSendsKeysAsATerminalDoes()
+    {
+        QTemporaryDir dir;
+        TerminalView view;
+        view.setSize({800, 400});
+        view.setProgram("/bin/sh");
+        view.setArguments({"-c", QString("stty raw -echo; while b=$(dd bs=1 count=1 2>/dev/null | od -An -tx1); [ -n \"$b\" ]; do echo $b >> '%1'; done").arg(dir.filePath("keys"))});
+        view.start();
+        QTest::qWait(300);
+        auto press = [&](int key, Qt::KeyboardModifiers mods, const QString &text = {}) {
+            QKeyEvent event(QEvent::KeyPress, key, mods, text);
+            QCoreApplication::sendEvent(&view, &event);
+        };
+        press(Qt::Key_Backtab, Qt::ShiftModifier);      // 1b 5b 5a
+        press(Qt::Key_C, Qt::ControlModifier, "\x03");  // 03
+        press(Qt::Key_Escape, Qt::NoModifier, "\x1b");  // 1b
+        press(Qt::Key_X, Qt::AltModifier, "x");         // 1b 78
+        press(Qt::Key_Return, Qt::NoModifier, "\r");    // 0d
+        press(Qt::Key_unknown, Qt::NoModifier, "č");    // c4 8d
+        press(Qt::Key_Up, Qt::NoModifier);              // 1b 5b 41
+        const QString expected = "1b\n5b\n5a\n03\n1b\n1b\n78\n0d\nc4\n8d\n1b\n5b\n41\n";
+        auto keys = [&] {
+            QFile file(dir.filePath("keys"));
+            return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
+        };
+        QTRY_COMPARE(keys(), expected);
+    }
+
+    void terminalKeepsReservedShortcuts()
+    {
+        TerminalView view;
+        view.setReservedShortcuts({"Alt+Up", "Ctrl+Shift+O"});
+        auto overridden = [&](int key, Qt::KeyboardModifiers mods) {
+            QKeyEvent event(QEvent::ShortcutOverride, key, mods);
+            event.ignore();
+            QCoreApplication::sendEvent(&view, &event);
+            return event.isAccepted();
+        };
+        QVERIFY(overridden(Qt::Key_Escape, Qt::NoModifier));
+        QVERIFY(overridden(Qt::Key_O, Qt::ControlModifier));
+        QVERIFY(!overridden(Qt::Key_Up, Qt::AltModifier));
+        QVERIFY(!overridden(Qt::Key_O, Qt::ControlModifier | Qt::ShiftModifier));
+    }
+
+    void terminalTellsTheProgramItsSize()
+    {
+        TerminalView view;
+        view.setSize({800, 400});
+        view.setProgram("/bin/sh");
+        view.setArguments({"-c", "trap 'clear; stty size' WINCH; stty size; while :; do sleep 0.05; done"});
+        view.start();
+        QTRY_COMPARE(view.screenText(), QString("%1 %2").arg(view.rows()).arg(view.columns()));
+        const int columns = view.columns();
+        view.setSize({400, 200});
+        QVERIFY(view.columns() < columns);
+        QTRY_COMPARE(view.screenText(), QString("%1 %2").arg(view.rows()).arg(view.columns()));
+    }
+
+    void terminalSaysWhenTheProgramEnds()
+    {
+        TerminalView view;
+        view.setSize({400, 200});
+        view.setProgram("/bin/true");
+        QSignalSpy finished(&view, &TerminalView::finished);
+        view.start();
+        QTRY_COMPARE(finished.count(), 1);
+        QVERIFY(!view.running());
     }
 
     void saysWhenHerdrIsMissing()
@@ -371,6 +449,12 @@ echo ok
     }
 
 private:
+    static QStringList Ansi16()
+    {
+        return {"#000000", "#ff6188", "#a9dc76", "#ffd866", "#fc9867", "#ab9df2", "#78dce8", "#c1c0c0",
+                "#727072", "#ff7a9b", "#bce592", "#ffe28a", "#fdad86", "#c0b5f5", "#95e5ee", "#fcfcfa"};
+    }
+
     static QByteArray agentsJson()
     {
         return R"({"id":"cli:agent:list","result":{"type":"agent_list","agents":[

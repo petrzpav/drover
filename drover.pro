@@ -8,10 +8,14 @@ TEMPLATE = app
 # workspace without window rules.
 LIBS += -lLayerShellQtInterface
 
+# The panel's terminal: libvterm parses, forkpty runs the program.
+LIBS += -lvterm -lutil
+
 HEADERS += \
     src/agentmodel.h \
     src/backend.h \
     src/surface.h \
+    src/terminalview.h \
     src/terminalfont.h \
     src/theme.h \
     src/translator.h
@@ -21,6 +25,7 @@ SOURCES += \
     src/agentmodel.cpp \
     src/backend.cpp \
     src/surface.cpp \
+    src/terminalview.cpp \
     src/terminalfont.cpp \
     src/theme.cpp \
     src/translator.cpp

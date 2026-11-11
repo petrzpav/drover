@@ -4,9 +4,10 @@ TARGET = drover_ui_tests
 TEMPLATE = app
 
 INCLUDEPATH += ../src
+LIBS += -lvterm -lutil
 LIBS += -lLayerShellQtInterface
 
-HEADERS += ../src/agentmodel.h ../src/backend.h ../src/surface.h ../src/theme.h ../src/translator.h
+HEADERS += ../src/agentmodel.h ../src/backend.h ../src/surface.h ../src/terminalview.h ../src/theme.h ../src/translator.h
 SOURCES += drover_ui_tests.cpp ../src/agentmodel.cpp ../src/backend.cpp ../src/surface.cpp \
-           ../src/theme.cpp ../src/translator.cpp
+           ../src/terminalview.cpp ../src/theme.cpp ../src/translator.cpp
 RESOURCES += ../src/resources.qrc
