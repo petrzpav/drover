@@ -6,6 +6,7 @@
 
 #include "agentmodel.h"
 #include "backend.h"
+#include "terminalfont.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -13,6 +14,27 @@ class DroverTests : public QObject {
     Q_OBJECT
 
 private slots:
+    void readsTheTerminalFont()
+    {
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath(".config/ghostty");
+        QDir(dir.path()).mkpath(".config/foot");
+        write(dir.path() + "/.config/xdg-terminals.list", "# preference\ncom.mitchellh.ghostty.desktop\n");
+        write(dir.path() + "/.config/ghostty/config", "font-family = \"Fira Code\"\nfont-size = 11.5\n");
+        write(dir.path() + "/.config/foot/foot.ini", "font=Iosevka:size=9\n");
+        QFont font = TerminalFont::read(dir.path());
+        QCOMPARE(font.family(), QString("Fira Code"));
+        QCOMPARE(font.pointSizeF(), 11.5);
+
+        write(dir.path() + "/.config/xdg-terminals.list", "foot.desktop\n");
+        font = TerminalFont::read(dir.path());
+        QCOMPARE(font.family(), QString("Iosevka"));
+        QCOMPARE(font.pointSizeF(), 9.0);
+
+        QTemporaryDir empty;
+        QCOMPARE(TerminalFont::read(empty.path()).pointSizeF(), 10.0);
+    }
+
     void parsesAgents()
     {
         const auto agents = Backend::parseAgents(agentsJson(), {{"w1", "garden"}}, "/home/ann");

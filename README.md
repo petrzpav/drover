@@ -65,8 +65,9 @@ SSH machines (`herdr --machine`) take seconds per call and are left out.
 
 It looks like the Omarchy shell: the theme's colors from `colors.toml`, the
 Hyprland active border (`hyprland_active_border`) around the panel and pill,
-Hyprland's window rounding, and the system font at its own size (monospace
-only for the agent's screen and the message box). It follows theme
+Hyprland's window rounding, and your terminal's font and size (read from the
+config of the first terminal in `~/.config/xdg-terminals.list`: Ghostty,
+Alacritty, kitty, or foot), so it reads like the terminal the agents run in. It follows theme
 switches and the language picked under Setup > Language (English and Czech so
 far) live.
 

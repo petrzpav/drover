@@ -5,8 +5,8 @@ import QtQuick.Layouts
 // The open panel, laid out like a chat: every agent of the herdr session on
 // the left, the selected agent's screen on the right with a box to talk to it,
 // or keys to answer it when it asks. Drawn like an Omarchy shell popup: the
-// theme background and the Hyprland active border, in the system font at its
-// own size; the agent's screen and the message box are monospace. Everything
+// theme background and the Hyprland active border, in the terminal's font
+// (the application font, set in main.cpp). Everything
 // has a fixed size, so nothing shifts as agents change state.
 Rectangle {
     id: panel
@@ -187,7 +187,6 @@ Rectangle {
                         color: theme.foreground
                         selectionColor: Qt.alpha(theme.foreground, 0.35)
                         selectedTextColor: theme.foreground
-                        font.family: "monospace"
                     }
                 }
 
@@ -266,7 +265,6 @@ Rectangle {
                                 color: theme.foreground
                                 selectionColor: Qt.alpha(theme.foreground, 0.35)
                                 selectedTextColor: theme.foreground
-                                font.family: "monospace"
                                 selectByMouse: true
                                 onCursorRectangleChanged: {
                                     if (cursorRectangle.y + cursorRectangle.height > messageScroll.contentY + messageScroll.height)

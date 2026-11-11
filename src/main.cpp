@@ -1,5 +1,6 @@
 // drover — a floating indicator of your herdr agents, on every workspace.
 
+#include <QDir>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QLocalServer>
@@ -13,6 +14,7 @@
 
 #include "backend.h"
 #include "surface.h"
+#include "terminalfont.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -57,6 +59,9 @@ int main(int argc, char *argv[]) {
     // Basic keeps Qt's controls out of the way; the look is drawn in QML to match
     // the Omarchy shell rather than Material.
     QQuickStyle::setStyle("Basic");
+
+    // All text in the terminal's font and size, like the agents' own screens.
+    app.setFont(TerminalFont::read(QDir::homePath()));
 
     // Installed before anything is translated, and every qsTr() binding is
     // re-evaluated when the Omarchy language changes.

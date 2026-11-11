@@ -12,6 +12,7 @@ HEADERS += \
     src/agentmodel.h \
     src/backend.h \
     src/surface.h \
+    src/terminalfont.h \
     src/theme.h \
     src/translator.h
 
@@ -20,6 +21,7 @@ SOURCES += \
     src/agentmodel.cpp \
     src/backend.cpp \
     src/surface.cpp \
+    src/terminalfont.cpp \
     src/theme.cpp \
     src/translator.cpp
 
