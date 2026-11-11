@@ -66,12 +66,13 @@ agent = codex
 ```
 
 Hyprland setups that bind `Ctrl+P` globally swallow the key before drover
-sees it. Such a binding can hand it on while the panel is open, which drover
-marks with `$XDG_RUNTIME_DIR/drover.open`:
+sees it, since a layer surface with the keyboard is never Hyprland's active
+window. Such a binding can hand the key on while drover's panel has the
+keyboard, which drover marks with `$XDG_RUNTIME_DIR/drover.focus`:
 
 ```lua
-local open = io.open((os.getenv("XDG_RUNTIME_DIR") or "") .. "/drover.open")
-if open then open:close(); hl.exec_cmd("drover pick") end
+local focus = io.open((os.getenv("XDG_RUNTIME_DIR") or "") .. "/drover.focus")
+if focus then focus:close(); hl.exec_cmd("drover pick") return end
 ```
 
 ## How it works

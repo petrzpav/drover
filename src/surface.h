@@ -42,8 +42,12 @@ public:
 signals:
     void offsetChanged();
 
+private slots:
+    void updateFocusFlag();
+
 private:
-    QString m_stateFile, m_openFlag;
+    QString m_stateFile, m_focusFlag;
+    bool m_expanded = false;
     QWindow *m_window = nullptr;
     bool m_layer = false;
     QPointF m_offset{12, 12};

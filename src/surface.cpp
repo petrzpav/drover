@@ -28,7 +28,8 @@ bool Surface::attach(QWindow *window) {
     m_window = window;
     m_layer = QGuiApplication::platformName().startsWith("wayland");
     if (m_layer)
-        m_openFlag = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation) + "/drover.open";
+        m_focusFlag = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation) + "/drover.focus";
+    connect(window, &QWindow::activeChanged, this, &Surface::updateFocusFlag);
     if (!m_layer) {
         if (auto *screen = QGuiApplication::primaryScreen())
             window->resize(screen->availableSize());
@@ -75,29 +76,45 @@ void Surface::setOffset(const QPointF &offset) {
 }
 
 Surface::~Surface() {
-    if (!m_openFlag.isEmpty())
-        QFile::remove(m_openFlag);
+    if (!m_focusFlag.isEmpty())
+        QFile::remove(m_focusFlag);
+}
+
+// This file exists exactly while the open panel has the keyboard, so a
+// compositor key binding (Ctrl+P in Hyprland) can hand the key to drover
+// rather than to the window beneath, which stays Hyprland's active window.
+void Surface::updateFocusFlag() {
+    if (m_focusFlag.isEmpty())
+        return;
+    if (m_expanded && m_window && m_window->isActive()) {
+        QFile flag(m_focusFlag);
+        if (!flag.open(QIODevice::WriteOnly))
+            qWarning("drover: can't write %s", qPrintable(m_focusFlag));
+    } else {
+        QFile::remove(m_focusFlag);
+    }
 }
 
 void Surface::setExpanded(bool expanded) {
-    // While the panel is open this file exists, so a compositor key binding
-    // (Ctrl+P in Hyprland) can hand the key to drover instead of a window.
-    if (!m_openFlag.isEmpty()) {
-        if (expanded) {
-            QFile flag(m_openFlag);
-            if (!flag.open(QIODevice::WriteOnly))
-                qWarning("drover: can't write %s", qPrintable(m_openFlag));
-        } else {
-            QFile::remove(m_openFlag);
-        }
-    }
+    m_expanded = expanded;
+    updateFocusFlag();
     if (!m_layer || !m_window)
         return;
-    LayerShellQt::Window::get(m_window)->setKeyboardInteractivity(
-        expanded ? LayerShellQt::Window::KeyboardInteractivityOnDemand
-                 : LayerShellQt::Window::KeyboardInteractivityNone);
-    if (expanded)
-        m_window->requestActivate();
+    auto *layer = LayerShellQt::Window::get(m_window);
+    if (!expanded) {
+        layer->setKeyboardInteractivity(LayerShellQt::Window::KeyboardInteractivityNone);
+        return;
+    }
+    // Opening the panel is asking for it, so it takes the keyboard at once:
+    // exclusive for a moment, which the compositor must honor, then on
+    // demand, so a click on any window takes the keyboard back.
+    layer->setKeyboardInteractivity(LayerShellQt::Window::KeyboardInteractivityExclusive);
+    m_window->requestActivate();
+    QTimer::singleShot(150, this, [this] {
+        if (m_expanded && m_window)
+            LayerShellQt::Window::get(m_window)->setKeyboardInteractivity(
+                LayerShellQt::Window::KeyboardInteractivityOnDemand);
+    });
 }
 
 void Surface::setInputRegion(const QRectF &indicator, const QRectF &panel) {
