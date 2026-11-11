@@ -1,5 +1,9 @@
 {
-  "%n agents": { "one": "%n agent", "few": "%n agenti", "other": "%n agentů" },
+  "%n agents": {
+    "one": "%n agent",
+    "few": "%n agenti",
+    "other": "%n agentů"
+  },
   "Answer:": "Odpověď:",
   "Answer an agent that asks you": "Odpovědět agentovi, který se ptá",
   "asks you": "ptá se",
@@ -30,5 +34,6 @@
   "Show or hide this help": "Zobrazit či skrýt nápovědu",
   "unexpected answer from herdr agent list.": "nečekaná odpověď z herdr agent list.",
   "unknown": "neznámý",
-  "working": "pracuje"
+  "working": "pracuje",
+  "Space, ? and Q work when the message box isn't focused; Esc always hides the panel.": "Mezerník, ? a Q fungují, když není aktivní pole zprávy; Esc panel skryje vždy."
 }

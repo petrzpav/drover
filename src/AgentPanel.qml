@@ -82,7 +82,7 @@ Rectangle {
                 delegate: AgentRow {
                     width: ListView.view.width
                     selected: paneId === backend.selected
-                    onPicked: backend.select(paneId)
+                    onPicked: { backend.select(paneId); panel.forceActiveFocus() }
                     onOpened: { backend.select(paneId); backend.jump() }
                 }
             }
@@ -163,6 +163,7 @@ Rectangle {
                 spacing: 8
                 TextField {
                     id: message
+                    objectName: "messageField"
                     Layout.fillWidth: true
                     enabled: backend.selected !== ""
                     placeholderText: backend.selected === "" ? qsTr("Message")
@@ -172,8 +173,13 @@ Rectangle {
                             backend.jump()
                             return
                         }
+                        // Cleared once herdr took it, so a rejected message
+                        // stays in the box.
                         backend.prompt(text)
-                        text = ""
+                    }
+                    Connections {
+                        target: backend
+                        function onPromptSent() { message.clear() }
                     }
                 }
                 Button {
@@ -262,6 +268,13 @@ Rectangle {
                         wrapMode: Text.Wrap
                     }
                 }
+            }
+            Text {
+                width: 380
+                text: qsTr("Space, ? and Q work when the message box isn't focused; Esc always hides the panel.")
+                color: "#8a8a95"
+                font.pixelSize: 12
+                wrapMode: Text.Wrap
             }
         }
     }

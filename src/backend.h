@@ -71,6 +71,7 @@ signals:
     void noticeChanged();
     void activeChanged();
     void jumped();
+    void promptSent();
 
 private:
     using Done = std::function<void(int code, const QByteArray &out, const QByteArray &err)>;

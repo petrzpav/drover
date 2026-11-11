@@ -32,6 +32,10 @@ drover quit       # stop it
 | `?`                 | Show or hide the shortcuts                           |
 | `Q`                 | Quit                                                 |
 
+The panel opens with the message box focused, so `Space`, `?` and `Q` type
+into it; they work as shortcuts once the box isn't focused (pick an agent with
+the mouse). `Esc` always hides the panel.
+
 Opening an agent focuses it in herdr (`herdr agent focus`) and brings the
 herdr window forward, wherever it is.
 

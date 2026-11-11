@@ -194,9 +194,10 @@ void Backend::prompt(const QString &text) {
     run(m_herdr, {"agent", "prompt", m_selected, message},
         [this, title](int code, const QByteArray &out, const QByteArray &err) {
             const QString error = commandError(out, err, code);
-            if (error.isEmpty())
+            if (error.isEmpty()) {
                 setNotice(tr("Sent to %1.").arg(title), false);
-            else
+                emit promptSent();
+            } else
                 setNotice(tr("Not sent: %1").arg(error), true);
             readSelected();
         });
