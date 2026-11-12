@@ -57,6 +57,7 @@ o.bind("SUPER + H", "Herdr agents", "drover toggle")
 | `Ctrl+Shift+C` `Ctrl+Shift+V` | Copy the selection, paste (bracketed)            |
 | `Alt+↑` `Alt+↓`     | Pick an agent                                              |
 | `Alt+E`             | Switch between the agent and the editor beside it          |
+| `Ctrl+;` (editor)   | Show or hide a terminal below the editor; `Ctrl+W` in it closes it |
 | `Ctrl+P`            | Pick a workspace and start the default agent there         |
 | `Ctrl+O` (picker)   | Pick the folder for a new workspace                        |
 | `Ctrl+D` (picker)   | Close the highlighted workspace; press again to confirm    |
@@ -84,6 +85,14 @@ The editor is [Fresh](https://github.com/sinelaw/fresh) (`fresh-editor` in
 the AUR): keys and mouse as in VS Code, a file explorer, `Ctrl+P` to find
 files, LSP. While it is in front, `Ctrl+P` is its own (the desktop's binding
 reaches it through drover), and `Ctrl+Shift` shortcuts reach it as such.
+`Ctrl+;` in the editor shows a terminal below it, the full width of the
+editor's side, in the agent's folder (a herdr pane labelled `shell`);
+`Ctrl+;` again hides it and it keeps running, `Ctrl+W` in it closes it.
+Switching between the agent, the editor and the terminal is instant: all
+stay attached while the panel is open. When the agent ends (it is gone for
+three seconds), its editor and terminal close too, and so does its pane if
+only a shell is left there; a tab where another agent works keeps them.
+
 Another terminal editor goes in the config:
 
 ```ini
@@ -149,7 +158,10 @@ Only the pill and the open panel take the pointer; everything else clicks
 through. It takes keyboard focus only while the panel is open. The pill's
 place is kept in `~/.local/state/drover/position`.
 
-It polls `herdr agent list` and `herdr workspace list` once a second (a few
+It lists agents with `herdr agent list` and `herdr workspace list` whenever
+herdr's socket reports a change (an agent's state, panes, tabs or workspaces
+coming and going), so the pill follows within milliseconds; while those
+events flow it also polls every 5 s, otherwise once a second (a few
 milliseconds each). A failed poll keeps the last list and says it is out of
 date; if the selected agent's pane closes, nothing is selected until you pick
 another, so the terminal never attaches to an agent you didn't choose. The
