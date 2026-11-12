@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QDir>
 #include <QHash>
 #include <QSet>
 #include <QObject>
@@ -84,6 +85,8 @@ public:
     void setCloseAction(const QString &action) { m_closeAction = action; }
     // herdr's socket, for what its CLI can't do (an action for a given workspace).
     void setSocketPath(const QString &path) { m_socketPath = path; }
+    // The folder typed paths start from; tests use a temporary one.
+    void setHome(const QString &home) { m_home = home; }
     // A name herdr accepts for an agent in this workspace.
     static QString agentName(const QString &label, const QString &suffix);
 
@@ -97,9 +100,10 @@ public:
     // Opens a tab in the workspace and starts the default agent in it, then
     // selects that agent.
     Q_INVOKABLE void startAgent(const QString &workspaceId);
-    // What the picker would create for this text: {label, cwd, folder, found},
-    // with folder shown as ~/… and found true when the text names an existing
-    // folder; an empty map for blank text.
+    // What the picker would create for this text: {label, cwd, folder, found,
+    // makeFolder}, with folder shown as ~/…, found true when the text names an
+    // existing folder and makeFolder when it names one drover can make; an
+    // empty map for blank text.
     Q_INVOKABLE QVariantMap newWorkspace(const QString &text) const;
     // Creates a workspace from the picker's text, in the given folder or the
     // one the text names, and starts the default agent in its first pane,
@@ -172,6 +176,7 @@ private:
     QString m_error, m_selected, m_notice, m_busy;
     QVariantList m_workspaceList;
     QString m_agentKind, m_pendingSelect, m_closeAction, m_socketPath;
+    QString m_home = QDir::homePath();
     bool m_noticeIsError = false, m_listing = false;
     bool m_selectionLost = false;
     int m_timeout = 4000;

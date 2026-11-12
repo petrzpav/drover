@@ -392,7 +392,11 @@ QVariantMap Backend::resolveNewWorkspace(const QString &text, const QString &hom
         path = home + '/' + path;
     const QFileInfo info(path);
     const bool isFolder = info.isDir();
-    const QString cwd = isFolder ? QDir::cleanPath(info.absoluteFilePath()) : home;
+    // A typed path to a folder that isn't there yet, in one that is, can be
+    // made; anything deeper is more likely a typo.
+    const bool isPath = typed.contains('/') || typed.startsWith('~');
+    const bool makeFolder = isPath && !info.exists() && QFileInfo(info.absolutePath()).isDir();
+    const QString cwd = isFolder || makeFolder ? QDir::cleanPath(info.absoluteFilePath()) : home;
     // A path names the workspace after its last folder; a name is kept as typed.
     QString label = typed.contains('/') || typed == "~" ? QFileInfo(QDir::cleanPath(path)).fileName() : typed;
     if (label.isEmpty())
@@ -400,11 +404,11 @@ QVariantMap Backend::resolveNewWorkspace(const QString &text, const QString &hom
     QString folder = cwd;
     if (!home.isEmpty() && (folder == home || folder.startsWith(home + '/')))
         folder = '~' + folder.mid(home.size());
-    return {{"label", label}, {"cwd", cwd}, {"folder", folder}, {"found", isFolder}};
+    return {{"label", label}, {"cwd", cwd}, {"folder", folder}, {"found", isFolder}, {"makeFolder", makeFolder}};
 }
 
 QVariantMap Backend::newWorkspace(const QString &text) const {
-    return resolveNewWorkspace(text, QDir::homePath());
+    return resolveNewWorkspace(text, m_home);
 }
 
 void Backend::createWorkspace(const QString &text, const QString &folder) {
@@ -419,6 +423,13 @@ void Backend::createWorkspace(const QString &text, const QString &folder) {
         return;
     }
     const QString label = workspace.value("label").toString();
+    if (folder.isEmpty() && workspace.value("makeFolder").toBool()) {
+        const QString path = workspace.value("cwd").toString();
+        if (!QDir().mkdir(path)) {
+            setNotice(tr("Couldn't make the folder %1.").arg(workspace.value("folder").toString()), true);
+            return;
+        }
+    }
     setBusy("start");
     setNotice(tr("Creating %1 and starting %2 there…").arg(label, m_agentKind), false);
     run(program, {"workspace", "create", "--label", label, "--cwd", workspace.value("cwd").toString(), "--no-focus"},

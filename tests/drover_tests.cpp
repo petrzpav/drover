@@ -1,5 +1,6 @@
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 #include <QSignalSpy>
 #include <QLocalServer>
@@ -287,6 +288,17 @@ echo ok
         QTRY_VERIFY(log(dir).contains("workspace create --label Orchard --cwd /srv/orchard --no-focus\n"));
     }
 
+    void makesTheFolderATypedPathNames()
+    {
+        QTemporaryDir dir, home;
+        QVERIFY(QDir(home.path()).mkpath("Work"));
+        Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
+        backend.setHome(home.path());
+        backend.createWorkspace("Work/meadow");
+        QVERIFY(QFileInfo(home.filePath("Work/meadow")).isDir());
+        QTRY_VERIFY(log(dir).contains("workspace create --label meadow --cwd " + home.filePath("Work/meadow") + " --no-focus\n"));
+    }
+
     void saysWhenTheFolderPickerFails()
     {
         QTemporaryDir dir;
@@ -334,8 +346,14 @@ echo ok
         QCOMPARE(resolve(home.path() + "/Work"), QString("Work | ~/Work"));
         QCOMPARE(Backend::resolveNewWorkspace(home.path() + "/Work", home.path()).value("cwd").toString(),
                  home.path() + "/Work");
-        // A path that isn't a folder still names it, in the home folder.
-        QCOMPARE(resolve("~/Work/meadow"), QString("meadow | ~"));
+        // A path to a new folder in an existing one is made there.
+        QCOMPARE(resolve("~/Work/meadow"), QString("meadow | ~/Work/meadow"));
+        QVERIFY(Backend::resolveNewWorkspace("Work/meadow", home.path()).value("makeFolder").toBool());
+        QVERIFY(!Backend::resolveNewWorkspace("Work/orchard", home.path()).value("makeFolder").toBool());
+        QVERIFY(!Backend::resolveNewWorkspace("meadow", home.path()).value("makeFolder").toBool());
+        // Deeper than one new folder, or a plain name: the folder picker decides.
+        QCOMPARE(resolve("~/Nope/meadow"), QString("meadow | ~"));
+        QVERIFY(!Backend::resolveNewWorkspace("~/Nope/meadow", home.path()).value("makeFolder").toBool());
     }
 
     void closesAWorkspace()

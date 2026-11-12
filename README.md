@@ -69,7 +69,9 @@ Omarchy); the panel steps aside meanwhile. Once you pick a folder, drover
 creates the workspace there (`herdr workspace create`) and starts the agent in
 its first pane; cancelling brings the picker back. Text that is already a
 folder, relative to your home (`~/Work/orchard`, `Work/orchard`), skips the
-picker: Enter creates the workspace there, named after the folder.
+picker: Enter creates the workspace there, named after the folder. A path to a
+folder that doesn't exist yet, inside one that does (`Work/orchard` with
+`~/Work` there), shows **new folder** on the row: Enter makes it first.
 
 `Ctrl+D`, or the trash button on a row, marks a workspace for closing; a second
 `Ctrl+D` (or Enter, or click) runs `herdr workspace close`, which ends every

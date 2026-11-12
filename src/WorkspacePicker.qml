@@ -6,7 +6,8 @@ import QtQuick.Layouts
 // moves; Up and Down walk the matches, Enter starts, Esc closes. A name no
 // workspace has yet adds a row that creates it, in a folder picked in the
 // desktop's folder picker (Ctrl+O or the row's folder button; Enter too,
-// unless the text already names a folder). Ctrl+D (or the row's trash
+// unless the text already names a folder, or a new one in an existing
+// folder, which Enter makes). Ctrl+D (or the row's trash
 // button) closes a workspace after a second press confirms it.
 Rectangle {
     id: picker
@@ -57,7 +58,7 @@ Rectangle {
                 armed = ""
             return
         }
-        if (item.create && !item.found) {
+        if (item.create && !item.found && !item.makeFolder) {
             chooseFolder()
             return
         }
@@ -109,7 +110,7 @@ Rectangle {
         if (!exact) {
             const fresh = backend.newWorkspace(field.text)
             found.push({ id: "", create: true, label: fresh.label, folder: fresh.folder, found: fresh.found,
-                         agents: 0 })
+                         makeFolder: fresh.makeFolder, agents: 0 })
         }
         return found
     }
@@ -261,7 +262,8 @@ Rectangle {
                         Text {
                             visible: modelData.create || modelData.agents > 0
                             text: !modelData.create ? qsTr("%n agents", "", modelData.agents)
-                                : modelData.found ? modelData.folder : qsTr("pick a folder")
+                                : modelData.found ? modelData.folder
+                                : modelData.makeFolder ? qsTr("new folder %1").arg(modelData.folder) : qsTr("pick a folder")
                             color: row.marked ? theme.urgent : picker.dim
                             elide: Text.ElideMiddle
                             Layout.maximumWidth: row.width / 2
@@ -301,6 +303,8 @@ Rectangle {
                 Layout.fillWidth: true
                 text: picker.armedItem
                       ? qsTr("Ctrl+D or Enter closes “%1” and everything in it · Esc keeps it").arg(picker.armedItem.label)
+                      : picker.current && picker.current.create && picker.current.makeFolder
+                      ? qsTr("Enter makes the folder, creates it there and starts %1 · Ctrl+O picks another").arg(backend.agentKind)
                       : picker.current && picker.current.create && picker.current.found
                       ? qsTr("Enter creates it there and starts %1 · Ctrl+O picks another folder").arg(backend.agentKind)
                       : picker.current && picker.current.create
