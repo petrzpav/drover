@@ -18,6 +18,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocalSocket>
+#include <QPointer>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QSet>
@@ -42,6 +43,12 @@ Backend::Backend(const QString &herdr, const QString &hyprctl, QObject *parent)
     connect(&m_poll, &QTimer::timeout, this, &Backend::refresh);
     m_poll.start();
     m_sheepClock.setInterval(50);
+    m_eventRefresh.setSingleShot(true);
+    m_eventRefresh.setInterval(15);
+    connect(&m_eventRefresh, &QTimer::timeout, this, &Backend::refresh);
+    m_vanishCheck.setSingleShot(true);
+    m_vanishCheck.setInterval(3000);
+    connect(&m_vanishCheck, &QTimer::timeout, this, &Backend::refresh);
 
     // Another agent, or none: the panel shows the agent again.
     connect(this, &Backend::selectedChanged, this, [this] {
@@ -151,9 +158,13 @@ void Backend::refresh() {
         setError(tr("herdr is not installed."));
         return;
     }
-    if (m_listing)
+    // One listing at a time; a change meanwhile asks for another after it.
+    if (m_listing) {
+        m_listAgain = true;
         return;
+    }
     m_listing = true;
+    m_listAgain = false;
 
     // Workspace labels first, so each agent says which workspace it lives in.
     run(program, {"workspace", "list"}, [this, program](int code, const QByteArray &out, const QByteArray &) {
@@ -161,6 +172,8 @@ void Backend::refresh() {
             m_workspaces = parseWorkspaces(out);
         run(program, {"agent", "list"}, [this](int code, const QByteArray &out, const QByteArray &err) {
             m_listing = false;
+            if (m_listAgain)
+                QTimer::singleShot(0, this, &Backend::refresh);
             QString error = commandError(out, err, code);
             QList<Agent> agents;
             if (error.isEmpty())
@@ -182,20 +195,21 @@ void Backend::refresh() {
 
 void Backend::applyAgents(const QList<Agent> &agents) {
     const QString before = selectedTitle() + '\n' + selectedStatus() + '\n' + QString::number(selectedIndex());
-    // An agent counts as ended once it is missing from three polls in a row,
+    // An agent counts as ended once it has been missing for three seconds,
     // so a moment herdr doesn't see it never closes its editor.
     const auto listed = [&](const QString &paneId) {
         return std::any_of(agents.begin(), agents.end(), [&](const Agent &a) { return a.paneId == paneId; });
     };
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
     for (const auto &agent : m_model.agents()) {
         if (!listed(agent.paneId))
-            m_vanished.insert(agent.paneId, {agent, 0});
+            m_vanished.insert(agent.paneId, {agent, now});
     }
     QList<Agent> gone;
     for (auto it = m_vanished.begin(); it != m_vanished.end();) {
         if (listed(it.key())) {
             it = m_vanished.erase(it);
-        } else if (++it->second >= 3) {
+        } else if (now - it->second >= 2900) {
             gone << it->first;
             it = m_vanished.erase(it);
         } else {
@@ -205,6 +219,10 @@ void Backend::applyAgents(const QList<Agent> &agents) {
     m_model.setAgents(agents);
     if (!gone.isEmpty())
         closeEditorsOf(gone);
+    // Missing agents are looked at again once their time is up.
+    if (!m_vanished.isEmpty() && !m_vanishCheck.isActive())
+        m_vanishCheck.start();
+    watchEvents();
 
     QHash<QString, int> counts;
     for (const auto &agent : agents)
@@ -564,6 +582,66 @@ void Backend::closeEditorsOf(const QList<Agent> &gone) {
                 run(program, {"pane", "close", agent.paneId}, [](int, const QByteArray &, const QByteArray &) {});
         }
     });
+}
+
+// One connection to herdr's socket at a time, subscribed to the agents'
+// states and to panes, tabs and workspaces coming and going; any event
+// lists the agents again at once (bursts make one listing). Another set of
+// agents gets a new subscription, which replaces the old once it runs. A lost
+// connection falls back to the one-second poll and tries again.
+void Backend::watchEvents() {
+    if (m_socketPath.isEmpty())
+        return;
+    QStringList panes;
+    for (const auto &agent : m_model.agents())
+        panes << agent.paneId;
+    panes.sort();
+    if (m_events && panes == m_watched)
+        return;
+    m_watched = panes;
+
+    QJsonArray subscriptions;
+    for (const char *type : {"pane.created", "pane.closed", "pane.exited", "pane.agent_detected", "tab.created",
+                             "tab.closed", "tab.renamed", "workspace.created", "workspace.closed", "workspace.renamed"})
+        subscriptions.append(QJsonObject{{"type", type}});
+    for (const QString &pane : panes)
+        subscriptions.append(QJsonObject{{"type", "pane.agent_status_changed"}, {"pane_id", pane}});
+    const QByteArray request = QJsonDocument(QJsonObject{{"id", "drover:events"}, {"method", "events.subscribe"},
+                                                         {"params", QJsonObject{{"subscriptions", subscriptions}}}})
+                                   .toJson(QJsonDocument::Compact) + '\n';
+
+    QPointer<QLocalSocket> previous = m_events;
+    auto *socket = new QLocalSocket(this);
+    m_events = socket;
+    connect(socket, &QLocalSocket::connected, socket, [socket, request] { socket->write(request); });
+    connect(socket, &QLocalSocket::readyRead, this, [this, socket, previous] {
+        while (socket->canReadLine()) {
+            const QJsonObject message = QJsonDocument::fromJson(socket->readLine()).object();
+            if (message.contains("event")) {
+                m_eventRefresh.start();
+            } else if (message.value("result").toObject().value("type").toString() == "subscription_started") {
+                if (previous && previous != socket) {
+                    previous->disconnect(this);
+                    previous->abort();
+                    previous->deleteLater();
+                }
+                m_poll.setInterval(5000);
+                m_eventRefresh.start();
+            }
+        }
+    });
+    const auto lost = [this, socket] {
+        if (m_events == socket) {
+            m_events = nullptr;
+            m_watched.clear();
+            m_poll.setInterval(1000);
+            QTimer::singleShot(2000, this, &Backend::watchEvents);
+        }
+        socket->deleteLater();
+    };
+    connect(socket, &QLocalSocket::errorOccurred, this, lost);
+    connect(socket, &QLocalSocket::disconnected, this, lost);
+    socket->connectToServer(m_socketPath);
 }
 
 QString Backend::readCloseAction(const QString &configFile) {

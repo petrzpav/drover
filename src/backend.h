@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QStringList>
 #include <QTimer>
+#include <QLocalSocket>
 #include <QVariantList>
 #include <QVariantMap>
 #include <functional>
@@ -225,7 +226,14 @@ private:
                     const std::function<void(const QString &, const QString &)> &found);
     void closeEditorsOf(const QList<Agent> &gone);
     // Agents missing from the list, and for how many polls in a row.
-    QHash<QString, std::pair<Agent, int>> m_vanished;
+    QHash<QString, std::pair<Agent, qint64>> m_vanished;
+    bool m_listAgain = false;
+    // herdr's events (agents' states, panes and tabs coming and going) wake a
+    // listing at once; the poll stays as a slower fallback while they flow.
+    void watchEvents();
+    QLocalSocket *m_events = nullptr;
+    QStringList m_watched;
+    QTimer m_eventRefresh, m_vanishCheck;
     QString m_agentKind, m_pendingSelect, m_closeAction, m_socketPath;
     QString m_home = QDir::homePath();
     bool m_noticeIsError = false, m_listing = false;

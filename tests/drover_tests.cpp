@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QtTest>
+#include <QPointer>
 #include <QJsonArray>
 
 #include "agentmodel.h"
@@ -381,6 +382,45 @@ echo ok
         QCOMPARE(Backend::readCloseAction(dir.filePath("config")), QString());
     }
 
+    void herdrsEventsListTheAgentsAtOnce()
+    {
+        QTemporaryDir dir;
+        Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
+        QTRY_VERIFY(backend.agents()->count() > 0);
+        QLocalServer server;
+        QVERIFY(server.listen(dir.filePath("herdr.sock")));
+        QJsonObject subscribe;
+        QPointer<QLocalSocket> events;
+        connect(&server, &QLocalServer::newConnection, this, [&] {
+            auto *client = server.nextPendingConnection();
+            connect(client, &QLocalSocket::readyRead, client, [&, client] {
+                if (!client->canReadLine())
+                    return;
+                subscribe = QJsonDocument::fromJson(client->readLine()).object();
+                client->write(R"({"id":"drover:events","result":{"type":"subscription_started"}})" "\n");
+                client->flush();
+                events = client;
+            });
+        });
+        backend.setSocketPath(dir.filePath("herdr.sock"));
+        backend.refresh();
+        QTRY_VERIFY(events);
+        QCOMPARE(subscribe.value("method").toString(), QString("events.subscribe"));
+        const auto subscriptions = subscribe.value("params").toObject().value("subscriptions").toArray();
+        QVERIFY(std::any_of(subscriptions.begin(), subscriptions.end(), [](const QJsonValue &v) {
+            return v.toObject().value("type").toString() == "pane.agent_status_changed"
+                && !v.toObject().value("pane_id").toString().isEmpty();
+        }));
+
+        // An agent's state changes: drover lists the agents well before its
+        // next poll.
+        QTest::qWait(200);
+        const int before = log(dir).count("agent list");
+        events->write(R"({"event":"pane.agent_status_changed","data":{"pane_id":"w1:p1","workspace_id":"w1","agent_status":"working"}})" "\n");
+        events->flush();
+        QTRY_VERIFY_WITH_TIMEOUT(log(dir).count("agent list") > before, 300);
+    }
+
     void closesAWorkspaceThroughAPluginAction()
     {
         QTemporaryDir dir;
@@ -395,7 +435,11 @@ echo ok
             connect(client, &QLocalSocket::readyRead, client, [&, client] {
                 if (!client->canReadLine())
                     return;
-                request = QJsonDocument::fromJson(client->readLine()).object();
+                const QJsonObject line = QJsonDocument::fromJson(client->readLine()).object();
+                // drover also listens to herdr's events on the socket.
+                if (line.value("method").toString() == "events.subscribe")
+                    return;
+                request = line;
                 client->write(answer + "\n");
                 client->flush();
             });
