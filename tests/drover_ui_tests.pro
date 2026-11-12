@@ -1,4 +1,4 @@
-QT += core gui qml quick quickcontrols2 testlib network
+QT += core gui qml quick quickcontrols2 testlib network dbus
 CONFIG += c++20 testcase
 TARGET = drover_ui_tests
 TEMPLATE = app

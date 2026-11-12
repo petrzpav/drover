@@ -2,7 +2,15 @@
 
 
 #include <QDateTime>
+#include <QDBusConnection>
+#include <QDBusMessage>
+#include <QDBusPendingCallWatcher>
+#include <QDBusPendingReply>
+#include <QDBusObjectPath>
+#include <QDBusArgument>
 #include <QDir>
+#include <QUrl>
+#include <QUuid>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -370,17 +378,19 @@ QVariantMap Backend::resolveNewWorkspace(const QString &text, const QString &hom
     QString folder = cwd;
     if (!home.isEmpty() && (folder == home || folder.startsWith(home + '/')))
         folder = '~' + folder.mid(home.size());
-    return {{"label", label}, {"cwd", cwd}, {"folder", folder}};
+    return {{"label", label}, {"cwd", cwd}, {"folder", folder}, {"found", isFolder}};
 }
 
 QVariantMap Backend::newWorkspace(const QString &text) const {
     return resolveNewWorkspace(text, QDir::homePath());
 }
 
-void Backend::createWorkspace(const QString &text) {
-    const QVariantMap workspace = newWorkspace(text);
+void Backend::createWorkspace(const QString &text, const QString &folder) {
+    QVariantMap workspace = newWorkspace(text);
     if (!m_busy.isEmpty() || workspace.isEmpty())
         return;
+    if (!folder.isEmpty())
+        workspace.insert("cwd", folder);
     const QString program = herdr();
     if (program.isEmpty()) {
         setNotice(tr("herdr is not installed."), true);
@@ -404,6 +414,75 @@ void Backend::createWorkspace(const QString &text) {
             refresh();
             launchAgent(pane, label, 1);
         });
+}
+
+void Backend::chooseFolderAndCreate(const QString &text) {
+    const QVariantMap workspace = newWorkspace(text);
+    if (!m_busy.isEmpty() || workspace.isEmpty())
+        return;
+    const QString label = workspace.value("label").toString();
+    setBusy("folder");
+    emit folderPickerOpened();
+    auto done = [this, text](const QString &folder, const QString &error) {
+        setBusy({});
+        if (!error.isEmpty())
+            setNotice(tr("Couldn't open the folder picker: %1").arg(error), true);
+        emit folderPickerClosed(!folder.isEmpty(), text);
+        if (!folder.isEmpty())
+            createWorkspace(text, folder);
+    };
+    const QString title = tr("Folder for %1").arg(label);
+    const QString start = workspace.value("cwd").toString();
+    if (m_folderChooser)
+        m_folderChooser(start, title, done);
+    else
+        choosePortalFolder(start, title, done);
+}
+
+// org.freedesktop.portal.FileChooser, which Omarchy routes to its own picker.
+// The answer comes later as a Response signal on a request object whose path
+// follows from our bus name and a token, so we listen before asking.
+void Backend::choosePortalFolder(const QString &start, const QString &title,
+                                 std::function<void(const QString &, const QString &)> done) {
+    auto bus = QDBusConnection::sessionBus();
+    if (!bus.isConnected()) {
+        done({}, tr("no session bus."));
+        return;
+    }
+    const QString token = "drover" + QUuid::createUuid().toString(QUuid::Id128);
+    const QString sender = bus.baseService().mid(1).replace('.', '_');
+    const QString requestPath = "/org/freedesktop/portal/desktop/request/" + sender + '/' + token;
+
+    // One listener per request, gone once it answers.
+    auto *listener = new PortalRequest(this);
+    connect(listener, &PortalRequest::answered, this, [listener, done](uint response, const QVariantMap &results) {
+        listener->deleteLater();
+        QString folder;
+        QStringList uris = results.value("uris").toStringList();
+        if (uris.isEmpty() && results.value("uris").canConvert<QDBusArgument>())
+            results.value("uris").value<QDBusArgument>() >> uris;
+        if (response == 0 && !uris.isEmpty())
+            folder = QUrl(uris.first()).toLocalFile();
+        // 1 is a cancel, which needs no message.
+        done(folder, response > 1 ? tr("the picker ended with an error.") : QString());
+    });
+    bus.connect("org.freedesktop.portal.Desktop", requestPath, "org.freedesktop.portal.Request", "Response",
+                listener, SLOT(response(uint, QVariantMap)));
+
+    auto message = QDBusMessage::createMethodCall("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+                                                  "org.freedesktop.portal.FileChooser", "OpenFile");
+    QVariantMap options{{"handle_token", token}, {"directory", true}, {"modal", true},
+                        {"current_folder", QByteArray(start.toUtf8() + '\0')}};
+    message << QString() << title << options;
+    auto *watcher = new QDBusPendingCallWatcher(bus.asyncCall(message), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [watcher, listener, done] {
+        watcher->deleteLater();
+        const QDBusPendingReply<QDBusObjectPath> reply = *watcher;
+        if (reply.isError()) {
+            listener->deleteLater();
+            done({}, reply.error().message());
+        }
+    });
 }
 
 void Backend::closeWorkspace(const QString &workspaceId) {

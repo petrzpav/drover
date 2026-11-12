@@ -1,4 +1,4 @@
-QT += core gui qml quick quickcontrols2 network
+QT += core gui qml quick quickcontrols2 network dbus
 
 CONFIG += c++20 release
 TARGET = drover

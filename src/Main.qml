@@ -66,8 +66,9 @@ ApplicationWindow {
 
     // The keyboard goes to the agent's terminal whenever the panel opens or
     // an agent is picked; the terminal is created a moment later.
+    // An open picker keeps it.
     function focusForAgent() {
-        Qt.callLater(panel.focusTerminal)
+        Qt.callLater(() => { if (!panel.picker.open) panel.focusTerminal() })
     }
 
     onExpandedChanged: {
@@ -105,6 +106,17 @@ ApplicationWindow {
     Connections {
         target: backend
         function onJumped() { win.expanded = false }
+        // The folder picker is a window, under this layer: the panel steps
+        // aside, then comes back to the new agent or, on cancel, the picker.
+        function onFolderPickerOpened() { win.expanded = false }
+        function onFolderPickerClosed(chosen, text) {
+            if (chosen) {
+                win.expanded = true
+                return
+            }
+            win.openPicker()
+            panel.picker.filter = text
+        }
         // A newly selected agent (picked, or started from the picker) gets
         // the keyboard, unless the picker is still open.
         function onSelectedChanged() {

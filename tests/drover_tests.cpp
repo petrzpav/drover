@@ -263,6 +263,43 @@ echo ok
         QVERIFY(!log(dir).contains("tab create"));
     }
 
+    void createsAWorkspaceInTheFolderPicked()
+    {
+        QTemporaryDir dir;
+        Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
+        QSignalSpy opened(&backend, &Backend::folderPickerOpened);
+        QSignalSpy closed(&backend, &Backend::folderPickerClosed);
+        QString title;
+        backend.setFolderChooser([&](const QString &, const QString &t, auto done) {
+            title = t;
+            QCOMPARE(backend.busy(), QString("folder"));
+            done("/srv/orchard", {});
+        });
+        backend.chooseFolderAndCreate("Orchard");
+        QCOMPARE(opened.count(), 1);
+        QCOMPARE(closed.count(), 1);
+        QCOMPARE(closed.first().at(0).toBool(), true);
+        QCOMPARE(title, QString("Folder for Orchard"));
+        QTRY_VERIFY(log(dir).contains("workspace create --label Orchard --cwd /srv/orchard --no-focus\n"));
+    }
+
+    void saysWhenTheFolderPickerFails()
+    {
+        QTemporaryDir dir;
+        Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
+        QSignalSpy closed(&backend, &Backend::folderPickerClosed);
+        backend.setFolderChooser([](const QString &, const QString &, auto done) { done({}, "no portal"); });
+        backend.chooseFolderAndCreate("orchard");
+        QCOMPARE(closed.count(), 1);
+        QCOMPARE(closed.first().at(0).toBool(), false);
+        QCOMPARE(closed.first().at(1).toString(), QString("orchard"));
+        QCOMPARE(backend.busy(), QString());
+        QVERIFY(backend.noticeIsError());
+        QCOMPARE(backend.notice(), QString("Couldn't open the folder picker: no portal"));
+        QTest::qWait(100);
+        QVERIFY(!log(dir).contains("workspace create"));
+    }
+
     void saysWhenAWorkspaceCantBeCreated()
     {
         QTemporaryDir dir;

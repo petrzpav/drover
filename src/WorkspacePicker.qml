@@ -4,7 +4,9 @@ import QtQuick.Layouts
 // Ctrl+P: pick a herdr workspace by typing part of its name, and the default
 // agent starts there in a new tab. A card over the panel, so nothing behind it
 // moves; Up and Down walk the matches, Enter starts, Esc closes. A name no
-// workspace has yet adds a row that creates it; Ctrl+D (or the row's trash
+// workspace has yet adds a row that creates it, in a folder picked in the
+// desktop's folder picker (Ctrl+O or the row's folder button; Enter too,
+// unless the text already names a folder). Ctrl+D (or the row's trash
 // button) closes a workspace after a second press confirms it.
 Rectangle {
     id: picker
@@ -55,11 +57,22 @@ Rectangle {
                 armed = ""
             return
         }
+        if (item.create && !item.found) {
+            chooseFolder()
+            return
+        }
         if (item.create)
             backend.createWorkspace(field.text)
         else
             backend.startAgent(item.id)
         close()
+    }
+    // The panel steps aside while the picker is open, and comes back after.
+    function chooseFolder() {
+        // Only a name no workspace has yet, as on the Create row.
+        if (backend.busy !== "" || !matches.some(item => item.create))
+            return
+        backend.chooseFolderAndCreate(field.text)
     }
     // The first press marks the workspace, the second closes it.
     function remove(index) {
@@ -95,7 +108,8 @@ Rectangle {
         const found = starts.concat(contains)
         if (!exact) {
             const fresh = backend.newWorkspace(field.text)
-            found.push({ id: "", create: true, label: fresh.label, folder: fresh.folder, agents: 0 })
+            found.push({ id: "", create: true, label: fresh.label, folder: fresh.folder, found: fresh.found,
+                         agents: 0 })
         }
         return found
     }
@@ -178,6 +192,10 @@ Rectangle {
                             event.accepted = true
                             if (!event.isAutoRepeat)
                                 picker.remove(list.currentIndex)
+                        } else if (event.key === Qt.Key_O && event.modifiers === Qt.ControlModifier) {
+                            event.accepted = true
+                            if (!event.isAutoRepeat)
+                                picker.chooseFolder()
                         }
                     }
                     Keys.onUpPressed: { picker.armed = ""; picker.moveHighlight(list.currentIndex - 1) }
@@ -242,7 +260,8 @@ Rectangle {
                         }
                         Text {
                             visible: modelData.create || modelData.agents > 0
-                            text: modelData.create ? modelData.folder : qsTr("%n agents", "", modelData.agents)
+                            text: !modelData.create ? qsTr("%n agents", "", modelData.agents)
+                                : modelData.found ? modelData.folder : qsTr("pick a folder")
                             color: row.marked ? theme.urgent : picker.dim
                             elide: Text.ElideMiddle
                             Layout.maximumWidth: row.width / 2
@@ -253,16 +272,18 @@ Rectangle {
                             Layout.preferredHeight: 26
                             IconButton {
                                 id: trash
-                                objectName: "pickerClose_" + modelData.label
+                                // On the Create row it picks the folder instead.
+                                objectName: modelData.create ? "pickerFolder" : "pickerClose_" + modelData.label
                                 anchors.fill: parent
-                                visible: !modelData.create && (row.current || rowHover.hovered || row.marked)
+                                visible: modelData.create || row.current || rowHover.hovered || row.marked
                                 activeFocusOnTab: false
-                                icon: "\uf1f8"
+                                icon: modelData.create ? "\uf07c" : "\uf1f8"
                                 tint: row.marked ? theme.urgent : picker.dim
                                 busy: row.marked && backend.busy === "close"
-                                hint: row.marked ? qsTr("Click again to close it") : qsTr("Close this workspace")
-                                shortcut: "Ctrl+D"
-                                onClicked: picker.remove(row.index)
+                                hint: modelData.create ? qsTr("Pick its folder")
+                                    : row.marked ? qsTr("Click again to close it") : qsTr("Close this workspace")
+                                shortcut: modelData.create ? "Ctrl+O" : "Ctrl+D"
+                                onClicked: modelData.create ? picker.chooseFolder() : picker.remove(row.index)
                             }
                         }
                     }
@@ -280,8 +301,10 @@ Rectangle {
                 Layout.fillWidth: true
                 text: picker.armedItem
                       ? qsTr("Ctrl+D or Enter closes “%1” and everything in it · Esc keeps it").arg(picker.armedItem.label)
+                      : picker.current && picker.current.create && picker.current.found
+                      ? qsTr("Enter creates it there and starts %1 · Ctrl+O picks another folder").arg(backend.agentKind)
                       : picker.current && picker.current.create
-                      ? qsTr("Enter creates it and starts %1 there · Esc closes").arg(backend.agentKind)
+                      ? qsTr("Enter or Ctrl+O picks its folder, then %1 starts there · Esc closes").arg(backend.agentKind)
                       : qsTr("Enter starts it in a new tab · Ctrl+D closes the workspace · Esc closes")
                 color: picker.armedItem ? theme.urgent : picker.dim
                 elide: Text.ElideRight

@@ -212,15 +212,50 @@ private slots:
         QTRY_VERIFY(rig.log().contains("tab create --workspace w2"));
     }
 
-    void pickerCreatesAWorkspaceNoOneHas()
+    void pickerCreatesAWorkspaceInAPickedFolder()
     {
         Rig rig(agents("idle", "idle"));
+        QString asked;
+        rig.backend->setFolderChooser([&](const QString &start, const QString &, auto done) {
+            asked = start;
+            // The panel stepped aside for the picker.
+            QVERIFY(!rig.window->property("expanded").toBool());
+            done(rig.dir.path(), {});
+        });
         rig.expand();
         QTest::keyClick(rig.window, Qt::Key_P, Qt::ControlModifier);
-        rig.type("orchard");
+        rig.type("orchardzzq");
         QTest::keyClick(rig.window, Qt::Key_Return);
-        QTRY_VERIFY(rig.log().contains("workspace create --label orchard --cwd " + QDir::homePath() + " --no-focus"));
+        QTRY_VERIFY(rig.log().contains("workspace create --label orchardzzq --cwd " + rig.dir.path() + " --no-focus"));
+        QCOMPARE(asked, QDir::homePath());
+        QVERIFY(rig.window->property("expanded").toBool());
         QVERIFY(!rig.log().contains("tab create"));
+    }
+
+    void cancellingTheFolderPickerBringsThePickerBack()
+    {
+        Rig rig(agents("idle", "idle"));
+        int asked = 0;
+        // The portal answers later, after the panel has stepped aside.
+        rig.backend->setFolderChooser([&](const QString &, const QString &, auto done) {
+            ++asked;
+            QTimer::singleShot(200, [done] { done({}, {}); });
+        });
+        rig.expand();
+        QTest::keyClick(rig.window, Qt::Key_P, Qt::ControlModifier);
+        rig.type("orchardzzq");
+        QTest::keyClick(rig.window, Qt::Key_O, Qt::ControlModifier);
+        QTRY_COMPARE(asked, 1);
+        auto *field = rig.find("pickerField");
+        QTRY_VERIFY(field->isVisible());
+        QTRY_VERIFY(field->hasActiveFocus());
+        QCOMPARE(field->property("text").toString(), QString("orchardzzq"));
+        QVERIFY(!rig.log().contains("workspace create"));
+        // Ctrl+O does nothing for a name a workspace already has.
+        field->setProperty("text", "gate");
+        QTest::keyClick(rig.window, Qt::Key_O, Qt::ControlModifier);
+        QTest::qWait(50);
+        QCOMPARE(asked, 1);
     }
 
     void pickerClosesAWorkspaceOnlyOnTheSecondPress()

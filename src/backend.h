@@ -10,6 +10,17 @@
 
 #include "agentmodel.h"
 
+// Receives one xdg portal request's Response signal.
+class PortalRequest : public QObject {
+    Q_OBJECT
+public:
+    using QObject::QObject;
+signals:
+    void answered(uint response, const QVariantMap &results);
+public slots:
+    void response(uint code, const QVariantMap &results) { emit answered(code, results); }
+};
+
 // Watches the agents of the local herdr session through the herdr CLI, starts
 // new ones, and brings the herdr window to one. Talking to an agent happens in
 // the panel's terminal, attached to the agent's pane (`herdr terminal attach`).
@@ -34,7 +45,8 @@ class Backend : public QObject {
     Q_PROPERTY(bool selectionLost READ selectionLost NOTIFY selectedChanged)
     Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
     Q_PROPERTY(bool noticeIsError READ noticeIsError NOTIFY noticeChanged)
-    // The action waiting for herdr: "open", "start", "close", or empty.
+    // The action waiting: "open", "start", "close", "folder" (the folder
+    // picker is open), or empty.
     Q_PROPERTY(QString busy READ busy NOTIFY busyChanged)
     // herdr's workspaces, by label: [{id, label, agents}], for the picker.
     Q_PROPERTY(QVariantList workspaces READ workspaces NOTIFY workspacesChanged)
@@ -77,12 +89,21 @@ public:
     // Opens a tab in the workspace and starts the default agent in it, then
     // selects that agent.
     Q_INVOKABLE void startAgent(const QString &workspaceId);
-    // What the picker would create for this text: {label, cwd, folder}, with
-    // folder shown as ~/… ; an empty map for blank text.
+    // What the picker would create for this text: {label, cwd, folder, found},
+    // with folder shown as ~/… and found true when the text names an existing
+    // folder; an empty map for blank text.
     Q_INVOKABLE QVariantMap newWorkspace(const QString &text) const;
-    // Creates a workspace from the picker's text and starts the default agent
-    // in its first pane, then selects that agent.
-    Q_INVOKABLE void createWorkspace(const QString &text);
+    // Creates a workspace from the picker's text, in the given folder or the
+    // one the text names, and starts the default agent in its first pane,
+    // then selects that agent.
+    Q_INVOKABLE void createWorkspace(const QString &text, const QString &folder = QString());
+    // Asks for the new workspace's folder in the desktop's folder picker (the
+    // xdg portal), then creates it there; folderPickerClosed tells whether.
+    Q_INVOKABLE void chooseFolderAndCreate(const QString &text);
+    // Tests replace the portal: start folder in, chosen folder (or empty) out.
+    using FolderChooser = std::function<void(const QString &start, const QString &title,
+                                             std::function<void(const QString &folder, const QString &error)>)>;
+    void setFolderChooser(FolderChooser chooser) { m_folderChooser = std::move(chooser); }
     // Closes a workspace and everything running in it.
     Q_INVOKABLE void closeWorkspace(const QString &workspaceId);
 
@@ -110,6 +131,9 @@ signals:
     void busyChanged();
     void workspacesChanged();
     void jumped();
+    // The folder picker opens over the desktop, so the panel steps aside.
+    void folderPickerOpened();
+    void folderPickerClosed(bool chosen, const QString &text);
 
 private:
     using Done = std::function<void(int code, const QByteArray &out, const QByteArray &err)>;
@@ -121,6 +145,8 @@ private:
     void setBusy(const QString &busy);
     void applyAgents(const QList<Agent> &agents);
     void raiseHerdr();
+    void choosePortalFolder(const QString &start, const QString &title,
+                            std::function<void(const QString &, const QString &)> done);
     QString herdr() const;
     QString hyprctl() const;
 
@@ -135,4 +161,5 @@ private:
     bool m_selectionLost = false;
     int m_timeout = 4000;
     QTimer m_poll, m_noticeTimer;
+    FolderChooser m_folderChooser;
 };
