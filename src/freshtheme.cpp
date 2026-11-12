@@ -11,11 +11,23 @@
 #include <QJsonObject>
 #include <QProcess>
 
+#include <cmath>
+
 namespace {
 
 QColor mix(const QColor &a, const QColor &b, double k) {
     return QColor::fromRgbF(a.redF() + (b.redF() - a.redF()) * k, a.greenF() + (b.greenF() - a.greenF()) * k,
                             a.blueF() + (b.blueF() - a.blueF()) * k);
+}
+
+// WCAG contrast ratio of two colors.
+double contrast(const QColor &a, const QColor &b) {
+    const auto luminance = [](const QColor &c) {
+        const auto linear = [](double v) { return v <= .04045 ? v / 12.92 : std::pow((v + .055) / 1.055, 2.4); };
+        return .2126 * linear(c.redF()) + .7152 * linear(c.greenF()) + .0722 * linear(c.blueF());
+    };
+    const double x = luminance(a), y = luminance(b);
+    return (std::max(x, y) + .05) / (std::min(x, y) + .05);
 }
 
 QJsonArray rgb(const QColor &c) {
@@ -43,13 +55,15 @@ QByteArray FreshTheme::build(const Theme &theme) {
         return value.isEmpty() ? fallback : QColor(value);
     };
     const QStringList palette = theme.terminalPalette();
-    const QColor bg(theme.background()), fg(theme.foreground()), accent(theme.accent()), muted(theme.muted());
+    const QColor bg(theme.background()), fg(theme.foreground()), accent(theme.accent()), border(theme.border());
+    // Comments, line numbers and quiet labels stay readable on any background.
+    const QColor muted = contrast(QColor(theme.muted()), bg) >= 3 ? QColor(theme.muted()) : mix(fg, bg, 0.35);
     const QColor red(palette.at(1)), green(palette.at(2)), yellow(palette.at(3)), blue(palette.at(4)),
         magenta(palette.at(5)), cyan(palette.at(6));
     const QColor orange = named("orange", mix(red, yellow, 0.5));
     const bool light = bg.lightnessF() > 0.5;
     // Chrome sits a step darker (or, on a light theme, lighter) than the text.
-    const QColor chrome = named("dark_background", mix(bg, light ? Qt::white : Qt::black, 0.18));
+    const QColor chrome = named("dark_background", mix(bg, Qt::black, light ? 0.06 : 0.18));
     const QColor raised = named("lighter_background", mix(bg, fg, 0.08));
     const QColor selection = named("selection", named("selection_background", mix(bg, accent, 0.28)));
     const QColor dim = named("dark_foreground", mix(fg, bg, 0.4));
@@ -65,7 +79,8 @@ QByteArray FreshTheme::build(const Theme &theme) {
         {"diff_modify_bg", rgb(mix(bg, yellow, 0.14))},
         {"diff_add_highlight_bg", rgb(mix(bg, green, 0.32))}, {"diff_remove_highlight_bg", rgb(mix(bg, red, 0.32))},
     };
-    const QColor rainbow[6] = {yellow, magenta, cyan, green, orange, blue};
+    // Some themes put orange in blue's place; then red takes it.
+    const QColor rainbow[6] = {yellow, magenta, cyan, green, orange, blue == orange ? red : blue};
     for (int i = 0; i < 6; ++i) {
         editor.insert(QString("bracket_rainbow_%1").arg(i + 1), rgb(rainbow[i]));
         editor.insert(QString("indent_rainbow_%1").arg(i + 1), rgb(mix(bg, rainbow[i], 0.12)));
@@ -85,14 +100,20 @@ QByteArray FreshTheme::build(const Theme &theme) {
         {"status_separator_fg", rgb(raised)}, {"status_separator_bg", rgb(chrome)},
         {"prompt_fg", rgb(fg)}, {"prompt_bg", rgb(chrome)},
         {"prompt_selection_fg", rgb(fg)}, {"prompt_selection_bg", rgb(selection)},
-        {"popup_border_fg", rgb(accent)}, {"popup_bg", rgb(chrome)}, {"popup_text_fg", rgb(fg)},
+        {"popup_border_fg", rgb(border)}, {"popup_bg", rgb(chrome)}, {"popup_text_fg", rgb(fg)},
         {"popup_selection_bg", rgb(selection)}, {"popup_selection_fg", rgb(fg)},
         {"text_input_selection_bg", rgb(selection)},
         {"suggestion_bg", rgb(chrome)}, {"suggestion_fg", rgb(fg)}, {"suggestion_selected_bg", rgb(selection)},
         {"help_bg", rgb(chrome)}, {"help_fg", rgb(fg)}, {"help_key_fg", rgb(accent)},
         {"help_separator_fg", rgb(raised)}, {"help_indicator_fg", rgb(chrome)}, {"help_indicator_bg", rgb(accent)},
         {"inline_code_bg", rgb(raised)},
-        {"split_separator_fg", rgb(raised)}, {"split_separator_hover_fg", rgb(accent)},
+        {"split_separator_fg", rgb(raised)}, {"split_separator_hover_fg", rgb(border)},
+        {"status_lsp_on_fg", rgb(green)}, {"status_lsp_on_bg", rgb(chrome)},
+        {"status_lsp_actionable_fg", rgb(fg)}, {"status_lsp_actionable_bg", rgb(raised)},
+        {"status_warning_indicator_fg", rgb(chrome)}, {"status_warning_indicator_bg", rgb(orange)},
+        {"status_warning_indicator_hover_fg", rgb(chrome)}, {"status_warning_indicator_hover_bg", rgb(mix(orange, fg, 0.15))},
+        {"status_error_indicator_fg", rgb(chrome)}, {"status_error_indicator_bg", rgb(red)},
+        {"status_error_indicator_hover_fg", rgb(chrome)}, {"status_error_indicator_hover_bg", rgb(mix(red, fg, 0.15))},
         {"scrollbar_track_fg", rgb(bg)}, {"scrollbar_thumb_fg", rgb(raised)},
         {"scrollbar_track_hover_fg", rgb(bg)}, {"scrollbar_thumb_hover_fg", rgb(muted)},
         {"semantic_highlight_bg", rgb(raised)}, {"terminal_bg", rgb(bg)}, {"terminal_fg", rgb(fg)},

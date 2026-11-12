@@ -9,7 +9,15 @@ Item {
     objectName: "herdBars"
     signal flash(color tint)
 
-    readonly property real barRoom: Math.max(0, width - 24 - label.implicitWidth - 10)
+    // The room left of the widest label the herd can have, so bars never
+    // move as the label changes.
+    readonly property real labelRoom: {
+        const n = Math.max(1, backend.agents.count)
+        return Math.max(...[qsTr("%n asks you", "", n), qsTr("%n working", "", n), qsTr("%n done", "", n),
+                            qsTr("all idle"), qsTr("%n agents", "", 0)].map(t => labelMetrics.advanceWidth(t)))
+    }
+    FontMetrics { id: labelMetrics }
+    readonly property real barRoom: Math.max(0, width - 24 - labelRoom - 10)
     readonly property real barStep: Math.min(8, barRoom / Math.max(1, backend.agents.count))
     readonly property int barWidth: Math.max(2, Math.round(barStep / 2))
 
@@ -40,7 +48,7 @@ Item {
                     readonly property color tint: status === "working" ? theme.accent
                                                 : status === "blocked" ? theme.urgent
                                                 : status === "done" ? theme.success
-                                                : theme.muted
+                                                : Qt.alpha(theme.foreground, 0.45)
 
                     width: herd.barWidth
                     height: 18
@@ -136,6 +144,6 @@ Item {
         color: backend.blocked > 0 ? theme.urgent
              : backend.working > 0 ? theme.accent
              : backend.done > 0 ? theme.success
-             : theme.muted
+             : Qt.alpha(theme.foreground, 0.45)
     }
 }

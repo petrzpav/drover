@@ -60,6 +60,10 @@ class Backend : public QObject {
     // panel shows it instead of the agent, and its terminal.
     Q_PROPERTY(bool editing READ editing NOTIFY editorChanged)
     Q_PROPERTY(QString editorTerminal READ editorTerminal NOTIFY editorChanged)
+    // A terminal below the editor, in the agent's folder: whether it shows,
+    // and its terminal (it stays attached while hidden).
+    Q_PROPERTY(bool shellShown READ shellShown NOTIFY shellChanged)
+    Q_PROPERTY(QString shellTerminal READ shellTerminal NOTIFY shellChanged)
 
 public:
     // Tests pass fake herdr and hyprctl scripts; empty means the ones on PATH.
@@ -93,6 +97,8 @@ public:
     QString editor() const { return m_editor; }
     bool editing() const { return m_editing; }
     QString editorTerminal() const { return m_editorTerminal; }
+    bool shellShown() const { return m_shellShown; }
+    QString shellTerminal() const { return m_shellTerminal; }
     // A herdr plugin action that closes a workspace instead of `herdr workspace
     // close`, as plugin_id.action_id (close_action = ... in the config): for
     // plugins that bring closed workspaces back unless their own action did it.
@@ -117,6 +123,11 @@ public:
     Q_INVOKABLE void toggleEditor();
     // The editor's terminal went away (the editor quit): back to the agent.
     Q_INVOKABLE void editorClosed();
+    // In the editor: shows or hides the terminal below it, opening it the
+    // first time; closes it for good; its terminal went away.
+    Q_INVOKABLE void toggleShell();
+    Q_INVOKABLE void closeShell();
+    Q_INVOKABLE void shellClosed();
     // Opens a tab in the workspace and starts the default agent in it, then
     // selects that agent.
     Q_INVOKABLE void startAgent(const QString &workspaceId);
@@ -161,6 +172,7 @@ signals:
     void countsChanged();
     void indicatorChanged();
     void editorChanged();
+    void shellChanged();
     void errorChanged();
     // A different pane is selected.
     void selectedChanged();
@@ -200,8 +212,11 @@ private:
     QString m_indicator = QStringLiteral("bars");
     QString m_editor = QStringLiteral("fresh");
     bool m_editing = false;
-    QString m_editorTerminal;
-    void showEditor(const QString &terminalId);
+    QString m_editorPane, m_editorTerminal;
+    bool m_shellShown = false;
+    QString m_shellPane, m_shellTerminal;
+    void openBeside(const QString &label, const QString &from, const QString &direction, const QString &command,
+                    const std::function<void(const QString &, const QString &)> &found);
     void closeEditorsOf(const QList<Agent> &gone);
     QString m_agentKind, m_pendingSelect, m_closeAction, m_socketPath;
     QString m_home = QDir::homePath();

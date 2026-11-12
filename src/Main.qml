@@ -102,6 +102,10 @@ ApplicationWindow {
                    }
                } }
     Shortcut { sequence: "Ctrl+P"; enabled: win.expanded && !backend.editing; context: Qt.ApplicationShortcut; onActivated: win.openPicker() }
+    Shortcut { sequence: "Ctrl+;"; enabled: win.expanded && backend.editing && !panel.picker.open; autoRepeat: false
+               context: Qt.ApplicationShortcut; onActivated: { panel.helpVisible = false; backend.toggleShell() } }
+    Shortcut { sequence: "Ctrl+W"; enabled: win.expanded && panel.shellFocused; autoRepeat: false
+               context: Qt.ApplicationShortcut; onActivated: backend.closeShell() }
     Shortcut { sequence: "Alt+E"; enabled: win.expanded && !panel.picker.open; autoRepeat: false; context: Qt.ApplicationShortcut
                onActivated: { panel.helpVisible = false; backend.toggleEditor(); win.focusForAgent() } }
     Shortcut { sequence: "Ctrl+Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }

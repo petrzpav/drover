@@ -13,6 +13,8 @@ Item {
     // The editor beside the agent rather than the agent: it gets Ctrl+P (the
     // desktop's binding is forwarded) and Ctrl+Shift+letters as such.
     property bool editor: false
+    // The terminal below the editor: Ctrl+; hides it, Ctrl+W closes it.
+    property bool shell: false
     signal detached()
 
     function focusTerminal() {
@@ -27,7 +29,7 @@ Item {
         id: terminal
         objectName: "agentTerminal"
         anchors.fill: parent
-        anchors.leftMargin: 10
+        anchors.leftMargin: 16
         anchors.topMargin: 6
         anchors.rightMargin: 6
         anchors.bottomMargin: 6
@@ -41,7 +43,8 @@ Item {
         // drover's own shortcuts; every other key belongs to the agent, or
         // the editor, which also takes Ctrl+P (its file finder) and Alt+Up and
         // Alt+Down (moving lines, as in VS Code).
-        reservedShortcuts: root.editor ? ["Alt+E", "Ctrl+Shift+O", "F1", "Ctrl+Q"]
+        reservedShortcuts: root.shell ? ["Alt+E", "Ctrl+;", "Ctrl+W", "Ctrl+Shift+O", "F1", "Ctrl+Q"]
+                         : root.editor ? ["Alt+E", "Ctrl+;", "Ctrl+Shift+O", "F1", "Ctrl+Q"]
                                        : ["Alt+Up", "Alt+Down", "Alt+E", "Ctrl+P", "Ctrl+Shift+O", "F1", "Ctrl+Q"]
         extendedKeys: root.editor
         onFinished: root.detached()

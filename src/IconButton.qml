@@ -9,6 +9,8 @@ Rectangle {
     property string icon: ""
     property string label: ""
     property color tint: theme.foreground
+    // A tint change fades rather than flips (the view switch's segments).
+    Behavior on tint { ColorAnimation { duration: 160; easing.type: Easing.OutCubic } }
     property string hint: ""
     property string shortcut: ""
     property bool busy: false
@@ -51,17 +53,23 @@ Rectangle {
 
     Item {
         id: content
+        // Glyph and label side by side: the glyph in a fixed box, so a
+        // spinner takes only its place and the label stays put.
+        readonly property bool both: button.icon !== "" && button.label !== ""
+        readonly property real box: 16
         anchors.centerIn: parent
-        implicitWidth: button.label !== "" ? labelText.implicitWidth : glyph.implicitWidth
+        implicitWidth: both ? box + 8 + labelText.implicitWidth
+                     : button.label !== "" ? labelText.implicitWidth : glyph.implicitWidth
         implicitHeight: Math.max(glyph.implicitHeight, labelText.implicitHeight)
         width: implicitWidth
         height: implicitHeight
 
         Text {
             id: glyph
-            anchors.centerIn: parent
+            x: content.both ? (content.box - width) / 2 : (content.width - width) / 2
+            anchors.verticalCenter: parent.verticalCenter
             visible: button.icon !== "" || button.busy
-            text: button.busy ? "" : button.icon
+            text: button.busy ? "" : button.icon
             color: button.tint
             RotationAnimator on rotation {
                 running: button.busy
@@ -74,8 +82,9 @@ Rectangle {
         }
         Text {
             id: labelText
-            anchors.centerIn: parent
-            visible: button.label !== "" && !button.busy
+            x: content.both ? content.box + 8 : (content.width - width) / 2
+            anchors.verticalCenter: parent.verticalCenter
+            visible: button.label !== "" && (!button.busy || content.both)
             text: button.label
             color: button.tint
         }

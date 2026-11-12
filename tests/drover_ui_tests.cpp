@@ -58,7 +58,11 @@ case "$1 $2" in
   "workspace list") cat '%1/ws.json' ;;
   "agent list") cat '%1/agents.json' ;;
   "pane list") cat '%1/panes.json' ;;
-  "pane split") echo '{"result":{"pane":{"pane_id":"w1:p9","terminal_id":"term_9","tab_id":"w1:t1"}}}' ;;
+  "pane split")
+    case "$*" in
+      *down*) echo '{"result":{"pane":{"pane_id":"w1:p10","terminal_id":"term_10","tab_id":"w1:t1"}}}' ;;
+      *) echo '{"result":{"pane":{"pane_id":"w1:p9","terminal_id":"term_9","tab_id":"w1:t1"}}}' ;;
+    esac ;;
   "terminal attach")
     trap 'echo "detached $3" >> "%1/log"; exit 0' HUP TERM INT
     stty raw -echo 2>/dev/null
@@ -473,10 +477,48 @@ private slots:
         QTest::keyClick(rig.window, Qt::Key_K, Qt::ControlModifier | Qt::ShiftModifier);
         QTRY_VERIFY(rig.log().contains("key 1b\nkey 5b\nkey 31\nkey 30\nkey 37\nkey 3b\nkey 36\nkey 75"));
 
-        // Alt+E again: back to the agent.
+        // Alt+E again: back to the agent, whose terminal stayed attached, as
+        // does the editor's, so switching back and forth is instant.
         QTest::keyClick(rig.window, Qt::Key_E, Qt::AltModifier);
         QTRY_VERIFY(!rig.backend->editing());
-        QTRY_COMPARE(rig.log().count("terminal attach term_1"), 2);
+        QTest::keyClick(rig.window, Qt::Key_E, Qt::AltModifier);
+        QTRY_VERIFY(rig.backend->editing());
+        QTest::qWait(300);
+        QCOMPARE(rig.log().count("terminal attach term_1"), 1);
+        QCOMPARE(rig.log().count("terminal attach term_9"), 1);
+        QCOMPARE(rig.log().count("pane split"), 1);
+    }
+
+    void ctrlSemicolonOpensATerminalBelowTheEditor()
+    {
+        Rig rig(agents("working", "idle"));
+        rig.backend->setEditor("sh");
+        rig.expand();
+        QTest::keyClick(rig.window, Qt::Key_E, Qt::AltModifier);
+        QTRY_VERIFY(rig.backend->editing());
+        QTest::keyClick(rig.window, Qt::Key_Semicolon, Qt::ControlModifier);
+        QTRY_VERIFY(rig.backend->shellShown());
+        QVERIFY(rig.log().contains("pane split w1:p9 --direction down --cwd /a --no-focus"));
+        QVERIFY(rig.log().contains("pane rename w1:p10 shell"));
+        QTRY_VERIFY(rig.log().contains("terminal attach term_10"));
+        auto *shell = rig.find("shellTerminal");
+        QVERIFY(shell);
+        QTRY_VERIFY(rig.find("panel")->property("shellFocused").toBool());
+
+        // Ctrl+; hides it and gives the editor the keyboard; again shows it.
+        QTest::keyClick(rig.window, Qt::Key_Semicolon, Qt::ControlModifier);
+        QTRY_VERIFY(!rig.backend->shellShown());
+        QVERIFY(!shell->isVisible());
+        QTest::keyClick(rig.window, Qt::Key_Semicolon, Qt::ControlModifier);
+        QTRY_VERIFY(rig.backend->shellShown());
+        QCOMPARE(rig.log().count("pane split w1:p9"), 1);
+
+        // Ctrl+W in it closes it for good.
+        QTRY_VERIFY(rig.find("panel")->property("shellFocused").toBool());
+        QTest::keyClick(rig.window, Qt::Key_W, Qt::ControlModifier);
+        QTRY_VERIFY(rig.log().contains("pane close w1:p10"));
+        QVERIFY(!rig.backend->shellShown());
+        QCOMPARE(rig.backend->shellTerminal(), QString());
     }
 
     void anEditorAlreadyInTheTabIsReused()

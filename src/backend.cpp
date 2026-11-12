@@ -44,10 +44,13 @@ Backend::Backend(const QString &herdr, const QString &hyprctl, QObject *parent)
 
     // Another agent, or none: the panel shows the agent again.
     connect(this, &Backend::selectedChanged, this, [this] {
-        if (m_editing) {
+        if (m_editing || !m_editorTerminal.isEmpty()) {
             m_editing = false;
+            m_editorPane.clear();
+            m_editorTerminal.clear();
             emit editorChanged();
         }
+        shellClosed();
     });
 
     m_noticeTimer.setSingleShot(true);
@@ -363,31 +366,33 @@ QString Backend::readEditor(const QString &configFile) {
     return QStringLiteral("fresh");
 }
 
-void Backend::showEditor(const QString &terminalId) {
-    setBusy({});
-    m_editorTerminal = terminalId;
-    m_editing = true;
-    emit editorChanged();
-}
-
 void Backend::editorClosed() {
-    if (!m_editing)
+    if (!m_editing && m_editorTerminal.isEmpty())
         return;
     m_editing = false;
+    m_editorPane.clear();
     m_editorTerminal.clear();
     emit editorChanged();
+    // Its terminal stays in herdr; it is found again with the next editor.
+    shellClosed();
 }
 
-// The editor is the pane labelled "editor" in the agent's tab, looked up
-// each time, so it survives a drover restart and is gone once it quits. A
-// tab without one gets it: split to the right of the agent, in its folder,
-// with the editor exec'd so the pane closes when the editor quits.
-void Backend::toggleEditor() {
-    if (m_editing) {
-        m_editing = false;
-        emit editorChanged();
+void Backend::shellClosed() {
+    if (!m_shellShown && m_shellTerminal.isEmpty())
         return;
-    }
+    m_shellShown = false;
+    m_shellPane.clear();
+    m_shellTerminal.clear();
+    emit shellChanged();
+}
+
+// The pane labelled `label` in the selected agent's tab, looked up each time,
+// so it survives a drover restart and is gone once it closes. A tab without
+// one gets it: `from` (the agent's pane, or the editor's) is split in the
+// agent's folder, and `command` runs in the new pane. `found` gets its pane
+// and terminal, unless another agent was picked meanwhile.
+void Backend::openBeside(const QString &label, const QString &from, const QString &direction, const QString &command,
+                         const std::function<void(const QString &, const QString &)> &found) {
     const int row = selectedIndex();
     if (row < 0 || !m_busy.isEmpty())
         return;
@@ -396,23 +401,25 @@ void Backend::toggleEditor() {
         setNotice(tr("herdr is not installed."), true);
         return;
     }
-    if (QStandardPaths::findExecutable(m_editor).isEmpty()) {
-        setNotice(tr("%1 is not installed.").arg(m_editor), true);
-        return;
-    }
     const Agent agent = m_model.agents().at(row);
-    setBusy("editor");
-    run(program, {"pane", "list"}, [this, program, agent](int code, const QByteArray &out, const QByteArray &err) {
+    const auto failed = [this, label](const QString &error) {
+        setBusy({});
+        setNotice((label == "editor" ? tr("Couldn't open the editor: %1") : tr("Couldn't open the terminal: %1")).arg(error), true);
+    };
+    const auto done = [this, agent, found](const QString &paneId, const QString &terminalId) {
+        setBusy({});
+        if (m_selected == agent.paneId)
+            found(paneId, terminalId);
+    };
+    setBusy(label);
+    run(program, {"pane", "list"}, [=, this](int code, const QByteArray &out, const QByteArray &err) {
         if (m_selected != agent.paneId) {
             setBusy({});
             return;
         }
         const QString error = commandError(out, err, code);
-        if (!error.isEmpty()) {
-            setBusy({});
-            setNotice(tr("Couldn't open the editor: %1").arg(error), true);
-            return;
-        }
+        if (!error.isEmpty())
+            return failed(error);
         const QJsonArray panes = QJsonDocument::fromJson(out).object().value("result").toObject().value("panes").toArray();
         QString tab = agent.tabId, cwd;
         for (const auto &value : panes) {
@@ -424,42 +431,83 @@ void Backend::toggleEditor() {
         }
         for (const auto &value : panes) {
             const auto pane = value.toObject();
-            if (pane.value("tab_id").toString() == tab && pane.value("label").toString() == "editor"
-                && pane.value("pane_id").toString() != agent.paneId) {
-                showEditor(pane.value("terminal_id").toString());
-                return;
-            }
+            if (!tab.isEmpty() && pane.value("tab_id").toString() == tab && pane.value("label").toString() == label
+                && pane.value("pane_id").toString() != agent.paneId)
+                return done(pane.value("pane_id").toString(), pane.value("terminal_id").toString());
         }
         if (cwd.isEmpty())
             cwd = agent.cwd.startsWith('~') ? QDir::homePath() + agent.cwd.mid(1) : agent.cwd;
-        run(program, {"pane", "split", agent.paneId, "--direction", "right", "--cwd", cwd, "--no-focus"},
-            [this, program](int code, const QByteArray &out, const QByteArray &err) {
+        run(program, {"pane", "split", from, "--direction", direction, "--cwd", cwd, "--no-focus"},
+            [=, this](int code, const QByteArray &out, const QByteArray &err) {
                 const QString error = commandError(out, err, code);
                 const auto pane = QJsonDocument::fromJson(out).object().value("result").toObject().value("pane").toObject();
                 const QString paneId = pane.value("pane_id").toString();
-                if (!error.isEmpty() || paneId.isEmpty()) {
-                    setBusy({});
-                    setNotice(tr("Couldn't open the editor: %1").arg(error.isEmpty() ? tr("herdr gave no pane.") : error), true);
-                    return;
-                }
+                if (!error.isEmpty() || paneId.isEmpty())
+                    return failed(error.isEmpty() ? tr("herdr gave no pane.") : error);
                 const QString terminalId = pane.value("terminal_id").toString();
-                run(program, {"pane", "rename", paneId, "editor"}, [](int, const QByteArray &, const QByteArray &) {});
-                run(program, {"pane", "run", paneId, "exec " + m_editor},
-                    [this, terminalId](int code, const QByteArray &out, const QByteArray &err) {
+                run(program, {"pane", "rename", paneId, label}, [](int, const QByteArray &, const QByteArray &) {});
+                if (command.isEmpty())
+                    return done(paneId, terminalId);
+                run(program, {"pane", "run", paneId, command},
+                    [=, this](int code, const QByteArray &out, const QByteArray &err) {
                         const QString error = commandError(out, err, code);
-                        if (!error.isEmpty()) {
-                            setBusy({});
-                            setNotice(tr("Couldn't start %1: %2").arg(m_editor, error), true);
-                            return;
-                        }
-                        showEditor(terminalId);
+                        if (!error.isEmpty())
+                            return failed(error);
+                        done(paneId, terminalId);
                     });
             });
     });
 }
 
-// An agent that ended takes its editor along: the pane labelled "editor" in
-// its tab closes, and so does the agent's own pane if only a shell is left in
+// The editor goes right of the agent, exec'd, so its pane closes when it quits.
+void Backend::toggleEditor() {
+    if (m_editing || !m_editorTerminal.isEmpty()) {
+        // Still attached from before: back and forth at once.
+        m_editing = !m_editing;
+        emit editorChanged();
+        return;
+    }
+    if (m_selected.isEmpty())
+        return;
+    if (QStandardPaths::findExecutable(m_editor).isEmpty()) {
+        setNotice(tr("%1 is not installed.").arg(m_editor), true);
+        return;
+    }
+    openBeside("editor", m_selected, "right", "exec " + m_editor, [this](const QString &pane, const QString &terminal) {
+        m_editorPane = pane;
+        m_editorTerminal = terminal;
+        m_editing = true;
+        emit editorChanged();
+    });
+}
+
+// The terminal goes below the editor, the full width of the editor's side.
+void Backend::toggleShell() {
+    if (!m_editing)
+        return;
+    if (m_shellShown || !m_shellTerminal.isEmpty()) {
+        m_shellShown = !m_shellShown;
+        emit shellChanged();
+        return;
+    }
+    openBeside("shell", m_editorPane, "down", QString(), [this](const QString &pane, const QString &terminal) {
+        m_shellPane = pane;
+        m_shellTerminal = terminal;
+        m_shellShown = true;
+        emit shellChanged();
+    });
+}
+
+void Backend::closeShell() {
+    if (m_shellPane.isEmpty())
+        return;
+    if (const QString program = herdr(); !program.isEmpty())
+        run(program, {"pane", "close", m_shellPane}, [](int, const QByteArray &, const QByteArray &) {});
+    shellClosed();
+}
+
+// An agent that ended takes its editor along: the panes labelled "editor"
+// and "shell" in its tab close, and so does the agent's own pane if only a shell is left in
 // it (herdr names no agent there). Tabs without an editor stay as they are.
 void Backend::closeEditorsOf(const QList<Agent> &gone) {
     const QString program = herdr();
@@ -471,6 +519,7 @@ void Backend::closeEditorsOf(const QList<Agent> &gone) {
         const QJsonArray panes = QJsonDocument::fromJson(out).object().value("result").toObject().value("panes").toArray();
         for (const auto &agent : gone) {
             QJsonObject own, editor;
+            QStringList shells;
             for (const auto &value : panes) {
                 const auto pane = value.toObject();
                 if (pane.value("pane_id").toString() == agent.paneId)
@@ -479,12 +528,17 @@ void Backend::closeEditorsOf(const QList<Agent> &gone) {
             const QString tab = !own.isEmpty() ? own.value("tab_id").toString() : agent.tabId;
             for (const auto &value : panes) {
                 const auto pane = value.toObject();
-                if (!tab.isEmpty() && pane.value("tab_id").toString() == tab && pane.value("label").toString() == "editor"
-                    && pane.value("pane_id").toString() != agent.paneId)
+                if (tab.isEmpty() || pane.value("tab_id").toString() != tab || pane.value("pane_id").toString() == agent.paneId)
+                    continue;
+                if (pane.value("label").toString() == "editor")
                     editor = pane;
+                else if (pane.value("label").toString() == "shell")
+                    shells << pane.value("pane_id").toString();
             }
             if (editor.isEmpty())
                 continue;
+            for (const QString &shell : shells)
+                run(program, {"pane", "close", shell}, [](int, const QByteArray &, const QByteArray &) {});
             run(program, {"pane", "close", editor.value("pane_id").toString()}, [](int, const QByteArray &, const QByteArray &) {});
             if (!own.isEmpty() && !own.contains("agent"))
                 run(program, {"pane", "close", agent.paneId}, [](int, const QByteArray &, const QByteArray &) {});

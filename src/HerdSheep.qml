@@ -146,7 +146,7 @@ Item {
 
     function drawSheep(ctx, sheep, t) {
         const color = sheep.status === "working" ? theme.accent : sheep.status === "blocked" ? theme.urgent
-                    : sheep.status === "done" ? theme.success : theme.muted
+                    : sheep.status === "done" ? theme.success : Qt.alpha(theme.foreground, 0.45)
         const pose = sheep.pose === "walk" ? (Math.floor(sheep.legT) % 2 ? "walk2" : "walk1") : sheep.pose
         const sprite = sprites[pose]
         const x0 = Math.round(sheep.x), y0 = 10 - Math.round(sheep.lift)
