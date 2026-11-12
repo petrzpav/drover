@@ -308,6 +308,29 @@ private slots:
         QVERIFY(!rig.log().contains("tab create"));
     }
 
+    void theHerdHasABarPerAgentAndMarksWhoFinished()
+    {
+        Rig rig(agents("working", "blocked"));
+        auto *label = rig.find("herdLabel");
+        QVERIFY(label);
+        QCOMPARE(label->property("text").toString(), QString("1 asks you"));
+        int bars = 0;
+        std::function<void(QQuickItem *)> count = [&](QQuickItem *item) {
+            bars += item->objectName() == "herdBar";
+            for (auto *child : item->childItems())
+                count(child);
+        };
+        count(rig.window->contentItem());
+        QCOMPARE(bars, 2);
+
+        // The first agent finishes: its bar shoots up, then settles low.
+        write(rig.dir.filePath("agents.json"), agents("done", "idle"));
+        QTRY_COMPARE(label->property("text").toString(), QString("1 done"));
+        auto *bar = rig.find("herdBar");
+        QTRY_VERIFY_WITH_TIMEOUT(bar->property("level").toReal() > 1.0, 2000);
+        QTRY_COMPARE_WITH_TIMEOUT(bar->property("level").toReal(), 0.45, 3000);
+    }
+
     void thePanelNeverCoversThePill()
     {
         Rig rig(agents("idle", "idle"));

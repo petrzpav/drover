@@ -4,6 +4,18 @@
     "few": "%n agenti",
     "other": "%n agentů"
   },
+  "%n asks you": {
+    "one": "%n se ptá",
+    "few": "%n se ptají",
+    "other": "%n se ptá"
+  },
+  "%n done": "%n hotovo",
+  "%n working": {
+    "one": "%n pracuje",
+    "few": "%n pracují",
+    "other": "%n pracuje"
+  },
+  "all idle": "klid",
   "Any key": "Jakákoli klávesa",
   "asks you": "ptá se",
   "Attach again": "Znovu připojit",

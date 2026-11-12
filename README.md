@@ -1,8 +1,10 @@
 # Drover
 
 A floating indicator of your [herdr](https://herdr.dev) agents, on every
-Omarchy workspace. The pill counts the agents that are working, asking you
-something, done, and idle; drag it wherever you like, and it stays there.
+Omarchy workspace. The pill is a small live herd, one bar per agent: working
+bars bounce, a bar that just finished shoots up and settles green, one that
+asks you something blinks red, idle ones lie low, and beside them the one
+state that matters most. Drag it wherever you like, and it stays there.
 Click it and a large panel opens beside it: every agent of the local herdr
 session on the left, and on the right a real terminal attached to the selected
 agent, where you work with it exactly as in herdr (Shift+Tab, Esc, Ctrl+C, its

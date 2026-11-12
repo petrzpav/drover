@@ -1,3 +1,4 @@
 {
-  "%n agents": { "one": "%n agent", "other": "%n agents" }
+  "%n agents": { "one": "%n agent", "other": "%n agents" },
+  "%n asks you": { "one": "%n asks you", "other": "%n ask you" }
 }
