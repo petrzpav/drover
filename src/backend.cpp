@@ -16,13 +16,22 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocalSocket>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QSet>
 #include <QStandardPaths>
 
 Backend::Backend(const QString &herdr, const QString &hyprctl, QObject *parent)
-    : QObject(parent), m_herdrOverride(herdr), m_hyprctlOverride(hyprctl),
-      m_agentKind(readAgentKind(QDir::homePath() + "/.config/drover/config")) {
+    : QObject(parent), m_herdrOverride(herdr), m_hyprctlOverride(hyprctl), m_agentKind("claude") {
+    // A fake herdr (the tests) gets no real config and no real herdr socket,
+    // so nothing it does can reach the user's session.
+    if (herdr.isEmpty()) {
+        const QString config = QDir::homePath() + "/.config/drover/config";
+        m_agentKind = readAgentKind(config);
+        m_closeAction = readCloseAction(config);
+        m_socketPath = qEnvironmentVariable("HERDR_SOCKET_PATH", QDir::homePath() + "/.config/herdr/herdr.sock");
+    }
     // A listing takes a few milliseconds, so a one-second poll is cheap and far
     // simpler than herdr's per-pane event subscriptions.
     m_poll.setInterval(1000);
@@ -150,6 +159,7 @@ void Backend::refresh() {
             setError({});
             applyAgents(agents);
             updateWorkspaceList();
+            nameStartedAgents(agents);
         });
     });
 }
@@ -302,6 +312,18 @@ QString Backend::readAgentKind(const QString &configFile) {
     return QStringLiteral("claude");
 }
 
+QString Backend::readCloseAction(const QString &configFile) {
+    QFile file(configFile);
+    if (file.open(QIODevice::ReadOnly)) {
+        static const QRegularExpression line(R"re(^\s*close_action\s*=\s*"?([A-Za-z0-9_.-]+\.[A-Za-z0-9_-]+)"?\s*$)re",
+                                             QRegularExpression::MultilineOption);
+        const auto match = line.match(QString::fromUtf8(file.readAll()));
+        if (match.hasMatch())
+            return match.captured(1);
+    }
+    return {};
+}
+
 QString Backend::agentName(const QString &label, const QString &suffix) {
     QString slug;
     for (const QChar c : label.toLower()) {
@@ -435,6 +457,8 @@ void Backend::chooseFolderAndCreate(const QString &text) {
     const QString start = workspace.value("cwd").toString();
     if (m_folderChooser)
         m_folderChooser(start, title, done);
+    else if (!m_herdrOverride.isEmpty())
+        done({}, tr("no folder picker in tests."));
     else
         choosePortalFolder(start, title, done);
 }
@@ -495,6 +519,10 @@ void Backend::closeWorkspace(const QString &workspaceId) {
     }
     const QString label = m_workspaces.value(workspaceId, workspaceId);
     setBusy("close");
+    if (!m_closeAction.isEmpty()) {
+        invokeCloseAction(workspaceId, label);
+        return;
+    }
     run(program, {"workspace", "close", workspaceId}, [this, label](int code, const QByteArray &out, const QByteArray &err) {
         setBusy({});
         const QString error = commandError(out, err, code);
@@ -507,15 +535,109 @@ void Backend::closeWorkspace(const QString &workspaceId) {
     });
 }
 
+// herdr's CLI invokes a plugin action only for whatever is focused; its
+// socket API takes the workspace as the action's context.
+void Backend::invokeCloseAction(const QString &workspaceId, const QString &label) {
+    const int dot = m_closeAction.lastIndexOf('.');
+    const QJsonObject request{
+        {"id", "drover:close"},
+        {"method", "plugin.action.invoke"},
+        {"params", QJsonObject{{"plugin_id", m_closeAction.left(dot)},
+                               {"action_id", m_closeAction.mid(dot + 1)},
+                               {"context", QJsonObject{{"workspace_id", workspaceId}, {"workspace_label", label}}}}}};
+
+    auto *socket = new QLocalSocket(this);
+    auto *timer = new QTimer(socket);
+    timer->setSingleShot(true);
+    auto finish = [this, socket, label](const QString &error) {
+        if (socket->property("done").toBool())
+            return;
+        socket->setProperty("done", true);
+        socket->deleteLater();
+        setBusy({});
+        if (!error.isEmpty()) {
+            setNotice(tr("Couldn't close %1: %2").arg(label, error), true);
+            return;
+        }
+        setNotice(tr("Closed %1.").arg(label), false);
+        refresh();
+    };
+    connect(timer, &QTimer::timeout, socket, [finish] { finish(tr("no answer within a few seconds.")); });
+    connect(socket, &QLocalSocket::errorOccurred, socket, [socket, finish](QLocalSocket::LocalSocketError) {
+        finish(tr("herdr's socket: %1").arg(socket->errorString()));
+    });
+    connect(socket, &QLocalSocket::connected, socket, [socket, request] {
+        socket->write(QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n');
+    });
+    connect(socket, &QLocalSocket::readyRead, socket, [socket, finish] {
+        if (!socket->canReadLine())
+            return;
+        const QByteArray line = socket->readLine();
+        const auto error = errorObject(line, {});
+        finish(error.isEmpty() ? QString() : error.value("message").toString(error.value("code").toString()));
+    });
+    timer->start(m_timeout);
+    socket->connectToServer(m_socketPath);
+}
+
+bool Backend::meaningfulTitle(const QString &title, const QString &kind) {
+    const QString text = title.trimmed().toLower();
+    if (text.isEmpty() || text.startsWith('~') || text.startsWith('/') || text.contains('@'))
+        return false;
+    // What agents call their terminal before they know the task.
+    static const QStringList generic{"claude", "claude code", "codex", "opencode", "gemini", "gemini cli",
+                                     "amp", "cursor", "cursor agent", "pi", "droid", "aider"};
+    return text != kind.toLower() && !generic.contains(text);
+}
+
+QString Backend::tabLabel(const QString &title) {
+    const QString text = title.simplified();
+    return text.size() <= 40 ? text : text.left(39).trimmed() + QChar(0x2026);
+}
+
+// Agents drover started carry a made-up name (work-81t). Once the agent
+// titles its terminal after the first question, the tab takes that title
+// and the name goes, so herdr and drover show the title, as for any agent.
+void Backend::nameStartedAgents(const QList<Agent> &agents) {
+    if (m_unnamed.isEmpty())
+        return;
+    QSet<QString> live;
+    for (const auto &agent : agents) {
+        live.insert(agent.paneId);
+        if (m_unnamed.contains(agent.paneId))
+            m_unnamedSeen.insert(agent.paneId);
+        const auto given = m_unnamed.constFind(agent.paneId);
+        if (given == m_unnamed.constEnd() || !meaningfulTitle(agent.terminalTitle, agent.kind))
+            continue;
+        const QString name = *given;
+        m_unnamed.remove(agent.paneId);
+        m_unnamedSeen.remove(agent.paneId);
+        if (!agent.tabId.isEmpty())
+            run(herdr(), {"tab", "rename", agent.tabId, tabLabel(agent.terminalTitle)}, [](int, auto, auto) {});
+        // Only the name drover gave goes; one the user chose stays.
+        if (agent.name == name)
+            run(herdr(), {"agent", "rename", agent.paneId, "--clear"}, [this](int, auto, auto) { refresh(); });
+    }
+    // An agent just started may not be listed yet; one listed and then gone
+    // is forgotten.
+    for (auto it = m_unnamed.begin(); it != m_unnamed.end();) {
+        if (!live.contains(it.key()) && m_unnamedSeen.remove(it.key()))
+            it = m_unnamed.erase(it);
+        else
+            ++it;
+    }
+}
+
 void Backend::launchAgent(const QString &pane, const QString &label, int attempt) {
     const QString name = agentName(label, QString::number(QDateTime::currentMSecsSinceEpoch() % 46656, 36));
     // herdr waits until the agent is ready for input, up to 30 seconds.
     run(herdr(), {"agent", "start", name, "--kind", m_agentKind, "--pane", pane},
-        [this, pane, label, attempt](int code, const QByteArray &out, const QByteArray &err) {
+        [this, pane, label, name, attempt](int code, const QByteArray &out, const QByteArray &err) {
             const QString error = commandError(out, err, code);
             // Blocked at startup (a trust prompt, say) still means started:
             // its question shows in the panel.
             if (error.isEmpty() || errorCode(out, err) == "agent_not_ready") {
+                m_unnamed.insert(pane, name);
                 setBusy({});
                 setNotice(tr("Started %1 in %2.").arg(m_agentKind, label), false);
                 m_pendingSelect = pane;
@@ -562,6 +684,9 @@ QList<Agent> Backend::parseAgents(const QByteArray &json, const QHash<QString, Q
         agent.kind = object.value("agent").toString();
         agent.status = object.value("agent_status").toString("unknown");
         agent.terminalId = object.value("terminal_id").toString();
+        agent.tabId = object.value("tab_id").toString();
+        agent.name = object.value("name").toString();
+        agent.terminalTitle = object.value("terminal_title_stripped").toString().trimmed();
         agent.workspaceId = object.value("workspace_id").toString();
         agent.workspace = workspaces.value(agent.workspaceId, agent.workspaceId);
         QString cwd = object.value("foreground_cwd").toString(object.value("cwd").toString());

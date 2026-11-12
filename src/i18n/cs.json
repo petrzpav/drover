@@ -36,6 +36,7 @@
   "herdr is not installed.": "herdr není nainstalovaný.",
   "herdr shows the agent, but hyprctl isn't available to bring its window forward.": "herdr agenta ukazuje, ale bez hyprctl nejde jeho okno přenést dopředu.",
   "herdr unavailable": "herdr nedostupný",
+  "herdr's socket: %1": "socket herdr: %1",
   "herdr: %1": "herdr: %1",
   "idle": "nečinný",
   "In the picker: close a workspace (press twice)": "Ve výběru: zavřít workspace (stiskněte dvakrát)",

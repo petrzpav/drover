@@ -14,6 +14,9 @@ struct Agent {
     QString workspaceId;
     QString terminalId; // herdr's id of the pane's terminal, for attaching
     QString cwd;        // with the home directory shortened to ~
+    QString tabId;
+    QString name;          // given with `herdr agent start` or `rename`
+    QString terminalTitle; // what the agent itself calls its terminal
 
     bool operator==(const Agent &other) const = default;
 };

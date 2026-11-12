@@ -75,6 +75,14 @@ picker: Enter creates the workspace there, named after the folder.
 `Ctrl+D` (or Enter, or click) runs `herdr workspace close`, which ends every
 pane and agent in it. Esc, typing, or moving to another row takes the mark back.
 
+If a herdr plugin brings closed workspaces back unless its own action closed
+them, name that action in the config; drover then runs it for the workspace
+(over herdr's socket, `plugin.action.invoke`) instead of `herdr workspace close`:
+
+```ini
+close_action = petrzpav.persistent-spaces.delete
+```
+
 Hyprland setups that bind `Ctrl+P` globally swallow the key before drover
 sees it, since a layer surface with the keyboard is never Hyprland's active
 window. Such a binding can hand the key on while drover's panel has the

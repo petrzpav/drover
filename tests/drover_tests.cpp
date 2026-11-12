@@ -2,6 +2,10 @@
 #include <QFile>
 #include <QTemporaryDir>
 #include <QSignalSpy>
+#include <QLocalServer>
+#include <QLocalSocket>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QtTest>
 
 #include "agentmodel.h"
@@ -347,6 +351,62 @@ echo ok
         QCOMPARE(backend.notice(), QString("Closed garden."));
     }
 
+    void readsTheCloseAction()
+    {
+        QTemporaryDir dir;
+        QCOMPARE(Backend::readCloseAction(dir.filePath("config")), QString());
+        write(dir.filePath("config"), "agent = codex\nclose_action = petrzpav.persistent-spaces.delete\n");
+        QCOMPARE(Backend::readCloseAction(dir.filePath("config")), QString("petrzpav.persistent-spaces.delete"));
+        write(dir.filePath("config"), "close_action = delete\n"); // no plugin id
+        QCOMPARE(Backend::readCloseAction(dir.filePath("config")), QString());
+    }
+
+    void closesAWorkspaceThroughAPluginAction()
+    {
+        QTemporaryDir dir;
+        Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
+        QTRY_COMPARE(backend.workspaces().size(), 1);
+        QLocalServer server;
+        QVERIFY(server.listen(dir.filePath("herdr.sock")));
+        QJsonObject request;
+        QByteArray answer = R"({"id":"drover:close","result":{"type":"plugin_action_invoked"}})";
+        connect(&server, &QLocalServer::newConnection, this, [&] {
+            auto *client = server.nextPendingConnection();
+            connect(client, &QLocalSocket::readyRead, client, [&, client] {
+                if (!client->canReadLine())
+                    return;
+                request = QJsonDocument::fromJson(client->readLine()).object();
+                client->write(answer + "\n");
+                client->flush();
+            });
+        });
+        backend.setSocketPath(dir.filePath("herdr.sock"));
+        backend.setCloseAction("petrzpav.persistent-spaces.delete");
+
+        backend.closeWorkspace("w1");
+        QCOMPARE(backend.busy(), QString("close"));
+        QTRY_COMPARE(backend.busy(), QString());
+        QCOMPARE(request.value("method").toString(), QString("plugin.action.invoke"));
+        const auto params = request.value("params").toObject();
+        QCOMPARE(params.value("plugin_id").toString(), QString("petrzpav.persistent-spaces"));
+        QCOMPARE(params.value("action_id").toString(), QString("delete"));
+        QCOMPARE(params.value("context").toObject().value("workspace_id").toString(), QString("w1"));
+        QCOMPARE(backend.notice(), QString("Closed garden."));
+        QVERIFY(!log(dir).contains("workspace close"));
+
+        answer = R"({"id":"drover:close","error":{"code":"plugin_action_not_found","message":"no such action"}})";
+        backend.closeWorkspace("w1");
+        QTRY_COMPARE(backend.busy(), QString());
+        QVERIFY(backend.noticeIsError());
+        QCOMPARE(backend.notice(), QString("Couldn't close garden: no such action"));
+
+        server.close();
+        backend.closeWorkspace("w1");
+        QTRY_COMPARE(backend.busy(), QString());
+        QVERIFY(backend.noticeIsError());
+        QVERIFY(backend.notice().startsWith("Couldn't close garden: herdr's socket:"));
+    }
+
     void saysWhenAWorkspaceCantBeClosed()
     {
         QTemporaryDir dir;
@@ -358,6 +418,49 @@ echo ok
         QTRY_COMPARE(backend.busy(), QString());
         QVERIFY(backend.noticeIsError());
         QCOMPARE(backend.notice(), QString("Couldn't close garden: workspace w1 not found"));
+    }
+
+    void namesTheTabAfterTheFirstQuestion()
+    {
+        QTemporaryDir dir;
+        Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
+        backend.setAgentKind("claude");
+        QTRY_COMPARE(backend.workspaces().size(), 1);
+        write(dir.filePath("pane-list.out"), R"({"result":{"panes":[]}})");
+        write(dir.filePath("tab-create.out"), R"({"result":{"root_pane":{"pane_id":"w1:p7"}}})");
+        backend.startAgent("w1");
+        QTRY_COMPARE(backend.busy(), QString());
+        const QString name = log(dir).section("agent start ", 1).section(' ', 0, 0);
+        QVERIFY(name.startsWith("garden-"));
+
+        const auto agentsWith = [&](const QString &title) {
+            return QString(R"({"result":{"agents":[{"agent":"claude","agent_status":"idle","cwd":"/g","pane_id":"w1:p7",
+                "tab_id":"w1:t2","name":"%1","terminal_id":"term_7","terminal_title_stripped":"%2","workspace_id":"w1"}]}})")
+                .arg(name, title).toUtf8();
+        };
+        // Before the first question the title only says which agent it is.
+        write(dir.filePath("agents.json"), agentsWith("Claude Code"));
+        QTest::qWait(1500);
+        QVERIFY(!log(dir).contains("rename"));
+
+        write(dir.filePath("agents.json"), agentsWith("Fix the fence by the old apple tree before the spring rains"));
+        QTRY_VERIFY(log(dir).contains("agent rename w1:p7 --clear\n"));
+        QVERIFY(log(dir).contains(QString("tab rename w1:t2 Fix the fence by the old apple tree bef") + QChar(0x2026) + "\n"));
+        // Only once.
+        QTest::qWait(1500);
+        QCOMPARE(log(dir).count("tab rename"), 1);
+    }
+
+    void tellsMeaningfulTitles()
+    {
+        QVERIFY(Backend::meaningfulTitle("Fix the gate", "claude"));
+        QVERIFY(!Backend::meaningfulTitle("Claude Code", "claude"));
+        QVERIFY(!Backend::meaningfulTitle("codex", "codex"));
+        QVERIFY(!Backend::meaningfulTitle("  ", "claude"));
+        QVERIFY(!Backend::meaningfulTitle("~/Work/drover", "claude"));
+        QVERIFY(!Backend::meaningfulTitle("ann@garden: /srv", "claude"));
+        QCOMPARE(Backend::tabLabel("  Fix   the gate "), QString("Fix the gate"));
+        QCOMPARE(Backend::tabLabel(QString(45, 'a')).size(), 40);
     }
 
     void namesAgentsTheWayHerdrWants()

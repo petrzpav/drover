@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QHash>
+#include <QSet>
 #include <QObject>
 #include <QStringList>
 #include <QTimer>
@@ -76,6 +77,13 @@ public:
     QString agentKind() const { return m_agentKind; }
     void setAgentKind(const QString &kind) { m_agentKind = kind; }
     static QString readAgentKind(const QString &configFile);
+    // A herdr plugin action that closes a workspace instead of `herdr workspace
+    // close`, as plugin_id.action_id (close_action = ... in the config): for
+    // plugins that bring closed workspaces back unless their own action did it.
+    static QString readCloseAction(const QString &configFile);
+    void setCloseAction(const QString &action) { m_closeAction = action; }
+    // herdr's socket, for what its CLI can't do (an action for a given workspace).
+    void setSocketPath(const QString &path) { m_socketPath = path; }
     // A name herdr accepts for an agent in this workspace.
     static QString agentName(const QString &label, const QString &suffix);
 
@@ -114,6 +122,11 @@ public:
     static QHash<QString, QString> parseWorkspaces(const QByteArray &json);
     static QList<Agent> parseAgents(const QByteArray &json, const QHash<QString, QString> &workspaces,
                                     const QString &home, QString *error = nullptr);
+    // Whether an agent's terminal title says what it works on, not just
+    // which agent it is or where it runs.
+    static bool meaningfulTitle(const QString &title, const QString &kind);
+    // A terminal title shortened for a tab.
+    static QString tabLabel(const QString &title);
     static QString commandError(const QByteArray &out, const QByteArray &err, int code);
     static QString errorCode(const QByteArray &out, const QByteArray &err);
 
@@ -140,11 +153,13 @@ private:
     void run(const QString &program, const QStringList &arguments, Done done, int timeout = -1);
     void launchAgent(const QString &pane, const QString &label, int attempt);
     void updateWorkspaceList();
+    void nameStartedAgents(const QList<Agent> &agents);
     void setError(const QString &error);
     void setNotice(const QString &notice, bool isError);
     void setBusy(const QString &busy);
     void applyAgents(const QList<Agent> &agents);
     void raiseHerdr();
+    void invokeCloseAction(const QString &workspaceId, const QString &label);
     void choosePortalFolder(const QString &start, const QString &title,
                             std::function<void(const QString &, const QString &)> done);
     QString herdr() const;
@@ -156,10 +171,14 @@ private:
     QHash<QString, QString> m_workspaces;
     QString m_error, m_selected, m_notice, m_busy;
     QVariantList m_workspaceList;
-    QString m_agentKind, m_pendingSelect;
+    QString m_agentKind, m_pendingSelect, m_closeAction, m_socketPath;
     bool m_noticeIsError = false, m_listing = false;
     bool m_selectionLost = false;
     int m_timeout = 4000;
     QTimer m_poll, m_noticeTimer;
+    // Agents drover started, by pane, with the name it gave them, until
+    // their tab is named after their task.
+    QHash<QString, QString> m_unnamed;
+    QSet<QString> m_unnamedSeen;
     FolderChooser m_folderChooser;
 };
