@@ -64,15 +64,17 @@ QByteArray FreshTheme::build(const Theme &theme) {
         magenta(palette.at(5)), cyan(palette.at(6));
     const QColor orange = named("orange", mix(red, yellow, 0.5));
     const bool light = bg.lightnessF() > 0.5;
-    // Chrome sits a step darker (or, on a light theme, lighter) than the text.
-    const QColor chrome = named("dark_background", mix(bg, Qt::black, light ? 0.06 : 0.18));
+    // The bars sit on the editor's own background, as in drover's panel, set
+    // apart by hairlines in the panel's line color.
+    const QColor chrome = bg;
+    const QColor hairline = mix(bg, fg, 0.12);
     const QColor raised = named("lighter_background", mix(bg, fg, 0.08));
     const QColor selection = named("selection", named("selection_background", mix(bg, accent, 0.28)));
     const QColor dim = named("dark_foreground", mix(fg, bg, 0.4));
     const QColor line = mix(bg, fg, 0.05);
 
     QJsonObject editor{
-        {"bg", rgb(bg)}, {"fg", rgb(fg)}, {"cursor", rgb(accent)}, {"inactive_cursor", rgb(muted)},
+        {"bg", rgb(bg)}, {"fg", rgb(fg)}, {"cursor", rgb(fg)}, {"inactive_cursor", rgb(muted)},
         {"selection_bg", rgb(selection)}, {"current_line_bg", rgb(line)},
         {"line_number_fg", rgb(muted)}, {"line_number_bg", rgb(bg)}, {"after_eof_bg", rgb(bg)},
         {"ruler_bg", rgb(raised)}, {"indentation_guide_fg", rgb(mix(bg, fg, 0.12))},
@@ -95,10 +97,10 @@ QByteArray FreshTheme::build(const Theme &theme) {
         {"menu_bg", rgb(chrome)}, {"menu_fg", rgb(dim)}, {"menu_active_bg", rgb(raised)}, {"menu_active_fg", rgb(fg)},
         {"menu_dropdown_bg", rgb(chrome)}, {"menu_dropdown_fg", rgb(fg)},
         {"menu_highlight_bg", rgb(selection)}, {"menu_highlight_fg", rgb(fg)},
-        {"menu_border_fg", rgb(raised)}, {"menu_separator_fg", rgb(raised)},
+        {"menu_border_fg", rgb(hairline)}, {"menu_separator_fg", rgb(hairline)},
         {"menu_hover_bg", rgb(raised)}, {"menu_hover_fg", rgb(fg)}, {"menu_disabled_fg", rgb(muted)},
         {"status_bar_fg", rgb(dim)}, {"status_bar_bg", rgb(chrome)},
-        {"status_palette_fg", rgb(chrome)}, {"status_palette_bg", rgb(accent)},
+        {"status_palette_fg", rgb(fg)}, {"status_palette_bg", rgb(selection)},
         {"status_separator_fg", rgb(raised)}, {"status_separator_bg", rgb(chrome)},
         {"prompt_fg", rgb(fg)}, {"prompt_bg", rgb(chrome)},
         {"prompt_selection_fg", rgb(fg)}, {"prompt_selection_bg", rgb(selection)},
@@ -106,10 +108,10 @@ QByteArray FreshTheme::build(const Theme &theme) {
         {"popup_selection_bg", rgb(selection)}, {"popup_selection_fg", rgb(fg)},
         {"text_input_selection_bg", rgb(selection)},
         {"suggestion_bg", rgb(chrome)}, {"suggestion_fg", rgb(fg)}, {"suggestion_selected_bg", rgb(selection)},
-        {"help_bg", rgb(chrome)}, {"help_fg", rgb(fg)}, {"help_key_fg", rgb(accent)},
-        {"help_separator_fg", rgb(raised)}, {"help_indicator_fg", rgb(chrome)}, {"help_indicator_bg", rgb(accent)},
+        {"help_bg", rgb(chrome)}, {"help_fg", rgb(fg)}, {"help_key_fg", rgb(fg)},
+        {"help_separator_fg", rgb(raised)}, {"help_indicator_fg", rgb(fg)}, {"help_indicator_bg", rgb(selection)},
         {"inline_code_bg", rgb(raised)},
-        {"split_separator_fg", rgb(raised)}, {"split_separator_hover_fg", rgb(border)},
+        {"split_separator_fg", rgb(hairline)}, {"split_separator_hover_fg", rgb(border)},
         {"status_lsp_on_fg", rgb(green)}, {"status_lsp_on_bg", rgb(chrome)},
         {"status_lsp_actionable_fg", rgb(fg)}, {"status_lsp_actionable_bg", rgb(raised)},
         {"status_warning_indicator_fg", rgb(chrome)}, {"status_warning_indicator_bg", rgb(orange)},
@@ -126,9 +128,9 @@ QByteArray FreshTheme::build(const Theme &theme) {
         {"file_status_untracked_fg", rgb(green)}, {"file_status_conflicted_fg", rgb(red)},
     };
     const QJsonObject search{
-        {"match_bg", rgb(mix(bg, accent, 0.3))}, {"match_fg", rgb(fg)},
-        {"current_match_bg", rgb(accent)}, {"current_match_fg", rgb(bg)},
-        {"label_bg", rgb(accent)}, {"label_fg", rgb(bg)},
+        {"match_bg", rgb(mix(bg, selection, 0.6))}, {"match_fg", rgb(fg)},
+        {"current_match_bg", rgb(selection)}, {"current_match_fg", rgb(fg)},
+        {"label_bg", rgb(selection)}, {"label_fg", rgb(fg)},
     };
     const QJsonObject diagnostic{
         {"error_fg", rgb(red)}, {"error_bg", rgb(mix(bg, red, 0.12))},

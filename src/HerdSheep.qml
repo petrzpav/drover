@@ -184,12 +184,16 @@ Item {
         }
     }
 
-    Timer {
-        interval: 50
-        repeat: true
-        running: field.visible && backend.agents.count > 0
-        onTriggered: field.tick()
+    // The backend's clock, not a QML Timer, which would redraw the whole
+    // screen-sized surface every frame; it runs while there are sheep.
+    Connections {
+        target: backend.sheepClock
+        function onTimeout() { field.tick() }
     }
+    readonly property bool grazing: field.visible && backend.agents.count > 0
+    onGrazingChanged: grazing ? backend.sheepClock.start() : backend.sheepClock.stop()
+    Component.onCompleted: if (grazing) backend.sheepClock.start()
+    Component.onDestruction: backend.sheepClock.stop()
 
     Canvas {
         id: canvas

@@ -85,6 +85,8 @@ int main(int argc, char *argv[]) {
     app.setQuitOnLastWindowClosed(false);
 
     QQuickStyle::setStyle("Basic");
+    // The panel's text rasterized like the terminal's, not as distance fields.
+    QQuickWindow::setTextRenderType(QQuickWindow::NativeTextRendering);
 
     // All text in the terminal's font and size, like the agents' own screens.
     app.setFont(TerminalFont::read(QDir::homePath()));

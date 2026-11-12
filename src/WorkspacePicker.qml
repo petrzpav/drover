@@ -25,7 +25,11 @@ Rectangle {
     }
     readonly property var current: matches[list.currentIndex] ?? null
 
-    visible: open
+    // Fades in and out; it takes input only while open.
+    opacity: open ? 1 : 0
+    visible: open || opacity > 0
+    enabled: open
+    Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
     color: Qt.alpha(theme.background, 0.6)
 
     function show() {
@@ -256,7 +260,7 @@ Rectangle {
                             id: rowText
                             Layout.fillWidth: true
                             text: modelData.create ? qsTr("Create “%1”").arg(modelData.label) : modelData.label
-                            color: row.marked ? theme.urgent : current ? theme.accent : theme.foreground
+                            color: row.marked ? theme.urgent : theme.foreground
                             elide: Text.ElideRight
                         }
                         Text {

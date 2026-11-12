@@ -29,10 +29,12 @@ Item {
         id: terminal
         objectName: "agentTerminal"
         anchors.fill: parent
-        anchors.leftMargin: 16
-        anchors.topMargin: 6
-        anchors.rightMargin: 6
-        anchors.bottomMargin: 6
+        // The editor and its terminal fill their side to the edge, like the
+        // editor's own bars; the agent's text keeps a margin.
+        anchors.leftMargin: root.editor || root.shell ? 0 : 16
+        anchors.topMargin: root.editor || root.shell ? 0 : 6
+        anchors.rightMargin: root.editor || root.shell ? 0 : 6
+        anchors.bottomMargin: root.editor || root.shell ? 0 : 6
         font: Qt.application.font
         background: theme.background
         foreground: theme.foreground
@@ -41,10 +43,9 @@ Item {
         program: backend.herdrPath
         arguments: ["terminal", "attach", root.terminalId, "--takeover"]
         // drover's own shortcuts; every other key belongs to the agent, or
-        // the editor, which also takes Ctrl+P (its file finder) and Alt+Up and
-        // Alt+Down (moving lines, as in VS Code).
-        reservedShortcuts: root.shell ? ["Alt+E", "Ctrl+;", "Ctrl+W", "Ctrl+Shift+O", "F1", "Ctrl+Q"]
-                         : root.editor ? ["Alt+E", "Ctrl+;", "Ctrl+Shift+O", "F1", "Ctrl+Q"]
+        // the editor, which also takes Ctrl+P (its file finder).
+        reservedShortcuts: root.shell ? ["Alt+Up", "Alt+Down", "Alt+E", "Ctrl+;", "Ctrl+W", "Ctrl+Shift+O", "F1", "Ctrl+Q"]
+                         : root.editor ? ["Alt+Up", "Alt+Down", "Alt+E", "Ctrl+;", "Ctrl+Shift+O", "F1", "Ctrl+Q"]
                                        : ["Alt+Up", "Alt+Down", "Alt+E", "Ctrl+P", "Ctrl+Shift+O", "F1", "Ctrl+Q"]
         extendedKeys: root.editor && backend.editor === "fresh"
         doubleCtrlB: true

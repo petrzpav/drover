@@ -23,7 +23,8 @@ Rectangle {
 
     height: rowContent.implicitHeight + 18
     radius: theme.radius
-    color: selected || hover.hovered ? Qt.alpha(theme.foreground, 0.08) : "transparent"
+    color: selected || hover.hovered ? Qt.alpha(theme.foreground, 0.08) : Qt.alpha(theme.foreground, 0)
+    Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
     border.width: selected ? 1 : 0
     border.color: Qt.alpha(theme.border, 0.25)
 
@@ -48,7 +49,7 @@ Rectangle {
             Text {
                 Layout.fillWidth: true
                 text: row.title
-                color: row.selected ? theme.accent : theme.foreground
+                color: theme.foreground
                 elide: Text.ElideRight
             }
             Text {

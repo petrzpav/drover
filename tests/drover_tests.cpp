@@ -542,7 +542,7 @@ echo ok
         QCOMPARE(json.value("name").toString(), QString("omarchy"));
         QCOMPARE(json.value("extends").toString(), QString("builtin://dark"));
         QCOMPARE(json.value("editor").toObject().value("bg").toArray(), QJsonArray({0x2d, 0x2a, 0x2e}));
-        QCOMPARE(json.value("editor").toObject().value("cursor").toArray(), QJsonArray({0xff, 0xd8, 0x66}));
+        QCOMPARE(json.value("editor").toObject().value("cursor").toArray(), QJsonArray({0xfc, 0xfc, 0xfa}));
         QCOMPARE(json.value("syntax").toObject().value("string").toArray(), QJsonArray({0xff, 0xd8, 0x66}));
 
         // Written into the given folder, never Fresh's real one; a fake fresh

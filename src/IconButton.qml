@@ -23,7 +23,8 @@ Rectangle {
     color: !enabled ? "transparent"
          : tap.pressed ? Qt.alpha(theme.foreground, 0.22)
          : hover.hovered || activeFocus ? Qt.alpha(theme.foreground, 0.08)
-         : "transparent"
+         : Qt.alpha(theme.foreground, 0)
+    Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
     border.width: activeFocus ? 1 : 0
     border.color: Qt.alpha(theme.foreground, 0.25)
 

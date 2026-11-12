@@ -25,7 +25,8 @@ Item {
 
         // Pulses gently, never so far that it reads as an empty slot.
         SequentialAnimation on opacity {
-            running: dot.status === "working"
+            // Only while it can be seen: a hidden pulse would still redraw the screen.
+            running: dot.status === "working" && dot.visible
             loops: Animation.Infinite
             alwaysRunToEnd: true
             NumberAnimation { to: 0.6; duration: 700; easing.type: Easing.InOutSine }

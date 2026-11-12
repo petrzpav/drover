@@ -172,7 +172,7 @@ private slots:
         QTest::keyClick(rig.window, Qt::Key_F1);
         QVERIFY(rig.find("help")->isVisible());
         QTest::keyClick(rig.window, Qt::Key_Escape);
-        QVERIFY(!rig.find("help")->isVisible());
+        QTRY_VERIFY(!rig.find("help")->isVisible());
         QVERIFY(rig.window->property("expanded").toBool());
         // Outside the terminal, Esc hides the panel.
         rig.find("panel")->forceActiveFocus();
@@ -543,13 +543,11 @@ private slots:
         QTRY_VERIFY(rig.backend->editing());
         QCOMPARE(rig.backend->editorTerminal(), QString("term_e"));
         QVERIFY(!rig.log().contains("pane split"));
-        // Alt+Down belongs to the editor (moving lines) while it is in front.
+        // Alt+Down picks the next agent from the editor too; the panel then
+        // shows that agent, not an editor.
         QTest::keyClick(rig.window, Qt::Key_Down, Qt::AltModifier);
-        QTRY_VERIFY(rig.log().contains("key 1b\nkey 5b\nkey 31\nkey 3b\nkey 33\nkey 42"));
-        QVERIFY(rig.backend->editing());
-        // Another agent: the panel shows that agent, not an editor.
-        rig.backend->selectNext(1);
         QTRY_VERIFY(!rig.backend->editing());
+        QCOMPARE(rig.backend->selected(), QString("w2:p1"));
     }
 
     void anAgentThatEndsTakesItsEditorAndShellAlong()

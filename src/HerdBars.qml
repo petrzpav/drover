@@ -93,7 +93,7 @@ Item {
                         height: parent.height * slot.level
                         color: slot.tint
                         opacity: slot.status === "working" || slot.status === "blocked" || slot.status === "done" ? 1 : 0.55
-                        Behavior on color { ColorAnimation { duration: 300 } }
+                        Behavior on color { ColorAnimation { duration: 160; easing.type: Easing.OutCubic } }
                     }
 
                     NumberAnimation {

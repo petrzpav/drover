@@ -61,6 +61,9 @@ class Backend : public QObject {
     Q_PROPERTY(bool editing READ editing NOTIFY editorChanged)
     Q_PROPERTY(QString editorTerminal READ editorTerminal NOTIFY editorChanged)
     Q_PROPERTY(QString editor READ editor CONSTANT)
+    // Ticks 20 times a second for the sheep. A QML Timer would keep the whole
+    // screen-sized surface redrawing every frame; this one only wakes them.
+    Q_PROPERTY(QTimer *sheepClock READ sheepClock CONSTANT)
     // A terminal below the editor, in the agent's folder: whether it shows,
     // and its terminal (it stays attached while hidden).
     Q_PROPERTY(bool shellShown READ shellShown NOTIFY shellChanged)
@@ -96,6 +99,7 @@ public:
     static QString readEditor(const QString &configFile);
     void setEditor(const QString &command) { m_editor = command; }
     QString editor() const { return m_editor; }
+    QTimer *sheepClock() { return &m_sheepClock; }
     bool editing() const { return m_editing; }
     QString editorTerminal() const { return m_editorTerminal; }
     bool shellShown() const { return m_shellShown; }
@@ -212,6 +216,7 @@ private:
     QVariantList m_workspaceList;
     QString m_indicator = QStringLiteral("bars");
     QString m_editor = QStringLiteral("fresh");
+    QTimer m_sheepClock;
     bool m_editing = false;
     QString m_editorPane, m_editorTerminal;
     bool m_shellShown = false;

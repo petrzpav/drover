@@ -1,5 +1,9 @@
 #include "terminalview.h"
 
+#include <cmath>
+
+#include <QCoreApplication>
+
 #include <QClipboard>
 #include <QFontMetricsF>
 #include <QGuiApplication>
@@ -242,6 +246,18 @@ void TerminalView::start() {
     emit runningChanged();
 }
 
+// Checks every 5 ms; after 100 ms the program's group is killed.
+static void reapLater(pid_t pid, int tries) {
+    int status = 0;
+    if (waitpid(pid, &status, WNOHANG) != 0)
+        return;
+    if (tries == 20)
+        ::kill(-pid, SIGKILL);
+    if (tries > 200)
+        return;
+    QTimer::singleShot(5, QCoreApplication::instance(), [pid, tries] { reapLater(pid, tries + 1); });
+}
+
 void TerminalView::stop() {
     if (m_pid <= 0)
         return;
@@ -250,20 +266,12 @@ void TerminalView::stop() {
     // A hangup is what closing a terminal sends, to the program's whole
     // process group (forkpty made it a session of its own); whatever doesn't
     // go after a moment is killed, so no process is left behind.
+    // Reaped later, so closing a terminal (switching agents, closing the
+    // panel) never waits for its program.
     ::kill(-m_pid, SIGHUP);
     ::close(m_fd);
     m_fd = -1;
-    int status = 0;
-    bool reaped = false;
-    for (int i = 0; i < 20 && !reaped; ++i) {
-        reaped = waitpid(m_pid, &status, WNOHANG) == m_pid;
-        if (!reaped)
-            usleep(5000);
-    }
-    if (!reaped) {
-        ::kill(-m_pid, SIGKILL);
-        waitpid(m_pid, &status, 0);
-    }
+    reapLater(m_pid, 0);
     m_pid = 0;
 }
 
@@ -309,16 +317,48 @@ void TerminalView::onOutput(const char *bytes, size_t length, void *user) {
     static_cast<TerminalView *>(user)->writePty(bytes, length);
 }
 
-int TerminalView::onDamage(VTermRect, void *user) {
-    static_cast<TerminalView *>(user)->update();
+void TerminalView::repaintAll() {
+    if (!isVisible()) {
+        m_stale = true;
+        return;
+    }
+    update();
+}
+
+// Rows and columns from top/left to bottom/right, exclusive. While the
+// scrollback is shown, screen rows sit elsewhere: everything is redrawn.
+void TerminalView::repaintCells(int top, int left, int bottom, int right) {
+    if (!isVisible()) {
+        m_stale = true;
+        return;
+    }
+    if (m_scrollOffset > 0) {
+        update();
+        return;
+    }
+    update(QRectF(left * m_cellWidth, top * m_cellHeight, (right - left) * m_cellWidth,
+                  (bottom - top) * m_cellHeight).toAlignedRect().adjusted(-1, -1, 1, 1));
+}
+
+void TerminalView::itemChange(ItemChange change, const ItemChangeData &value) {
+    if (change == ItemVisibleHasChanged && value.boolValue && m_stale) {
+        m_stale = false;
+        update();
+    }
+    QQuickPaintedItem::itemChange(change, value);
+}
+
+int TerminalView::onDamage(VTermRect rect, void *user) {
+    static_cast<TerminalView *>(user)->repaintCells(rect.start_row, rect.start_col, rect.end_row, rect.end_col);
     return 1;
 }
 
-int TerminalView::onMoveCursor(VTermPos pos, VTermPos, int visible, void *user) {
+int TerminalView::onMoveCursor(VTermPos pos, VTermPos old, int visible, void *user) {
     auto *self = static_cast<TerminalView *>(user);
     self->m_cursor = pos;
     self->m_cursorVisible = visible;
-    self->update();
+    self->repaintCells(old.row, old.col, old.row + 1, old.col + 1);
+    self->repaintCells(pos.row, pos.col, pos.row + 1, pos.col + 1);
     return 1;
 }
 
@@ -332,7 +372,7 @@ int TerminalView::onSetTermProp(VTermProp prop, VTermValue *value, void *user) {
         self->m_mouseMode = value->number;
         self->setAcceptHoverEvents(value->number == VTERM_PROP_MOUSE_MOVE);
     }
-    self->update();
+    self->repaintAll();
     return 1;
 }
 
@@ -368,7 +408,7 @@ int TerminalView::onClearScrollback(void *user) {
     self->m_scrollback.clear();
     self->m_scrollOffset = 0;
     self->m_hasSelection = false;
-    self->update();
+    self->repaintAll();
     return 1;
 }
 
@@ -414,8 +454,14 @@ bool TerminalView::selected(int line, int column) const {
 }
 
 void TerminalView::paint(QPainter *painter) {
-    painter->fillRect(QRectF(0, 0, width(), height()), m_background);
+    // Only the rows the dirty area touches (all of them for a full repaint).
+    QRectF area = painter->clipBoundingRect();
+    if (area.isEmpty())
+        area = QRectF(0, 0, width(), height());
+    painter->fillRect(area, m_background);
     const int first = firstVisibleLine();
+    const int firstRow = qBound(0, int(area.top() / m_cellHeight), m_rows);
+    const int lastRow = qBound(0, int(std::ceil(area.bottom() / m_cellHeight)), m_rows);
 
     struct Run {
         qreal x = 0;
@@ -438,7 +484,7 @@ void TerminalView::paint(QPainter *painter) {
         run.text.clear();
     };
 
-    for (int row = 0; row < m_rows; ++row) {
+    for (int row = firstRow; row < lastRow; ++row) {
         const int line = first + row;
         const qreal y = row * m_cellHeight;
         Run run;

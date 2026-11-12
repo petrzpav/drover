@@ -41,6 +41,7 @@ Backend::Backend(const QString &herdr, const QString &hyprctl, QObject *parent)
     m_poll.setInterval(1000);
     connect(&m_poll, &QTimer::timeout, this, &Backend::refresh);
     m_poll.start();
+    m_sheepClock.setInterval(50);
 
     // Another agent, or none: the panel shows the agent again.
     connect(this, &Backend::selectedChanged, this, [this] {

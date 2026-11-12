@@ -15,6 +15,7 @@ Rectangle {
     color: pill.expanded ? Qt.tint(theme.background, Qt.alpha(theme.foreground, 0.18))
          : mouse.containsMouse ? Qt.tint(theme.background, Qt.alpha(theme.foreground, 0.08))
          : theme.background
+    Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
     radius: theme.radius
     border.width: 2
     border.color: backend.error !== "" || backend.blocked > 0 ? theme.urgent : theme.border

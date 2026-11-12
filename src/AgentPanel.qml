@@ -259,7 +259,7 @@ Rectangle {
                     icon: ""
                     hint: qsTr("Keyboard shortcuts")
                     shortcut: "F1"
-                    tint: panel.helpVisible ? theme.accent : theme.foreground
+                    tint: panel.helpVisible ? theme.foreground : panel.dim
                     onClicked: panel.helpVisible = !panel.helpVisible
                 }
                 IconButton {
@@ -344,7 +344,7 @@ Rectangle {
                 }
                 Repeater {
                     id: shellTerminals
-                    model: panel.attached && backend.editing && backend.shellTerminal !== "" && backend.herdrPath !== ""
+                    model: panel.attached && backend.shellTerminal !== "" && backend.herdrPath !== ""
                            ? [backend.shellTerminal + "#" + panel.attachRound] : []
                     delegate: AgentTerminal {
                         required property string modelData
@@ -352,7 +352,7 @@ Rectangle {
                         terminalId: modelData.split("#")[0]
                         shell: true
                         // Hidden, it keeps its size, so its pane isn't squeezed.
-                        visible: terminalArea.shellHeight > 0
+                        visible: backend.editing && terminalArea.shellHeight > 0
                         y: terminalArea.height - height
                         width: terminalArea.width
                         height: Math.round(terminalArea.height * 0.35)
@@ -395,7 +395,9 @@ Rectangle {
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     anchors.margins: 16
-                    visible: backend.notice !== ""
+                    opacity: backend.notice !== "" ? 1 : 0
+                    visible: backend.notice !== "" || opacity > 0
+                    Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
                     width: Math.min(noticeText.implicitWidth + 20, terminalArea.width - 40)
                     height: noticeText.implicitHeight + 12
                     radius: theme.radius
@@ -423,7 +425,10 @@ Rectangle {
         y: panel.headerHeight + 3
         width: panel.width - x - 2
         height: panel.height - y - 2
-        visible: panel.helpVisible
+        opacity: panel.helpVisible ? 1 : 0
+        visible: panel.helpVisible || opacity > 0
+        enabled: panel.helpVisible
+        Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
         color: theme.background
         radius: theme.radius
 
@@ -448,7 +453,7 @@ Rectangle {
                 Repeater {
                     model: [
                         qsTr("Any key"), qsTr("Goes to the agent's terminal, as in herdr"),
-                        "Alt+↑ Alt+↓", qsTr("Pick an agent (in the editor: move lines)"),
+                        "Alt+↑ Alt+↓", qsTr("Pick an agent"),
                         "Ctrl+P", qsTr("Start an agent in a workspace, or create one"),
                         "Ctrl+D", qsTr("In the picker: close a workspace (press twice)"),
                         "Alt+E", qsTr("Switch between the agent and the editor beside it"),
@@ -463,7 +468,7 @@ Rectangle {
                         required property var modelData
                         required property int index
                         text: modelData
-                        color: index % 2 === 0 ? theme.accent : theme.foreground
+                        color: index % 2 === 0 ? theme.foreground : panel.dim
                         width: index % 2 === 0 ? implicitWidth : Math.min(implicitWidth, panel.width - panel.sidebarWidth - 260)
                         wrapMode: Text.Wrap
                     }

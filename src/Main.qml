@@ -110,8 +110,8 @@ ApplicationWindow {
                onActivated: { panel.helpVisible = false; backend.toggleEditor(); win.focusForAgent() } }
     Shortcut { sequence: "Ctrl+Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
     Shortcut { sequence: "F1"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: panel.helpVisible = !panel.helpVisible }
-    Shortcut { sequence: "Alt+Up"; enabled: win.expanded && !backend.editing; context: Qt.ApplicationShortcut; onActivated: { backend.selectNext(-1); win.focusForAgent() } }
-    Shortcut { sequence: "Alt+Down"; enabled: win.expanded && !backend.editing; context: Qt.ApplicationShortcut; onActivated: { backend.selectNext(1); win.focusForAgent() } }
+    Shortcut { sequence: "Alt+Up"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: { backend.selectNext(-1); win.focusForAgent() } }
+    Shortcut { sequence: "Alt+Down"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: { backend.selectNext(1); win.focusForAgent() } }
     Shortcut { sequence: "Ctrl+Shift+O"; enabled: win.expanded; autoRepeat: false; context: Qt.ApplicationShortcut; onActivated: backend.jump() }
 
     Connections {
@@ -139,7 +139,11 @@ ApplicationWindow {
     AgentPanel {
         id: panel
         objectName: "panel"
-        visible: win.expanded
+        // Fades in and out; it takes the pointer and keys only while open.
+        opacity: win.expanded ? 1 : 0
+        visible: win.expanded || opacity > 0
+        enabled: win.expanded
+        Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
         x: win.panelRect.x
         y: win.panelRect.y
         width: win.panelRect.width

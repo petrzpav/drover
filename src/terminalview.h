@@ -94,6 +94,8 @@ signals:
     void finished();
 
 protected:
+    // A terminal that was hidden while its program drew catches up as it shows.
+    void itemChange(ItemChange change, const ItemChangeData &value) override;
     bool event(QEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void inputMethodEvent(QInputMethodEvent *event) override;
@@ -137,6 +139,11 @@ private:
     QStringList m_arguments, m_colors, m_reserved;
     bool m_extendedKeys = false;
     bool m_doubleCtrlB = false;
+    // Drawn on the next frame: only these cells, or all of them; nothing while
+    // hidden (stale until shown).
+    void repaintCells(int top, int left, int bottom, int right);
+    void repaintAll();
+    bool m_stale = false;
     QFont m_font, m_bold, m_italic, m_boldItalic;
     QColor m_background{"#101315"}, m_foreground{"#cacccc"}, m_selectionColor{"#505a5f"};
     qreal m_cellWidth = 8, m_cellHeight = 16, m_ascent = 12;
