@@ -24,6 +24,15 @@ Item {
         terminal.sendControl(letter)
     }
     readonly property bool terminalFocused: terminal.activeFocus
+    // Something is on screen, or it took too long to wait for.
+    readonly property bool ready: terminal.ready || patience.triggered
+    Timer {
+        id: patience
+        property bool triggered: false
+        interval: 400
+        running: true
+        onTriggered: triggered = true
+    }
 
     TerminalView {
         id: terminal

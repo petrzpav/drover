@@ -530,6 +530,30 @@ private slots:
         QCOMPARE(rig.backend->shellTerminal(), QString());
     }
 
+    void switchingAgentsKeepsTheOldTerminalUntilTheNewOneDraws()
+    {
+        Rig rig(agents("working", "idle"));
+        rig.expand();
+        QTRY_VERIFY(rig.log().contains("terminal attach term_1"));
+        const auto count = [&] {
+            int n = 0;
+            std::function<void(QQuickItem *)> walk = [&](QQuickItem *item) {
+                n += item->objectName() == "agentTerminal";
+                for (auto *child : item->childItems())
+                    walk(child);
+            };
+            walk(rig.window->contentItem());
+            return n;
+        };
+        QTRY_COMPARE(count(), 1);
+        rig.backend->selectNext(1);
+        // The fake agent draws nothing: the old one stays for a moment...
+        QTRY_VERIFY(rig.log().contains("terminal attach term_2"));
+        QCOMPARE(count(), 2);
+        // ...then goes, at the latest after 400 ms.
+        QTRY_COMPARE_WITH_TIMEOUT(count(), 1, 1500);
+    }
+
     void anEditorAlreadyInTheTabIsReused()
     {
         Rig rig(agents("working", "idle"));

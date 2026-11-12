@@ -22,7 +22,9 @@ Rectangle {
     readonly property Item editorTerminal: editorTerminals.count > 0 ? editorTerminals.itemAt(0) : null
     readonly property Item shellTerminal: shellTerminals.count > 0 ? shellTerminals.itemAt(0) : null
     readonly property bool shellFocused: shellTerminal !== null && shellTerminal.terminalFocused
-    readonly property Item terminal: !backend.editing ? (terminals.count > 0 ? terminals.itemAt(0) : null)
+    // The newest agent terminal: the one being switched to.
+    readonly property Item agentTerminal: terminals.count > 0 ? terminals.itemAt(terminals.count - 1) : null
+    readonly property Item terminal: !backend.editing ? agentTerminal
                                    : backend.shellShown && shellFocused ? shellTerminal : editorTerminal
     readonly property bool terminalFocused: terminal !== null && terminal.terminalFocused
 
@@ -304,18 +306,42 @@ Rectangle {
                 readonly property real shellHeight: backend.editing && backend.shellShown
                     ? Math.round(terminalArea.height * 0.35) : 0
 
+                // Switching agents keeps the previous terminal on screen until
+                // the new one has drawn, so nothing flashes blank.
+                readonly property string agentKey: panel.attached && !terminalArea.detached && backend.selectedTerminal !== ""
+                    && backend.herdrPath !== "" ? backend.selectedTerminal + "#" + panel.attachRound : ""
+                onAgentKeyChanged: {
+                    if (agentKey === "") {
+                        agentTerminals.clear()
+                        return
+                    }
+                    if (agentTerminals.count > 0 && agentTerminals.get(agentTerminals.count - 1).key === agentKey)
+                        return
+                    while (agentTerminals.count > 1)
+                        agentTerminals.remove(0)
+                    agentTerminals.append({ key: agentKey })
+                }
+                function dropOlderAgentTerminals() {
+                    while (agentTerminals.count > 1)
+                        agentTerminals.remove(0)
+                }
+                ListModel { id: agentTerminals }
                 Repeater {
                     id: terminals
-                    model: panel.attached && !terminalArea.detached && backend.selectedTerminal !== ""
-                           && backend.herdrPath !== "" ? [backend.selectedTerminal + "#" + panel.attachRound] : []
+                    model: agentTerminals
                     delegate: AgentTerminal {
-                        required property string modelData
-                        terminalId: modelData.split("#")[0]
-                        visible: !backend.editing
+                        required property string key
+                        required property int index
+                        readonly property bool newest: index === agentTerminals.count - 1
+                        terminalId: key.split("#")[0]
+                        // While the editor is still drawing, the agent stays in view.
+                        visible: !backend.editing || !(panel.editorTerminal && panel.editorTerminal.ready)
+                        opacity: !newest || ready ? 1 : 0
                         width: terminalArea.width
                         height: terminalArea.height
-                        onDetached: terminalArea.detached = true
-                        Component.onCompleted: if (panel.attached && visible && !panel.picker.open && !panel.helpVisible) focusTerminal()
+                        onReadyChanged: if (ready && newest) terminalArea.dropOlderAgentTerminals()
+                        onDetached: if (newest) terminalArea.detached = true
+                        Component.onCompleted: if (panel.attached && !backend.editing && !panel.picker.open && !panel.helpVisible) focusTerminal()
                     }
                 }
                 Repeater {
@@ -328,6 +354,7 @@ Rectangle {
                         terminalId: modelData.split("#")[0]
                         editor: true
                         visible: backend.editing
+                        opacity: ready ? 1 : 0
                         width: terminalArea.width
                         height: terminalArea.height - (terminalArea.shellHeight > 0 ? terminalArea.shellHeight + 1 : 0)
                         // An editor that quits closes its pane: back to the agent.

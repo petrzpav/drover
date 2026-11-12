@@ -4,6 +4,7 @@
 #include <QFont>
 #include <QPoint>
 #include <QQuickPaintedItem>
+#include <QTimer>
 #include <QStringList>
 #include <QVector>
 #include <deque>
@@ -40,6 +41,8 @@ class TerminalView : public QQuickPaintedItem {
     // prefix whatever the config says, and passes it on only when doubled.
     Q_PROPERTY(bool doubleCtrlB READ doubleCtrlB WRITE setDoubleCtrlB)
     Q_PROPERTY(bool running READ running NOTIFY runningChanged)
+    // The program has drawn something: the terminal is worth showing.
+    Q_PROPERTY(bool ready READ ready NOTIFY readyChanged)
     Q_PROPERTY(int columns READ columns NOTIFY gridChanged)
     Q_PROPERTY(int rows READ rows NOTIFY gridChanged)
 
@@ -68,6 +71,7 @@ public:
     void setDoubleCtrlB(bool on) { m_doubleCtrlB = on; }
     void setExtendedKeys(bool on) { m_extendedKeys = on; }
     bool running() const { return m_pid > 0; }
+    bool ready() const { return m_ready; }
     int columns() const { return m_cols; }
     int rows() const { return m_rows; }
 
@@ -88,6 +92,7 @@ signals:
     void programChanged();
     void fontChanged();
     void colorsChanged();
+    void readyChanged();
     void runningChanged();
     void gridChanged();
     // The program ended (for `herdr terminal attach`: the terminal detached).
@@ -144,6 +149,11 @@ private:
     void repaintCells(int top, int left, int bottom, int right);
     void repaintAll();
     bool m_stale = false;
+    bool m_ready = false, m_drawn = false;
+    // A size the program was told of, applied with its redraw.
+    void applyPendingSize();
+    int m_pendingCols = 0, m_pendingRows = 0;
+    QTimer m_resizeTimer;
     QFont m_font, m_bold, m_italic, m_boldItalic;
     QColor m_background{"#101315"}, m_foreground{"#cacccc"}, m_selectionColor{"#505a5f"};
     qreal m_cellWidth = 8, m_cellHeight = 16, m_ascent = 12;

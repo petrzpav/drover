@@ -655,7 +655,8 @@ echo ok
         QTRY_COMPARE(view.screenText(), QString("%1 %2").arg(view.rows()).arg(view.columns()));
         const int columns = view.columns();
         view.setSize({400, 200});
-        QVERIFY(view.columns() < columns);
+        // The grid follows with the program's redraw, within 100 ms at most.
+        QTRY_VERIFY_WITH_TIMEOUT(view.columns() < columns, 500);
         QTRY_COMPARE(view.screenText(), QString("%1 %2").arg(view.rows()).arg(view.columns()));
     }
 

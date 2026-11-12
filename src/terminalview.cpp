@@ -78,6 +78,9 @@ TerminalView::TerminalView(QQuickItem *parent) : QQuickPaintedItem(parent) {
     setFlag(ItemAcceptsInputMethod, true);
     setAcceptedMouseButtons(Qt::LeftButton | Qt::RightButton);
     setOpaquePainting(true);
+    m_resizeTimer.setSingleShot(true);
+    m_resizeTimer.setInterval(100);
+    connect(&m_resizeTimer, &QTimer::timeout, this, &TerminalView::applyPendingSize);
 
     m_vt = vterm_new(m_rows, m_cols);
     vterm_set_utf8(m_vt, 1);
@@ -187,19 +190,36 @@ void TerminalView::updateMetrics() {
 void TerminalView::updateGrid() {
     const int cols = qMax(2, int(width() / m_cellWidth));
     const int rows = qMax(1, int(height() / m_cellHeight));
-    if (cols == m_cols && rows == m_rows)
+    if (cols == (m_pendingCols ? m_pendingCols : m_cols) && rows == (m_pendingRows ? m_pendingRows : m_rows))
         return;
-    m_cols = cols;
-    m_rows = rows;
-    vterm_set_size(m_vt, rows, cols);
-    vterm_screen_flush_damage(m_screen);
-    if (m_fd >= 0) {
-        struct winsize size = {ushort(rows), ushort(cols), ushort(width()), ushort(height())};
-        ioctl(m_fd, TIOCSWINSZ, &size);
+    if (m_fd < 0) {
+        m_pendingCols = cols;
+        m_pendingRows = rows;
+        applyPendingSize();
+        return;
     }
+    // The program hears of the new size at once, but the screen keeps its old
+    // grid until the program's redraw arrives (or 100 ms pass), so a resize
+    // never shows a cut-off old screen for a frame.
+    struct winsize size = {ushort(rows), ushort(cols), ushort(width()), ushort(height())};
+    ioctl(m_fd, TIOCSWINSZ, &size);
+    m_pendingCols = cols;
+    m_pendingRows = rows;
+    m_resizeTimer.start();
+}
+
+void TerminalView::applyPendingSize() {
+    m_resizeTimer.stop();
+    if (!m_pendingCols)
+        return;
+    m_cols = m_pendingCols;
+    m_rows = m_pendingRows;
+    m_pendingCols = m_pendingRows = 0;
+    vterm_set_size(m_vt, m_rows, m_cols);
+    vterm_screen_flush_damage(m_screen);
     m_scrollOffset = qMin<int>(m_scrollOffset, m_scrollback.size());
     emit gridChanged();
-    update();
+    repaintAll();
 }
 
 void TerminalView::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) {
@@ -282,6 +302,7 @@ void TerminalView::readPty() {
     for (;;) {
         const ssize_t length = ::read(m_fd, buffer, sizeof buffer);
         if (length > 0) {
+            applyPendingSize();
             vterm_input_write(m_vt, buffer, size_t(length));
             continue;
         }
@@ -291,6 +312,10 @@ void TerminalView::readPty() {
         break;
     }
     vterm_screen_flush_damage(m_screen);
+    if (m_drawn && !m_ready) {
+        m_ready = true;
+        emit readyChanged();
+    }
     if (ended) {
         stop();
         emit runningChanged();
@@ -349,7 +374,9 @@ void TerminalView::itemChange(ItemChange change, const ItemChangeData &value) {
 }
 
 int TerminalView::onDamage(VTermRect rect, void *user) {
-    static_cast<TerminalView *>(user)->repaintCells(rect.start_row, rect.start_col, rect.end_row, rect.end_col);
+    auto *self = static_cast<TerminalView *>(user);
+    self->m_drawn = true;
+    self->repaintCells(rect.start_row, rect.start_col, rect.end_row, rect.end_col);
     return 1;
 }
 
