@@ -50,12 +50,43 @@ ApplicationWindow {
         return Qt.rect(Math.round(x), lower ? py - gap - height : py + pillHeight + gap, fullWidth, height)
     }
 
-    readonly property var inputRegion: [pillX, pillY, panelRect, expanded]
+    // The stage for an agent's question sits beside the pill too: above it
+    // in the lower half of the screen, below it in the upper half, flush
+    // with its right edge.
+    readonly property rect stageRect: placeStage(width, height, pillX, pillY, stage.height)
+    function placeStage(w, h, px, py, stageHeight) {
+        const lower = py + pillHeight / 2 > h / 2
+        const x = clamp(px + pillWidth - stage.width, edge, w - stage.width - edge)
+        // Below the pill, room for a sheep standing on the card's top edge.
+        const y = lower ? py - gap - stageHeight : py + pillHeight + gap + (stage.fence ? 36 : 0)
+        return Qt.rect(Math.round(x), Math.round(clamp(y, edge, h - stageHeight - edge)), stage.width, stageHeight)
+    }
+
+    readonly property var inputRegion: [pillX, pillY, panelRect, expanded, stageRect, stage.visible]
     onInputRegionChanged: surface.setInputRegion(Qt.rect(pillX, pillY, pillWidth, pillHeight),
-                                                 expanded ? panelRect : Qt.rect(0, 0, 0, 0))
+                                                 expanded ? panelRect : Qt.rect(0, 0, 0, 0),
+                                                 stage.visible ? stageRect : Qt.rect(0, 0, 0, 0))
 
     function setExpanded(value) {
         expanded = value
+    }
+
+    // drover's toggle key: gives the keyboard to an agent that asks on the
+    // stage, and again takes it back (the question stays); with nobody
+    // asking, opens or closes the panel.
+    function toggle() {
+        if (stage.shown && !stage.leaving && !expanded) {
+            if (stage.hasKeyboard)
+                stage.releaseKeyboard()
+            else
+                stage.takeKeyboard()
+            return
+        }
+        if (stage.shown && !stage.leaving && !stage.hasKeyboard) {
+            stage.takeKeyboard()
+            return
+        }
+        expanded = !expanded
     }
 
     function openPicker() {
@@ -156,6 +187,28 @@ ApplicationWindow {
         // sets the application's layout direction.
         LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
         LayoutMirroring.childrenInherit: true
+    }
+
+    AskStage {
+        id: stage
+        x: win.stageRect.x
+        y: win.stageRect.y
+        z: 5
+        // The sheep comes from the pasture's middle.
+        origin: Qt.point(win.pillX + 40, win.pillY + win.pillHeight - 6)
+        look: asker.look
+        onWantsKeyboard: surface.setStageFocus(true)
+        onReleasedKeyboard: {
+            surface.setStageFocus(false)
+            if (win.expanded)
+                win.focusForAgent()
+        }
+        onOpenAgent: (pane) => {
+            surface.setStageFocus(false)
+            backend.select(pane)
+            win.expanded = true
+            win.focusForAgent()
+        }
     }
 
     HerdPill {

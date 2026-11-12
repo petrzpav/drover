@@ -10,8 +10,13 @@
 #include <QtTest>
 #include <QPointer>
 #include <QJsonArray>
+#include <QUuid>
+#include <atomic>
+#include <thread>
 
 #include "agentmodel.h"
+#include "asker.h"
+#include "hook.h"
 #include "backend.h"
 #include "freshtheme.h"
 #include "terminalfont.h"
@@ -804,7 +809,363 @@ echo ok
         QCOMPARE(Translator::pluralCategory("ja", 1), QString("other"));
     }
 
+    // --- Questions on the stage: the hook and the asker -------------------
+
+    void hookIgnoresWhatIsntAQuestionForAnAgent()
+    {
+        const QHash<QString, QString> pane{{"HERDR_PANE_ID", "w1:p1"}};
+        const QJsonObject ask = question();
+        QVERIFY(Hook::request(ask, {}).isEmpty());  // not in a herdr pane
+        QJsonObject subagent = ask;
+        subagent.insert("agent_id", "a1");
+        QVERIFY(Hook::request(subagent, pane).isEmpty());
+        QJsonObject other = ask;
+        other.insert("tool_name", "Bash");
+        QVERIFY(Hook::request(other, pane).isEmpty());
+        // Options with previews need Claude's own dialog.
+        QJsonObject preview = ask;
+        QJsonObject input = preview.value("tool_input").toObject();
+        QJsonArray questions = input.value("questions").toArray();
+        QJsonObject first = questions.at(0).toObject();
+        QJsonArray options = first.value("options").toArray();
+        QJsonObject option = options.at(0).toObject();
+        option.insert("preview", "<b>mock</b>");
+        options.replace(0, option);
+        first.insert("options", options);
+        questions.replace(0, first);
+        input.insert("questions", questions);
+        preview.insert("tool_input", input);
+        QVERIFY(Hook::request(preview, pane).isEmpty());
+
+        QCOMPARE(Hook::request(ask, pane).value("kind").toString(), QString("question"));
+        QCOMPARE(Hook::request(ask, pane).value("pane").toString(), QString("w1:p1"));
+        QCOMPARE(Hook::request(permission(), pane).value("kind").toString(), QString("permission"));
+    }
+
+    void hookPrintsNothingWithoutDrover()
+    {
+        const QByteArray input = QJsonDocument(question()).toJson();
+        QVERIFY(Hook::run(input, {{"HERDR_PANE_ID", "w1:p1"}}, "drover-test-nobody-" + QUuid::createUuid().toString(QUuid::Id128)).isEmpty());
+        QVERIFY(Hook::run("not json", {{"HERDR_PANE_ID", "w1:p1"}}, "drover-test-nobody").isEmpty());
+    }
+
+    void askerAnswersAQuestion()
+    {
+        Asker asker;
+        const QString name = listen(asker);
+        asker.agentsListed({agent("w1:p1", "working", "s1")});
+        QSignalSpy asking(&asker, &Asker::askingChanged);
+        QByteArray output;
+        std::thread hook([&] { output = Hook::run(QJsonDocument(question()).toJson(), pane("w1:p1"), name); });
+        QTRY_VERIFY(asker.current().contains("id"));
+        const QVariantMap current = asker.current();
+        QCOMPARE(current.value("kind").toString(), QString("question"));
+        QCOMPARE(current.value("title").toString(), QString("Paint the gate"));
+        QCOMPARE(current.value("questions").toList().size(), 2);
+        QCOMPARE(asker.askingPanes(), QSet<QString>{"w1:p1"});
+        asker.answer(current.value("id").toInt(), {"Red, Blue", "Something else"});
+        hook.join();
+        const QJsonObject out = QJsonDocument::fromJson(output).object().value("hookSpecificOutput").toObject();
+        QCOMPARE(out.value("permissionDecision").toString(), QString("allow"));
+        const QJsonObject answers = out.value("updatedInput").toObject().value("answers").toObject();
+        QCOMPARE(answers.value("Which colors?").toString(), QString("Red, Blue"));
+        QCOMPARE(answers.value("Which size?").toString(), QString("Something else"));
+        // The questions themselves go back unchanged.
+        QCOMPARE(out.value("updatedInput").toObject().value("questions").toArray().size(), 2);
+        QVERIFY(asker.current().isEmpty());
+        QVERIFY(asker.askingPanes().isEmpty());
+        QCOMPARE(asking.count(), 2);
+    }
+
+    void askerLeavesToTheTerminalWhatIsntItsBusiness()
+    {
+        Asker asker;
+        const QString name = listen(asker);
+        asker.agentsListed({agent("w1:p1", "working", "s1")});
+        const QByteArray input = QJsonDocument(question()).toJson();
+        // An agent drover doesn't know.
+        QVERIFY(ask(input, pane("w7:p1"), name).isEmpty());
+        // Another Claude inside the agent's pane.
+        QJsonObject nested = question();
+        nested.insert("session_id", "someone-else");
+        QVERIFY(ask(QJsonDocument(nested).toJson(), pane("w1:p1"), name).isEmpty());
+        // The user is looking at the agent.
+        asker.setWatching([](const QString &p) { return p == "w1:p1"; });
+        QVERIFY(ask(input, pane("w1:p1"), name).isEmpty());
+        QVERIFY(asker.current().isEmpty());
+    }
+
+    void askerGivesAQuestionBackAfterAWhile()
+    {
+        Asker asker;
+        asker.setHold(1);
+        const QString name = listen(asker);
+        asker.agentsListed({agent("w1:p1", "working", "s1")});
+        QByteArray output = "unset";
+        std::thread hook([&] { output = Hook::run(QJsonDocument(question()).toJson(), pane("w1:p1"), name); });
+        QTRY_VERIFY(asker.current().contains("id"));
+        QTRY_VERIFY_WITH_TIMEOUT(asker.current().isEmpty(), 3000);
+        hook.join();
+        QVERIFY(output.isEmpty());
+    }
+
+    void askerLetsGoWhenTheAgentStopsWaiting()
+    {
+        Asker asker;
+        const QString name = listen(asker);
+        asker.agentsListed({agent("w1:p1", "working", "s1")});
+        QLocalSocket socket;  // a hook Claude ends (Esc in the terminal)
+        socket.connectToServer(name);
+        QVERIFY(socket.waitForConnected(1000));
+        socket.write(QJsonDocument(Hook::request(question(), pane("w1:p1"))).toJson(QJsonDocument::Compact) + '\n');
+        QTRY_VERIFY(asker.current().contains("id"));
+        socket.abort();
+        QTRY_VERIFY(asker.current().isEmpty());
+    }
+
+    void askerQueuesRequestsOldestFirst()
+    {
+        Asker asker;
+        const QString name = listen(asker);
+        asker.agentsListed({agent("w1:p1", "working", "s1"), agent("w2:p1", "working", "s2")});
+        QByteArray first, second;
+        std::thread one([&] { first = Hook::run(QJsonDocument(question()).toJson(), pane("w1:p1"), name); });
+        QTRY_VERIFY(asker.current().contains("id"));
+        QJsonObject other = question();
+        other.insert("session_id", "s2");
+        std::thread two([&] { second = Hook::run(QJsonDocument(other).toJson(), pane("w2:p1"), name); });
+        QTRY_COMPARE(asker.waiting(), 1);
+        QCOMPARE(asker.current().value("pane").toString(), QString("w1:p1"));
+        asker.pass(asker.current().value("id").toInt());
+        one.join();
+        QVERIFY(first.isEmpty());
+        QCOMPARE(asker.current().value("pane").toString(), QString("w2:p1"));
+        QCOMPARE(asker.waiting(), 0);
+        asker.answer(asker.current().value("id").toInt(), {"Red", "Small"});
+        two.join();
+        QVERIFY(second.contains("Small"));
+    }
+
+    void askerAnswersAPermission()
+    {
+        Asker asker;
+        const QString name = listen(asker);
+        asker.agentsListed({agent("w1:p1", "blocked", "s1")});
+        const QByteArray input = QJsonDocument(permission()).toJson();
+        for (const QString &how : {"allow", "always", "deny", "redirect"}) {
+            QByteArray output;
+            std::thread hook([&] { output = Hook::run(input, pane("w1:p1"), name); });
+            QTRY_VERIFY(asker.current().contains("id"));
+            const QVariantMap current = asker.current();
+            QCOMPARE(current.value("detail").toString(), QString("rm -rf build"));
+            QCOMPARE(current.value("always").toString(), QString("Bash(rm -rf build:*)"));
+            const int id = current.value("id").toInt();
+            if (how == "allow") asker.allow(id, false);
+            else if (how == "always") asker.allow(id, true);
+            else if (how == "deny") asker.deny(id, QString());
+            else asker.deny(id, "Use make clean instead");
+            hook.join();
+            const QJsonObject decision = QJsonDocument::fromJson(output).object().value("hookSpecificOutput")
+                                             .toObject().value("decision").toObject();
+            if (how == "allow") {
+                QCOMPARE(decision.value("behavior").toString(), QString("allow"));
+                QVERIFY(!decision.contains("updatedPermissions"));
+            } else if (how == "always") {
+                QCOMPARE(decision.value("updatedPermissions").toArray(), permission().value("permission_suggestions").toArray());
+            } else if (how == "deny") {
+                QCOMPARE(decision.value("behavior").toString(), QString("deny"));
+                QCOMPARE(decision.value("interrupt").toBool(), true);
+            } else {
+                QCOMPARE(decision.value("message").toString(), QString("Use make clean instead"));
+                QCOMPARE(decision.value("interrupt").toBool(), false);
+            }
+        }
+        // A permission prompt shows in the terminal too, so it doesn't make
+        // the agent count as asking on drover's account.
+        QVERIFY(asker.askingPanes().isEmpty());
+    }
+
+    void askerLetsGoOfAPermissionAnsweredInTheTerminal()
+    {
+        Asker asker;
+        const QString name = listen(asker);
+        asker.agentsListed({agent("w1:p1", "working", "s1")});
+        QByteArray output = "unset";
+        std::thread hook([&] { output = Hook::run(QJsonDocument(permission()).toJson(), pane("w1:p1"), name); });
+        QTRY_VERIFY(asker.current().contains("id"));
+        // Still working: herdr hasn't seen the prompt yet, so it stays.
+        asker.agentsListed({agent("w1:p1", "working", "s1")});
+        QVERIFY(asker.current().contains("id"));
+        asker.agentsListed({agent("w1:p1", "blocked", "s1")});
+        QVERIFY(asker.current().contains("id"));
+        asker.agentsListed({agent("w1:p1", "working", "s1")});
+        QVERIFY(asker.current().isEmpty());
+        hook.join();
+        QVERIFY(output.isEmpty());
+    }
+
+    void askerDescribesPermissions()
+    {
+        QCOMPARE(Asker::detail("Write", {{"file_path", QDir::homePath() + "/x/notes.md"}}), QString("~/x/notes.md"));
+        QCOMPARE(Asker::detail("WebFetch", {{"url", "https://example.com"}}), QString("https://example.com"));
+        const QJsonArray suggestions{
+            QJsonObject{{"type", "setMode"}, {"mode", "acceptEdits"}, {"destination", "session"}},
+            QJsonObject{{"type", "addDirectories"}, {"directories", QJsonArray{QDir::homePath() + "/scratch"}}},
+        };
+        QCOMPARE(Asker::alwaysWhat(suggestions), QString("file edits, ~/scratch"));
+        QVERIFY(Asker::alwaysWhat({}).isEmpty());
+    }
+
+    void readsTheAskHold()
+    {
+        QTemporaryDir dir;
+        QCOMPARE(Asker::readHold(dir.filePath("missing")), 180);
+        write(dir.filePath("config"), "agent = claude\nask_hold = 60\n");
+        QCOMPARE(Asker::readHold(dir.filePath("config")), 60);
+        write(dir.filePath("config"), "ask_hold = 0\n");
+        QCOMPARE(Asker::readHold(dir.filePath("config")), 0);
+    }
+
+    void readsTheStageLook()
+    {
+        QTemporaryDir dir;
+        QCOMPARE(Asker::readLook(dir.filePath("missing")), QString("fence"));
+        write(dir.filePath("config"), "indicator = sheep\nstage = spotlight\n");
+        QCOMPARE(Asker::readLook(dir.filePath("config")), QString("spotlight"));
+        write(dir.filePath("config"), "stage = curtain\n");
+        QCOMPARE(Asker::readLook(dir.filePath("config")), QString("fence"));
+    }
+
+    void installsTheHooksBesideOthers()
+    {
+        QTemporaryDir dir;
+        const QString settings = dir.filePath("claude/settings.json");
+        QDir().mkpath(dir.filePath("claude"));
+        write(settings, R"({
+  "model": "opus",
+  "hooks": {
+    "SessionStart": [{"matcher": "*", "hooks": [{"type": "command", "command": "herdr-agent-state.sh session"}]}],
+    "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "guard.sh"}]}]
+  }
+})");
+        QVERIFY(!Hook::installed(settings));
+        QCOMPARE(Hook::install(settings), QString());
+        QCOMPARE(Hook::install(settings), QString());  // twice is once
+        QVERIFY(Hook::installed(settings));
+        QVERIFY(QFile::exists(settings + ".drover-backup"));
+        QFile file(settings);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QByteArray text = file.readAll();
+        QVERIFY(text.startsWith("{\n  \""));  // Claude's two-space indent
+        const QJsonObject hooks = QJsonDocument::fromJson(text).object().value("hooks").toObject();
+        QCOMPARE(QJsonDocument::fromJson(text).object().value("model").toString(), QString("opus"));
+        QCOMPARE(hooks.value("SessionStart").toArray().size(), 1);
+        QCOMPARE(hooks.value("PreToolUse").toArray().size(), 2);
+        QCOMPARE(hooks.value("PreToolUse").toArray().at(1).toObject().value("matcher").toString(), QString("AskUserQuestion"));
+        QCOMPARE(hooks.value("PermissionRequest").toArray().size(), 1);
+
+        QCOMPARE(Hook::uninstall(settings), QString());
+        QVERIFY(!Hook::installed(settings));
+        QFile again(settings);
+        QVERIFY(again.open(QIODevice::ReadOnly));
+        const QJsonObject left = QJsonDocument::fromJson(again.readAll()).object().value("hooks").toObject();
+        QCOMPARE(left.value("PreToolUse").toArray().size(), 1);
+        QVERIFY(!left.contains("PermissionRequest"));
+        QCOMPARE(left.value("SessionStart").toArray().size(), 1);
+    }
+
+    void leavesBrokenSettingsAlone()
+    {
+        QTemporaryDir dir;
+        const QString settings = dir.filePath("settings.json");
+        write(settings, "{ not json");
+        QVERIFY(!Hook::install(settings).isEmpty());
+        QFile file(settings);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), QByteArray("{ not json"));
+        // No settings yet: they are made.
+        const QString fresh = dir.filePath("new/settings.json");
+        QCOMPARE(Hook::install(fresh), QString());
+        QVERIFY(Hook::installed(fresh));
+    }
+
+    void anAgentWithAQuestionHereAsksYou()
+    {
+        QTemporaryDir dir;
+        Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
+        QTRY_VERIFY(backend.agents()->count() > 0);
+        QString heard;
+        connect(&backend, &Backend::listed, this, [&](const QList<Agent> &agents) { heard = agents.at(0).status; });
+        const QString pane = backend.agents()->agents().at(0).paneId;
+        const QString before = backend.agents()->agents().at(0).status;
+        QVERIFY(before != "blocked");
+        const int blocked = backend.blocked();
+        backend.setAsking({pane});
+        QCOMPARE(backend.agents()->agents().at(0).status, QString("blocked"));
+        QCOMPARE(backend.blocked(), blocked + 1);
+        // The asker still hears what herdr says.
+        QCOMPARE(heard, before);
+        backend.setAsking({});
+        QCOMPARE(backend.agents()->agents().at(0).status, before);
+    }
+
 private:
+
+    static QJsonObject question()
+    {
+        return QJsonDocument::fromJson(R"({"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","session_id":"s1",
+          "tool_input":{"questions":[
+            {"question":"Which colors?","header":"Colors","multiSelect":true,"options":[{"label":"Red","description":"warm"},{"label":"Green"},{"label":"Blue"}]},
+            {"question":"Which size?","header":"Size","multiSelect":false,"options":[{"label":"Small"},{"label":"Large"}]}]}})").object();
+    }
+
+    static QJsonObject permission()
+    {
+        return QJsonDocument::fromJson(R"({"hook_event_name":"PermissionRequest","tool_name":"Bash","session_id":"s1",
+          "tool_input":{"command":"rm -rf build","description":"Clean the build"},
+          "permission_suggestions":[{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"rm -rf build:*"}],"behavior":"allow","destination":"localSettings"}]})").object();
+    }
+
+    static Agent agent(const QString &pane, const QString &status, const QString &session)
+    {
+        Agent a;
+        a.paneId = pane;
+        a.status = status;
+        a.sessionId = session;
+        a.kind = "claude";
+        a.title = "Paint the gate";
+        a.workspace = "garden";
+        return a;
+    }
+
+    static QHash<QString, QString> pane(const QString &id) { return {{"HERDR_PANE_ID", id}}; }
+
+    // A hook that drover answers at once, run beside the event loop that
+    // answers it; "timeout" when drover kept it waiting.
+    static QByteArray ask(const QByteArray &input, const QHash<QString, QString> &env, const QString &name)
+    {
+        std::atomic<bool> done = false;
+        QByteArray output;
+        std::thread hook([&] { output = Hook::run(input, env, name); done = true; });
+        QElapsedTimer timer;
+        timer.start();
+        while (!done && timer.elapsed() < 3000)
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        if (!done) {
+            hook.detach();
+            return "timeout";
+        }
+        hook.join();
+        return output;
+    }
+
+    static QString listen(Asker &asker)
+    {
+        const QString name = "drover-test-" + QUuid::createUuid().toString(QUuid::Id128);
+        if (!asker.listen(name))
+            qFatal("can't listen on %s", qPrintable(name));
+        return name;
+    }
     static QStringList Ansi16()
     {
         return {"#000000", "#ff6188", "#a9dc76", "#ffd866", "#fc9867", "#ab9df2", "#78dce8", "#c1c0c0",

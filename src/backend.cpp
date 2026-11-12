@@ -193,7 +193,22 @@ void Backend::refresh() {
     });
 }
 
-void Backend::applyAgents(const QList<Agent> &agents) {
+void Backend::setAsking(const QSet<QString> &panes) {
+    if (panes == m_asking)
+        return;
+    m_asking = panes;
+    applyAgents(m_listed);
+}
+
+void Backend::applyAgents(const QList<Agent> &listedAgents) {
+    // An agent whose question waits in drover asks you, whatever herdr sees
+    // (Claude shows no dialog while drover holds the question).
+    m_listed = listedAgents;
+    QList<Agent> agents = listedAgents;
+    for (auto &agent : agents)
+        if (m_asking.contains(agent.paneId))
+            agent.status = QStringLiteral("blocked");
+    emit listed(listedAgents);
     const QString before = selectedTitle() + '\n' + selectedStatus() + '\n' + QString::number(selectedIndex());
     // An agent counts as ended once it has been missing for three seconds,
     // so a moment herdr doesn't see it never closes its editor.
@@ -1030,6 +1045,8 @@ QList<Agent> Backend::parseAgents(const QByteArray &json, const QHash<QString, Q
         agent.tabId = object.value("tab_id").toString();
         agent.name = object.value("name").toString();
         agent.terminalTitle = object.value("terminal_title_stripped").toString().trimmed();
+        agent.sessionId = object.value("agent_session").toObject().value("value").toString();
+        agent.focused = object.value("focused").toBool();
         agent.workspaceId = object.value("workspace_id").toString();
         agent.workspace = workspaces.value(agent.workspaceId, agent.workspaceId);
         QString cwd = object.value("foreground_cwd").toString(object.value("cwd").toString());

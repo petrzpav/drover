@@ -17,6 +17,8 @@ struct Agent {
     QString tabId;
     QString name;          // given with `herdr agent start` or `rename`
     QString terminalTitle; // what the agent itself calls its terminal
+    QString sessionId;     // the agent's own session (Claude's session id)
+    bool focused = false;  // herdr's focused pane
 
     bool operator==(const Agent &other) const = default;
 };

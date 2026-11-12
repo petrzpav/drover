@@ -1,7 +1,8 @@
 #!/bin/sh
 # Draws the README's pictures into docs/ against a made-up herd: the panel
 # (screenshot.png) and each indicator style watching the herd change
-# (pill-dots.gif, pill-bars.gif, pill-sheep.gif). Needs ffmpeg.
+# (pill-dots.gif, pill-bars.gif, pill-sheep.gif), and an agent's question on
+# the stage (stage.png). Needs ffmpeg.
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
@@ -15,6 +16,7 @@ make -j"$(nproc)" >/dev/null
 DROVER_SCREENSHOTS="$OUT" QT_QPA_PLATFORM=offscreen ./drover_ui_tests screenshots >/dev/null
 
 cp "$OUT/screenshot.png" "$ROOT/docs/screenshot.png"
+cp "$OUT/stage.png" "$ROOT/docs/stage.png"
 for style in dots bars sheep; do
   # The frames span four steps of 2.2 s each.
   rate=$(ls "$OUT/$style" | wc -l | awk '{ printf "%.2f", $1 / 8.8 }')
@@ -22,4 +24,4 @@ for style in dots bars sheep; do
     -vf "scale=iw*2:ih*2:flags=neighbor,split[a][b];[a]palettegen[p];[b][p]paletteuse=dither=none" \
     "$ROOT/docs/pill-$style.gif"
 done
-echo "Drew docs/screenshot.png and docs/pill-{dots,bars,sheep}.gif"
+echo "Drew docs/screenshot.png, docs/stage.png and docs/pill-{dots,bars,sheep}.gif"

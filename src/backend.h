@@ -120,6 +120,12 @@ public:
     // How long a herdr or hyprctl call may take; tests shorten it.
     void setTimeout(int milliseconds) { m_timeout = milliseconds; }
 
+    // Panes whose agent has a question waiting in drover; they count as
+    // asking you.
+    void setAsking(const QSet<QString> &panes);
+    // The last listing as herdr reported it.
+    const QList<Agent> &listedAgents() const { return m_listed; }
+
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void select(const QString &paneId);
     Q_INVOKABLE void selectNext(int step);
@@ -188,6 +194,8 @@ signals:
     void busyChanged();
     void workspacesChanged();
     void jumped();
+    // Every listing of the agents, as herdr reported it.
+    void listed(const QList<Agent> &agents);
     // The folder picker opens over the desktop, so the panel steps aside.
     void folderPickerOpened();
     void folderPickerClosed(bool chosen, const QString &text);
@@ -212,6 +220,8 @@ private:
     QString m_herdrOverride, m_hyprctlOverride;
     AgentModel m_model;
     QHash<QString, int> m_counts;
+    QList<Agent> m_listed;
+    QSet<QString> m_asking;
     QHash<QString, QString> m_workspaces;
     QString m_error, m_selected, m_notice, m_busy;
     QVariantList m_workspaceList;

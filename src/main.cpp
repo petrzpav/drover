@@ -1,6 +1,10 @@
 // drover — a floating indicator of your herdr agents, on every workspace.
 
+#include <QCoreApplication>
 #include <QDir>
+#include <QFile>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QLocalServer>
@@ -17,7 +21,9 @@
 #include <QUrl>
 #include <unistd.h>
 
+#include "asker.h"
 #include "backend.h"
+#include "hook.h"
 #include "surface.h"
 #include "terminalview.h"
 #include "freshtheme.h"
@@ -25,7 +31,67 @@
 #include "theme.h"
 #include "translator.h"
 
+namespace {
+
+// `drover hook`: Claude Code runs it before a question dialog and with a
+// permission prompt (see hook.h). It needs no window, and never fails the
+// agent: anything unexpected prints nothing, and Claude asks itself.
+int runHook(int argc, char *argv[]) {
+    QCoreApplication app(argc, argv);
+    QFile in;
+    if (!in.open(stdin, QIODevice::ReadOnly))
+        return 0;
+    const QByteArray input = in.readAll();
+    QHash<QString, QString> env;
+    const auto system = QProcessEnvironment::systemEnvironment();
+    for (const QString &key : system.keys())
+        env.insert(key, system.value(key));
+    const QByteArray output = Hook::run(input, env);
+    if (!output.isEmpty()) {
+        fwrite(output.constData(), 1, output.size(), stdout);
+        fflush(stdout);
+    }
+    return 0;
+}
+
+// `drover hooks install|uninstall|status`: drover's hooks in the user's
+// Claude settings.
+int runHooks(int argc, char *argv[]) {
+    QCoreApplication app(argc, argv);
+    const QString action = argc > 2 ? QString::fromLocal8Bit(argv[2]) : QStringLiteral("status");
+    const QString settings = qEnvironmentVariable("CLAUDE_CONFIG_DIR", QDir::homePath() + "/.claude") + "/settings.json";
+    QString error;
+    if (action == "install") {
+        error = Hook::install(settings);
+        if (error.isEmpty())
+            printf("Added drover's hooks to %s. Agents started from now on ask on drover's stage.\n", qPrintable(settings));
+    } else if (action == "uninstall") {
+        error = Hook::uninstall(settings);
+        if (error.isEmpty())
+            printf("Took drover's hooks out of %s.\n", qPrintable(settings));
+    } else if (action == "status") {
+        printf("%s\n", Hook::installed(settings) ? "installed" : "not installed");
+    } else {
+        fprintf(stderr, "usage: drover hooks [install|uninstall|status]\n");
+        return 1;
+    }
+    if (!error.isEmpty()) {
+        fprintf(stderr, "drover: %s\n", qPrintable(error));
+        return 1;
+    }
+    return 0;
+}
+
+} // namespace
+
 int main(int argc, char *argv[]) {
+    // Before anything else: the hook runs inside an agent's pane and needs
+    // its herdr variables.
+    if (argc >= 2 && qstrcmp(argv[1], "hook") == 0)
+        return runHook(argc, argv);
+    if (argc >= 2 && qstrcmp(argv[1], "hooks") == 0)
+        return runHooks(argc, argv);
+
     // herdr talks to the session of the pane it runs in. Started from inside a
     // herdr pane, drover must still see, and attach to, the whole session.
     for (const char *name : {"HERDR_ENV", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID"})
@@ -47,7 +113,7 @@ int main(int argc, char *argv[]) {
     const bool bare = argc < 2;
     const QString command = bare ? QStringLiteral("toggle") : QString::fromLocal8Bit(argv[1]);
     if (command != "toggle" && command != "quit" && command != "open" && command != "pick") {
-        fprintf(stderr, "usage: drover [open|toggle|pick|quit]\n");
+        fprintf(stderr, "usage: drover [open|toggle|pick|quit|hooks]\n");
         return 1;
     }
     const QString runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
@@ -109,12 +175,22 @@ int main(int argc, char *argv[]) {
         freshTheme.reset(new FreshTheme(&theme, QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
                                                     + "/fresh/themes", fresh));
 
+    // The agents' questions, on drover's stage.
+    Asker asker;
+    asker.setHold(Asker::readHold(QDir::homePath() + "/.config/drover/config"));
+    asker.setLook(Asker::readLook(QDir::homePath() + "/.config/drover/config"));
+    if (!asker.listen(Hook::serverName()))
+        fprintf(stderr, "drover: can't listen on %s, so agents ask in their terminals\n", qPrintable(Hook::serverName()));
+    QObject::connect(&backend, &Backend::listed, &asker, &Asker::agentsListed);
+    QObject::connect(&asker, &Asker::askingChanged, &backend, [&] { backend.setAsking(asker.askingPanes()); });
+
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("backend", &backend);
     engine.rootContext()->setContextProperty("surface", &surface);
+    engine.rootContext()->setContextProperty("asker", &asker);
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;
@@ -124,6 +200,23 @@ int main(int argc, char *argv[]) {
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
     surface.attach(window);
     window->show();
+    // Whether the user looks at an agent's pane: drover's panel shows it, or
+    // the herdr window is in front with that pane focused.
+    asker.setWatching([&backend, window](const QString &pane) {
+        if (window->property("expanded").toBool() && backend.selected() == pane)
+            return true;
+        bool focused = false;
+        for (const auto &agent : backend.listedAgents())
+            focused = focused || (agent.paneId == pane && agent.focused);
+        if (!focused)
+            return false;
+        QProcess hyprctl;
+        hyprctl.start("hyprctl", {"activewindow", "-j"});
+        if (!hyprctl.waitForFinished(300))
+            return false;
+        return QString::fromUtf8(hyprctl.readAllStandardOutput()).contains("herdr", Qt::CaseInsensitive);
+    });
+
     if (command == "pick")
         QMetaObject::invokeMethod(window, "openPicker");
     else if (!bare)
@@ -140,7 +233,7 @@ int main(int argc, char *argv[]) {
                 else if (message == "pick")
                     QMetaObject::invokeMethod(window, "openPicker");
                 else
-                    QMetaObject::invokeMethod(window, "setExpanded", Q_ARG(QVariant, !window->property("expanded").toBool()));
+                    QMetaObject::invokeMethod(window, "toggle");
             });
             QObject::connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
         }

@@ -2,7 +2,8 @@
 
 A floating indicator of your [herdr](https://herdr.dev) agents, on every
 Omarchy workspace. The pill is a small live herd that shows what every agent
-is doing and lights up when one finishes or asks you something; drag it
+is doing and lights up when one finishes or asks you something, and an agent's
+question comes on a small stage beside it, to be answered right there; drag it
 wherever you like, and it stays there. Click it and a large panel opens beside it: every agent of the local herdr
 session on the left, and on the right a real terminal attached to the selected
 agent, where you work with it exactly as in herdr (Shift+Tab, Esc, Ctrl+C, its
@@ -39,6 +40,7 @@ drover toggle     # open or hide the panel, starting drover if needed
 drover open       # open the panel, starting drover if needed
 drover pick       # open the panel with the workspace picker
 drover quit       # stop it
+drover hooks install  # agents' questions on drover's stage (see below)
 ```
 
 A global shortcut is one line in `~/.config/hypr/bindings.lua`:
@@ -62,7 +64,9 @@ o.bind("SUPER + H", "Herdr agents", "drover toggle")
 | `Ctrl+O` (picker)   | Pick the folder for a new workspace                        |
 | `Ctrl+D` (picker)   | Close the highlighted workspace; press again to confirm    |
 | `Ctrl+Shift+O`      | Open the agent in herdr (or double-click its row)          |
-| `Super+H`           | Show or hide the panel (with the binding below)            |
+| `Super+H`           | Show or hide the panel (with the binding below); while an agent asks on the stage, give it the keyboard or take it back |
+| `1`–`9`, Enter (stage) | Answer the agent's question                             |
+| `Esc` (stage)       | Leave the question to the agent's terminal                 |
 | `Esc`               | Close the picker or help; outside the terminal, hide the panel |
 | `F1`                | Show or hide the shortcuts                                 |
 | `Ctrl+Q`            | Quit                                                       |
@@ -106,6 +110,62 @@ Fresh apply it whenever the theme changes. Use it in `~/.config/fresh/config.jso
 ```json
 { "theme": "omarchy.json" }
 ```
+
+### Questions on the stage
+
+When a Claude agent asks you something (a question with options, or a
+permission prompt), its sheep jumps the pasture's fence and lands on a small
+card beside the pill. You can answer there without
+opening the panel or the herdr window. Pick an option with `1`–`9` (a
+multiple-choice question ticks with digits and sends with Enter), or take
+the last row for your own words. A permission prompt offers yes, yes and
+don't ask again (whatever Claude proposes, like `Bash(npm test:*)`), no
+(the agent stops and waits), or no with what to do instead. Several agents
+asking wait in line; the next one peeks in from the wings.
+
+![An agent's question on the stage](docs/stage.png)
+
+The stage never takes the keyboard on its own, so typing elsewhere can't
+answer it: click it, or press drover's key (`drover toggle`, `Super+H` with
+the binding above). It then keeps the keyboard until you answer; the same
+key hands it back and leaves the question waiting. `Esc` leaves the question to the agent's terminal, and
+**Open** (`Ctrl+O`) opens the agent in the panel.
+
+It needs two Claude Code hooks in `~/.claude/settings.json`; drover adds or
+removes them, leaving the rest of the file as it was (a copy of the old one
+is kept beside it, as `settings.json.drover-backup`):
+
+```sh
+drover hooks install     # or uninstall, or status
+```
+
+Agents started afterwards ask on the stage; restart running ones, or review
+the change under `/hooks` in them. The hook (`drover hook`) passes the
+question to drover over a local socket and waits for your answer. Whenever
+drover has nothing to do with the question, the hook prints nothing and
+Claude shows its own dialog as before. That happens when drover isn't
+running, the session isn't an agent in herdr (scripts, `claude -p`), you are
+already looking at that agent (in the panel, or in the herdr window), or the
+options carry previews.
+
+While drover holds a question, Claude's own dialog doesn't show, so the herdr
+window and remote clients see the agent working. After `ask_hold` seconds
+without an answer (3 minutes unless set; `0` waits for good), the question
+goes back to the terminal:
+
+```ini
+ask_hold = 180
+```
+
+Once answered, the sheep nods and jumps back. It can trot onto the card's
+stage instead, under a spotlight:
+
+```ini
+stage = spotlight   # or fence, the default
+```
+
+A permission prompt shows in the terminal at the same time. Answer it in
+either place: once herdr sees the agent working again, the stage lets it go.
 
 ### The default agent
 
@@ -155,7 +215,8 @@ Drover is a transparent wlr-layer-shell surface (via `layer-shell-qt`) on the
 top layer, over the whole area the bar leaves free, so it floats over windows
 on every workspace without window rules and hides under fullscreen windows.
 Only the pill and the open panel take the pointer; everything else clicks
-through. It takes keyboard focus only while the panel is open. The pill's
+through. It takes keyboard focus only while the panel is open, or the stage
+once you give it the keyboard. The pill's
 place is kept in `~/.local/state/drover/position`.
 
 It lists agents with `herdr agent list` and `herdr workspace list` whenever

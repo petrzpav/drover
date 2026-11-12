@@ -34,8 +34,11 @@ public:
     void setOffset(const QPointF &offset);
 
     Q_INVOKABLE void setExpanded(bool expanded);
+    // The stage wants the keyboard (the user clicked it, or pressed the
+    // toggle key while an agent asks), or gives it back.
+    Q_INVOKABLE void setStageFocus(bool focus);
     // The parts of the window that take the pointer.
-    Q_INVOKABLE void setInputRegion(const QRectF &indicator, const QRectF &panel);
+    Q_INVOKABLE void setInputRegion(const QRectF &indicator, const QRectF &panel, const QRectF &stage = QRectF());
     // Remembers the indicator's place for the next start.
     Q_INVOKABLE void save();
 
@@ -46,8 +49,12 @@ private slots:
     void updateFocusFlag();
 
 private:
+    void updateKeyboard(bool grab);
+
+private:
     QString m_stateFile, m_focusFlag;
     bool m_expanded = false;
+    bool m_stageFocus = false;
     QWindow *m_window = nullptr;
     bool m_layer = false;
     QPointF m_offset{12, 12};

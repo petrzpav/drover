@@ -98,15 +98,37 @@ void Surface::updateFocusFlag() {
 }
 
 void Surface::setExpanded(bool expanded) {
+    const bool grab = expanded && !m_expanded;
     m_expanded = expanded;
     updateFocusFlag();
+    updateKeyboard(grab);
+}
+
+void Surface::setStageFocus(bool focus) {
+    const bool grab = focus && !m_stageFocus;
+    m_stageFocus = focus;
+    updateKeyboard(grab);
+}
+
+void Surface::updateKeyboard(bool grab) {
     if (!m_layer || !m_window)
         return;
     auto *layer = LayerShellQt::Window::get(m_window);
-    if (!expanded) {
+    if (!m_expanded && !m_stageFocus) {
         layer->setKeyboardInteractivity(LayerShellQt::Window::KeyboardInteractivityNone);
         return;
     }
+    // The stage, small and rarely under the pointer, keeps the keyboard
+    // exclusively until it is answered or handed back (Esc, the toggle key):
+    // on demand, the compositor gives the keyboard back to the window under
+    // the pointer at once.
+    if (m_stageFocus && !m_expanded) {
+        layer->setKeyboardInteractivity(LayerShellQt::Window::KeyboardInteractivityExclusive);
+        m_window->requestActivate();
+        return;
+    }
+    if (!grab)
+        return;
     // Opening the panel is asking for it, so it takes the keyboard at once:
     // exclusive for a moment, which the compositor must honor, then on
     // demand, so a click on any window takes the keyboard back.
@@ -119,12 +141,14 @@ void Surface::setExpanded(bool expanded) {
     });
 }
 
-void Surface::setInputRegion(const QRectF &indicator, const QRectF &panel) {
+void Surface::setInputRegion(const QRectF &indicator, const QRectF &panel, const QRectF &stage) {
     if (!m_window)
         return;
     QRegion region(indicator.toAlignedRect());
     if (!panel.isEmpty())
         region += panel.toAlignedRect();
+    if (!stage.isEmpty())
+        region += stage.toAlignedRect();
     m_window->setMask(region);
 }
 

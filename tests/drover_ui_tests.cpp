@@ -12,8 +12,16 @@
 #include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QUuid>
+#include <atomic>
+#include <thread>
 
+#include "asker.h"
 #include "backend.h"
+#include "hook.h"
 #include "surface.h"
 #include "terminalfont.h"
 #include "terminalview.h"
@@ -34,6 +42,55 @@ QByteArray agents(const char *first, const char *second) {
       {"agent":"claude","agent_status":")" + second + R"(","cwd":"/b","pane_id":"w2:p1","terminal_id":"term_2","terminal_title_stripped":"Fix the gate","workspace_id":"w2"}]}})";
 }
 
+
+// A Claude hook asking drover, on its own thread like the real one.
+struct AskingHook {
+    std::atomic<bool> done = false;
+    QByteArray output;
+    std::thread thread;
+    Asker *asker = nullptr;
+    AskingHook(const QJsonObject &input, const QString &pane, const QString &server, Asker *owner = nullptr)
+        : asker(owner) {
+        const QByteArray json = QJsonDocument(input).toJson();
+        thread = std::thread([this, json, pane, server] {
+            output = Hook::run(json, {{"HERDR_PANE_ID", pane}}, server);
+            done = true;
+        });
+    }
+    // A test that failed half way lets the hook go rather than hang.
+    ~AskingHook() {
+        QElapsedTimer timer;
+        timer.start();
+        while (!done && asker && timer.elapsed() < 3000) {
+            const QVariant id = asker->current().value("id");
+            if (id.isValid())
+                asker->pass(id.toInt());
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        }
+        if (done)
+            thread.join();
+        else
+            thread.detach();
+    }
+    QJsonObject result() const { return QJsonDocument::fromJson(output).object().value("hookSpecificOutput").toObject(); }
+};
+
+QJsonObject questionInput(bool two) {
+    QJsonArray questions{QJsonObject{{"question", "Which colors?"}, {"header", "Colors"}, {"multiSelect", two},
+        {"options", QJsonArray{QJsonObject{{"label", "Red"}, {"description", "warm"}}, QJsonObject{{"label", "Green"}},
+                                QJsonObject{{"label", "Blue"}}}}}};
+    if (two)
+        questions.append(QJsonObject{{"question", "Which size?"}, {"header", "Size"}, {"multiSelect", false},
+            {"options", QJsonArray{QJsonObject{{"label", "Small"}}, QJsonObject{{"label", "Large"}}}}});
+    return QJsonObject{{"hook_event_name", "PreToolUse"}, {"tool_name", "AskUserQuestion"}, {"session_id", "s1"},
+                       {"tool_input", QJsonObject{{"questions", questions}}}};
+}
+
+QJsonObject permissionInput() {
+    return QJsonObject{{"hook_event_name", "PermissionRequest"}, {"tool_name", "Bash"}, {"session_id", "s1"},
+                       {"tool_input", QJsonObject{{"command", "rm -rf build"}}}};
+}
+
 // One drover with a fake herdr in a temporary directory.
 struct Rig {
     QTemporaryDir dir;
@@ -41,6 +98,8 @@ struct Rig {
     std::unique_ptr<Theme> theme;
     std::unique_ptr<Backend> backend;
     std::unique_ptr<Surface> surface;
+    std::unique_ptr<Asker> asker;
+    QString askServer = "drover-ui-test-" + QUuid::createUuid().toString(QUuid::Id128);
     std::unique_ptr<QQmlApplicationEngine> engine;
     QQuickWindow *window = nullptr;
     int quits = 0;
@@ -80,12 +139,17 @@ esac
         theme.reset(new Theme(dir.path()));
         backend.reset(new Backend(herdr, dir.filePath("no-hyprctl")));
         surface.reset(new Surface(dir.filePath("position")));
+        asker.reset(new Asker);
+        QVERIFY(asker->listen(askServer));
+        QObject::connect(backend.get(), &Backend::listed, asker.get(), &Asker::agentsListed);
+        QObject::connect(asker.get(), &Asker::askingChanged, backend.get(), [this] { backend->setAsking(asker->askingPanes()); });
         engine.reset(new QQmlApplicationEngine);
         QObject::connect(engine.get(), &QQmlEngine::quit, engine.get(), [this] { ++quits; });
         engine->rootContext()->setContextProperty("translator", translator.get());
         engine->rootContext()->setContextProperty("theme", theme.get());
         engine->rootContext()->setContextProperty("backend", backend.get());
         engine->rootContext()->setContextProperty("surface", surface.get());
+        engine->rootContext()->setContextProperty("asker", asker.get());
         engine->load(QUrl("qrc:/Main.qml"));
         window = qobject_cast<QQuickWindow *>(engine->rootObjects().value(0));
         QVERIFY(window);
@@ -430,6 +494,27 @@ private slots:
         grab(panel.united(pillRect()).adjusted(-24, -24, 24, 24)).save(out + "/screenshot.png");
         QMetaObject::invokeMethod(rig.window, "setExpanded", Q_ARG(QVariant, false));
 
+        // An agent's question on the stage, with the sheep in the pill.
+        {
+            rig.backend->setIndicator("sheep");
+            const QJsonObject question{{"hook_event_name", "PreToolUse"}, {"tool_name", "AskUserQuestion"},
+                {"tool_input", QJsonObject{{"questions", QJsonArray{QJsonObject{
+                    {"question", "Which database should the planting log use?"}, {"header", "Database"},
+                    {"multiSelect", false},
+                    {"options", QJsonArray{
+                        QJsonObject{{"label", "PostgreSQL (Recommended)"}, {"description", "what the other apps run on"}},
+                        QJsonObject{{"label", "SQLite"}, {"description", "one file, no server"}},
+                        QJsonObject{{"label", "MySQL"}, {"description", "the old server has it"}}}}}}}}}};
+            AskingHook hook(question, "w2:p1", rig.askServer, rig.asker.get());
+            auto *stage = rig.find("askStage");
+            QTRY_VERIFY(stage->isVisible());
+            QMetaObject::invokeMethod(rig.window, "toggle");
+            QTest::qWait(1200);
+            const QRect area = QRectF(stage->x(), stage->y(), stage->width(), stage->height()).toAlignedRect();
+            grab(area.united(pillRect()).adjusted(-24, -64, 24, 24)).save(out + "/stage.png");
+        }
+        QTest::qWait(400);
+
         // Each style, while one agent finishes, one gets to work and one asks.
         const QList<QStringList> story = {
             {"working", "working", "done", "idle"}, {"done", "working", "done", "idle"},
@@ -628,6 +713,132 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(rig.log().contains("pane close w1:p4"), 8000);
         QTest::qWait(300);
         QVERIFY(!rig.log().contains("pane close w1:p1"));
+    }
+
+    void anAgentsQuestionComesOnStageWithoutTakingTheKeyboard()
+    {
+        Rig rig(agents("working", "idle"));
+        auto *stage = rig.find("askStage");
+        QVERIFY(stage);
+        QVERIFY(!stage->isVisible());
+        AskingHook hook(questionInput(false), "w1:p1", rig.askServer, rig.asker.get());
+        QTRY_VERIFY(stage->isVisible());
+        // The sheep counts as asking in the pill.
+        QTRY_COMPARE(rig.backend->blocked(), 1);
+        QTRY_VERIFY(rig.find("stageSheep")->isVisible());  // on its mark after the entrance
+        QVERIFY(rig.find("stageSheep")->property("asking").toBool());
+        QCOMPARE(rig.find("stageQuestion")->property("text").toString(), QString("Which colors?"));
+        // Keys typed elsewhere never answer it.
+        QTest::keyClick(rig.window, Qt::Key_1);
+        QTest::qWait(100);
+        QVERIFY(!hook.done);
+        QVERIFY(!stage->property("hasKeyboard").toBool());
+        // drover's key gives it the keyboard.
+        QMetaObject::invokeMethod(rig.window, "toggle");
+        QTRY_VERIFY(stage->property("hasKeyboard").toBool());
+        QVERIFY(!rig.window->property("expanded").toBool());
+        // Pressed again, it takes the keyboard back; the question stays.
+        QMetaObject::invokeMethod(rig.window, "toggle");
+        QTRY_VERIFY(!stage->property("hasKeyboard").toBool());
+        QVERIFY(stage->isVisible());
+        QVERIFY(!rig.window->property("expanded").toBool());
+        QMetaObject::invokeMethod(rig.window, "toggle");
+        QTRY_VERIFY(stage->property("hasKeyboard").toBool());
+        QTest::keyClick(rig.window, Qt::Key_2);
+        QTRY_VERIFY(hook.done);
+        QCOMPARE(hook.result().value("updatedInput").toObject().value("answers").toObject()
+                     .value("Which colors?").toString(), QString("Green"));
+        QTRY_VERIFY(!stage->isVisible());
+        QTRY_COMPARE(rig.backend->blocked(), 0);
+    }
+
+    void theSpotlightLookWorksToo()
+    {
+        Rig rig(agents("working", "idle"));
+        rig.asker->setLook("spotlight");
+        auto *stage = rig.find("askStage");
+        stage->setProperty("look", "spotlight");
+        AskingHook hook(questionInput(false), "w1:p1", rig.askServer, rig.asker.get());
+        QTRY_VERIFY(stage->isVisible());
+        QTRY_VERIFY(rig.find("stageSheep")->isVisible());
+        QMetaObject::invokeMethod(rig.window, "toggle");
+        QTRY_VERIFY(stage->property("hasKeyboard").toBool());
+        QTest::keyClick(rig.window, Qt::Key_1);
+        QTRY_VERIFY(hook.done);
+        QCOMPARE(hook.result().value("updatedInput").toObject().value("answers").toObject()
+                     .value("Which colors?").toString(), QString("Red"));
+        QTRY_VERIFY(!stage->isVisible());
+    }
+
+    void theStageTicksSeveralAndTakesYourOwnWords()
+    {
+        Rig rig(agents("working", "idle"));
+        auto *stage = rig.find("askStage");
+        AskingHook hook(questionInput(true), "w1:p1", rig.askServer, rig.asker.get());
+        QTRY_VERIFY(stage->isVisible());
+        QMetaObject::invokeMethod(rig.window, "toggle");
+        QTRY_VERIFY(stage->property("hasKeyboard").toBool());
+        QTest::keyClick(rig.window, Qt::Key_1);
+        QTest::keyClick(rig.window, Qt::Key_3);
+        QTest::keyClick(rig.window, Qt::Key_Return);
+        QTRY_COMPARE(rig.find("stageQuestion")->property("text").toString(), QString("Which size?"));
+        QVERIFY(!hook.done);
+        QTest::keyClick(rig.window, Qt::Key_3);  // the own-answer row
+        QTRY_VERIFY(rig.find("stageOwnField")->hasActiveFocus());
+        rig.type("Medium");
+        QTest::keyClick(rig.window, Qt::Key_Return);
+        QTRY_VERIFY(hook.done);
+        const QJsonObject answers = hook.result().value("updatedInput").toObject().value("answers").toObject();
+        QCOMPARE(answers.value("Which colors?").toString(), QString("Red, Blue"));
+        QCOMPARE(answers.value("Which size?").toString(), QString("Medium"));
+    }
+
+    void theStageAnswersAPermissionOrLeavesItToTheTerminal()
+    {
+        Rig rig(agents("blocked", "idle"));
+        auto *stage = rig.find("askStage");
+        {
+            AskingHook hook(permissionInput(), "w1:p1", rig.askServer, rig.asker.get());
+            QTRY_VERIFY(stage->isVisible());
+            QCOMPARE(rig.find("stageDetail")->property("text").toString(), QString("rm -rf build"));
+            QMetaObject::invokeMethod(rig.window, "toggle");
+            QTRY_VERIFY(stage->property("hasKeyboard").toBool());
+            QTest::keyClick(rig.window, Qt::Key_1);
+            QTRY_VERIFY(hook.done);
+            QCOMPARE(hook.result().value("decision").toObject().value("behavior").toString(), QString("allow"));
+        }
+        QTRY_VERIFY(!stage->isVisible());
+        {
+            AskingHook hook(permissionInput(), "w1:p1", rig.askServer, rig.asker.get());
+            QTRY_VERIFY(stage->isVisible());
+            QMetaObject::invokeMethod(rig.window, "toggle");
+            QTRY_VERIFY(stage->property("hasKeyboard").toBool());
+            QTest::keyClick(rig.window, Qt::Key_Escape);
+            QTRY_VERIFY(hook.done);
+            QVERIFY(hook.output.isEmpty());  // Claude's own prompt answers it
+            // Esc on the stage doesn't close anything else.
+            QVERIFY(!rig.window->property("expanded").toBool());
+        }
+    }
+
+    void theStageNeverCoversThePill()
+    {
+        Rig rig(agents("working", "idle"));
+        AskingHook hook(questionInput(false), "w1:p1", rig.askServer, rig.asker.get());
+        auto *stage = rig.find("askStage");
+        QTRY_VERIFY(stage->isVisible());
+        const QRectF pill(rig.window->property("pillX").toReal(), rig.window->property("pillY").toReal(),
+                          rig.window->property("pillWidth").toReal(), rig.window->property("pillHeight").toReal());
+        for (const QPointF offset : {QPointF(12, 12), QPointF(1700, 12), QPointF(12, 1100), QPointF(900, 600)}) {
+            rig.surface->setOffset(offset);
+            QTest::qWait(20);
+            const QRectF p(rig.window->property("pillX").toReal(), rig.window->property("pillY").toReal(),
+                           pill.width(), pill.height());
+            const QRectF s(stage->x(), stage->y(), stage->width(), stage->height());
+            QVERIFY2(!s.intersects(p), qPrintable(QString("offset %1,%2").arg(offset.x()).arg(offset.y())));
+            QVERIFY(s.left() >= 0 && s.right() <= rig.window->width() && s.top() >= 0 && s.bottom() <= rig.window->height());
+        }
+        rig.asker->pass(rig.asker->current().value("id").toInt());
     }
 
     void thePanelNeverCoversThePill()
