@@ -349,6 +349,85 @@ void Backend::startAgent(const QString &workspaceId) {
         });
 }
 
+QVariantMap Backend::resolveNewWorkspace(const QString &text, const QString &home) {
+    QString typed = text.trimmed();
+    while (typed.size() > 1 && typed.endsWith('/'))
+        typed.chop(1);
+    if (typed.isEmpty())
+        return {};
+    QString path = typed;
+    if (path == "~" || path.startsWith("~/"))
+        path = home + path.mid(1);
+    else if (!QDir::isAbsolutePath(path))
+        path = home + '/' + path;
+    const QFileInfo info(path);
+    const bool isFolder = info.isDir();
+    const QString cwd = isFolder ? QDir::cleanPath(info.absoluteFilePath()) : home;
+    // A path names the workspace after its last folder; a name is kept as typed.
+    QString label = typed.contains('/') || typed == "~" ? QFileInfo(QDir::cleanPath(path)).fileName() : typed;
+    if (label.isEmpty())
+        label = typed;
+    QString folder = cwd;
+    if (!home.isEmpty() && (folder == home || folder.startsWith(home + '/')))
+        folder = '~' + folder.mid(home.size());
+    return {{"label", label}, {"cwd", cwd}, {"folder", folder}};
+}
+
+QVariantMap Backend::newWorkspace(const QString &text) const {
+    return resolveNewWorkspace(text, QDir::homePath());
+}
+
+void Backend::createWorkspace(const QString &text) {
+    const QVariantMap workspace = newWorkspace(text);
+    if (!m_busy.isEmpty() || workspace.isEmpty())
+        return;
+    const QString program = herdr();
+    if (program.isEmpty()) {
+        setNotice(tr("herdr is not installed."), true);
+        return;
+    }
+    const QString label = workspace.value("label").toString();
+    setBusy("start");
+    setNotice(tr("Creating %1 and starting %2 there…").arg(label, m_agentKind), false);
+    run(program, {"workspace", "create", "--label", label, "--cwd", workspace.value("cwd").toString(), "--no-focus"},
+        [this, label](int code, const QByteArray &out, const QByteArray &err) {
+            const QString error = commandError(out, err, code);
+            // The new workspace's first pane is a shell, ready for the agent.
+            const QString pane = QJsonDocument::fromJson(out).object().value("result").toObject()
+                                     .value("root_pane").toObject().value("pane_id").toString();
+            if (!error.isEmpty() || pane.isEmpty()) {
+                setBusy({});
+                setNotice(tr("Couldn't create %1: %2")
+                              .arg(label, error.isEmpty() ? tr("herdr gave no pane.") : error), true);
+                return;
+            }
+            refresh();
+            launchAgent(pane, label, 1);
+        });
+}
+
+void Backend::closeWorkspace(const QString &workspaceId) {
+    if (!m_busy.isEmpty() || workspaceId.isEmpty())
+        return;
+    const QString program = herdr();
+    if (program.isEmpty()) {
+        setNotice(tr("herdr is not installed."), true);
+        return;
+    }
+    const QString label = m_workspaces.value(workspaceId, workspaceId);
+    setBusy("close");
+    run(program, {"workspace", "close", workspaceId}, [this, label](int code, const QByteArray &out, const QByteArray &err) {
+        setBusy({});
+        const QString error = commandError(out, err, code);
+        if (!error.isEmpty()) {
+            setNotice(tr("Couldn't close %1: %2").arg(label, error), true);
+            return;
+        }
+        setNotice(tr("Closed %1.").arg(label), false);
+        refresh();
+    });
+}
+
 void Backend::launchAgent(const QString &pane, const QString &label, int attempt) {
     const QString name = agentName(label, QString::number(QDateTime::currentMSecsSinceEpoch() % 46656, 36));
     // herdr waits until the agent is ready for input, up to 30 seconds.

@@ -315,7 +315,8 @@ Rectangle {
                     model: [
                         qsTr("Any key"), qsTr("Goes to the agent's terminal, as in herdr"),
                         "Alt+↑ Alt+↓", qsTr("Pick an agent"),
-                        "Ctrl+P", qsTr("Start an agent in a workspace"),
+                        "Ctrl+P", qsTr("Start an agent in a workspace, or create one"),
+                        "Ctrl+D", qsTr("In the picker: close a workspace (press twice)"),
                         "Ctrl+Shift+O", qsTr("Open the agent in herdr"),
                         "Super+H", qsTr("Show or hide the panel"),
                         "Esc", qsTr("Close the picker or help; outside the terminal, hide the panel"),

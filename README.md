@@ -39,6 +39,7 @@ o.bind("SUPER + H", "Herdr agents", "drover toggle")
 | `Ctrl+Shift+C` `Ctrl+Shift+V` | Copy the selection, paste (bracketed)            |
 | `Alt+↑` `Alt+↓`     | Pick an agent                                              |
 | `Ctrl+P`            | Pick a workspace and start the default agent there         |
+| `Ctrl+D` (picker)   | Close the highlighted workspace; press again to confirm    |
 | `Ctrl+Shift+O`      | Open the agent in herdr (or double-click its row)          |
 | `Super+H`           | Show or hide the panel (with the binding below)            |
 | `Esc`               | Close the picker or help; outside the terminal, hide the panel |
@@ -60,6 +61,16 @@ works in, and starts the agent kind set in `~/.config/drover/config`
 ```ini
 agent = codex
 ```
+
+A name no workspace has yet adds a **Create** row: Enter creates the workspace
+(`herdr workspace create`) and starts the agent in its first pane. The text is
+read as a folder, relative to your home: when that folder exists the workspace
+opens there and takes its last name (`~/Work/orchard`, `Work/orchard` →
+`orchard`); otherwise it opens in your home folder. The row shows which.
+
+`Ctrl+D`, or the trash button on a row, marks a workspace for closing; a second
+`Ctrl+D` (or Enter, or click) runs `herdr workspace close`, which ends every
+pane and agent in it. Esc, typing, or moving to another row takes the mark back.
 
 Hyprland setups that bind `Ctrl+P` globally swallow the key before drover
 sees it, since a layer surface with the keyboard is never Hyprland's active

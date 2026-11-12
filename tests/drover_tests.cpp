@@ -246,6 +246,83 @@ echo ok
         QVERIFY(backend.notice().startsWith("Started codex in garden"));
     }
 
+    void createsAWorkspaceAndStartsAnAgentInIt()
+    {
+        QTemporaryDir dir;
+        Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
+        backend.setAgentKind("codex");
+        QTRY_COMPARE(backend.workspaces().size(), 1);
+        write(dir.filePath("workspace-create.out"),
+              R"({"result":{"type":"workspace_created","root_pane":{"pane_id":"w9:p1"},"workspace":{"workspace_id":"w9"}}})");
+        backend.createWorkspace("orchard");
+        QCOMPARE(backend.busy(), QString("start"));
+        QTRY_VERIFY(log(dir).contains("--kind codex --pane w9:p1\n"));
+        QVERIFY(log(dir).contains("workspace create --label orchard --cwd " + QDir::homePath() + " --no-focus\n"));
+        QVERIFY(log(dir).contains("agent start orchard-"));
+        // The workspace's own first pane takes the agent; no extra tab.
+        QVERIFY(!log(dir).contains("tab create"));
+    }
+
+    void saysWhenAWorkspaceCantBeCreated()
+    {
+        QTemporaryDir dir;
+        Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
+        write(dir.filePath("workspace-create.fail"), R"({"error":{"code":"bad_cwd","message":"no such folder"}})");
+        backend.createWorkspace("orchard");
+        QTRY_COMPARE(backend.busy(), QString());
+        QVERIFY(backend.noticeIsError());
+        QCOMPARE(backend.notice(), QString("Couldn't create orchard: no such folder"));
+        QVERIFY(!log(dir).contains("agent start"));
+    }
+
+    void resolvesWhereANewWorkspaceLives()
+    {
+        QTemporaryDir home;
+        QVERIFY(QDir(home.path()).mkpath("Work/orchard"));
+        const auto resolve = [&](const QString &text) {
+            const auto map = Backend::resolveNewWorkspace(text, home.path());
+            return map.value("label").toString() + " | " + map.value("folder").toString();
+        };
+        QVERIFY(Backend::resolveNewWorkspace("  ", home.path()).isEmpty());
+        // A plain name lives in the home folder, even when a folder has it.
+        QCOMPARE(resolve(" orchard "), QString("orchard | ~"));
+        QCOMPARE(resolve("My Plans"), QString("My Plans | ~"));
+        // A path to a folder is used, and names the workspace.
+        QCOMPARE(resolve("~/Work/orchard/"), QString("orchard | ~/Work/orchard"));
+        QCOMPARE(resolve("Work/orchard"), QString("orchard | ~/Work/orchard"));
+        QCOMPARE(resolve(home.path() + "/Work"), QString("Work | ~/Work"));
+        QCOMPARE(Backend::resolveNewWorkspace(home.path() + "/Work", home.path()).value("cwd").toString(),
+                 home.path() + "/Work");
+        // A path that isn't a folder still names it, in the home folder.
+        QCOMPARE(resolve("~/Work/meadow"), QString("meadow | ~"));
+    }
+
+    void closesAWorkspace()
+    {
+        QTemporaryDir dir;
+        Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
+        QTRY_COMPARE(backend.workspaces().size(), 1);
+        backend.closeWorkspace("w1");
+        QCOMPARE(backend.busy(), QString("close"));
+        QTRY_COMPARE(backend.busy(), QString());
+        QVERIFY(log(dir).contains("workspace close w1\n"));
+        QVERIFY(!backend.noticeIsError());
+        QCOMPARE(backend.notice(), QString("Closed garden."));
+    }
+
+    void saysWhenAWorkspaceCantBeClosed()
+    {
+        QTemporaryDir dir;
+        Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
+        QTRY_COMPARE(backend.workspaces().size(), 1);
+        write(dir.filePath("workspace-close.fail"),
+              R"({"error":{"code":"workspace_not_found","message":"workspace w1 not found"},"id":"cli:workspace:close"})");
+        backend.closeWorkspace("w1");
+        QTRY_COMPARE(backend.busy(), QString());
+        QVERIFY(backend.noticeIsError());
+        QCOMPARE(backend.notice(), QString("Couldn't close garden: workspace w1 not found"));
+    }
+
     void namesAgentsTheWayHerdrWants()
     {
         QCOMPARE(Backend::agentName("Ak Beránek!", "x1"), QString("ak-ber-nek-x1"));

@@ -85,6 +85,8 @@ ApplicationWindow {
                enabled: win.expanded && (panel.picker.open || panel.helpVisible || !panel.terminalFocused)
                onActivated: {
                    if (panel.picker.open) {
+                       if (panel.picker.cancel())
+                           return
                        panel.picker.close()
                        win.focusForAgent()
                    } else if (panel.helpVisible) {

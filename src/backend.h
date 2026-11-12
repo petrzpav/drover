@@ -5,6 +5,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QVariantList>
+#include <QVariantMap>
 #include <functional>
 
 #include "agentmodel.h"
@@ -33,7 +34,7 @@ class Backend : public QObject {
     Q_PROPERTY(bool selectionLost READ selectionLost NOTIFY selectedChanged)
     Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
     Q_PROPERTY(bool noticeIsError READ noticeIsError NOTIFY noticeChanged)
-    // The action waiting for herdr: "open", "start", or empty.
+    // The action waiting for herdr: "open", "start", "close", or empty.
     Q_PROPERTY(QString busy READ busy NOTIFY busyChanged)
     // herdr's workspaces, by label: [{id, label, agents}], for the picker.
     Q_PROPERTY(QVariantList workspaces READ workspaces NOTIFY workspacesChanged)
@@ -76,6 +77,18 @@ public:
     // Opens a tab in the workspace and starts the default agent in it, then
     // selects that agent.
     Q_INVOKABLE void startAgent(const QString &workspaceId);
+    // What the picker would create for this text: {label, cwd, folder}, with
+    // folder shown as ~/… ; an empty map for blank text.
+    Q_INVOKABLE QVariantMap newWorkspace(const QString &text) const;
+    // Creates a workspace from the picker's text and starts the default agent
+    // in its first pane, then selects that agent.
+    Q_INVOKABLE void createWorkspace(const QString &text);
+    // Closes a workspace and everything running in it.
+    Q_INVOKABLE void closeWorkspace(const QString &workspaceId);
+
+    // A typed path that is a folder becomes the workspace's folder, named
+    // after it; anything else is a name for a workspace in the home folder.
+    static QVariantMap resolveNewWorkspace(const QString &text, const QString &home);
 
     static QHash<QString, QString> parseWorkspaces(const QByteArray &json);
     static QList<Agent> parseAgents(const QByteArray &json, const QHash<QString, QString> &workspaces,

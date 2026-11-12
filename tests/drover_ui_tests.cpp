@@ -212,6 +212,67 @@ private slots:
         QTRY_VERIFY(rig.log().contains("tab create --workspace w2"));
     }
 
+    void pickerCreatesAWorkspaceNoOneHas()
+    {
+        Rig rig(agents("idle", "idle"));
+        rig.expand();
+        QTest::keyClick(rig.window, Qt::Key_P, Qt::ControlModifier);
+        rig.type("orchard");
+        QTest::keyClick(rig.window, Qt::Key_Return);
+        QTRY_VERIFY(rig.log().contains("workspace create --label orchard --cwd " + QDir::homePath() + " --no-focus"));
+        QVERIFY(!rig.log().contains("tab create"));
+    }
+
+    void pickerClosesAWorkspaceOnlyOnTheSecondPress()
+    {
+        Rig rig(agents("idle", "idle"));
+        rig.expand();
+        QTest::keyClick(rig.window, Qt::Key_P, Qt::ControlModifier);
+        rig.type("ga");
+        QTest::keyClick(rig.window, Qt::Key_Down);
+        QTest::keyClick(rig.window, Qt::Key_D, Qt::ControlModifier);
+        QVERIFY(!rig.log().contains("workspace close"));
+        // A workspace that sorts first shows up between the presses; the
+        // second press still closes the one that was marked.
+        write(rig.dir.filePath("ws.json"), R"({"result":{"workspaces":[{"workspace_id":"w1","label":"garden"},
+            {"workspace_id":"w2","label":"gate"},{"workspace_id":"w3","label":"gable"}]}})");
+        QTRY_COMPARE(rig.backend->workspaces().size(), 3);
+        QTest::qWait(50);
+        QTest::keyClick(rig.window, Qt::Key_D, Qt::ControlModifier);
+        QTRY_VERIFY(rig.log().contains("workspace close w2\n"));
+        QVERIFY(!rig.log().contains("workspace close w1") && !rig.log().contains("workspace close w3"));
+
+        // Esc takes a mark back and keeps the picker open.
+        QFile::remove(rig.dir.filePath("log"));
+        rig.type("te");
+        QTest::keyClick(rig.window, Qt::Key_D, Qt::ControlModifier);
+        QTest::keyClick(rig.window, Qt::Key_Escape);
+        QVERIFY(rig.find("pickerField")->isVisible());
+        QTest::keyClick(rig.window, Qt::Key_D, Qt::ControlModifier);
+        QTest::qWait(100);
+        QVERIFY(!rig.log().contains("workspace close"));
+        QTest::keyClick(rig.window, Qt::Key_D, Qt::ControlModifier);
+        QTRY_VERIFY(rig.log().contains("workspace close w2\n"));
+        QVERIFY(!rig.log().contains("tab create"));
+    }
+
+    void clickingTheTrashButtonStartsNothing()
+    {
+        Rig rig(agents("idle", "idle"));
+        rig.expand();
+        QTest::keyClick(rig.window, Qt::Key_P, Qt::ControlModifier);
+        rig.type("gate");
+        QQuickItem *trash = nullptr;
+        QTRY_VERIFY((trash = rig.find("pickerClose_gate")) && trash->isVisible());
+        const QPoint center = trash->mapToScene(QPointF(trash->width() / 2, trash->height() / 2)).toPoint();
+        QTest::mouseClick(rig.window, Qt::LeftButton, {}, center);
+        QTest::qWait(100);
+        QVERIFY(!rig.log().contains("workspace close"));
+        QTest::mouseClick(rig.window, Qt::LeftButton, {}, center);
+        QTRY_VERIFY(rig.log().contains("workspace close w2\n"));
+        QVERIFY(!rig.log().contains("tab create"));
+    }
+
     void thePanelNeverCoversThePill()
     {
         Rig rig(agents("idle", "idle"));
