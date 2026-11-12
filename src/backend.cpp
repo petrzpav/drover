@@ -29,6 +29,7 @@ Backend::Backend(const QString &herdr, const QString &hyprctl, QObject *parent)
     if (herdr.isEmpty()) {
         const QString config = QDir::homePath() + "/.config/drover/config";
         m_agentKind = readAgentKind(config);
+        m_indicator = readIndicator(config);
         m_closeAction = readCloseAction(config);
         m_socketPath = qEnvironmentVariable("HERDR_SOCKET_PATH", QDir::homePath() + "/.config/herdr/herdr.sock");
     }
@@ -310,6 +311,26 @@ QString Backend::readAgentKind(const QString &configFile) {
             return match.captured(1);
     }
     return QStringLiteral("claude");
+}
+
+QString Backend::readIndicator(const QString &configFile) {
+    QFile file(configFile);
+    if (file.open(QIODevice::ReadOnly)) {
+        static const QRegularExpression line(R"re(^\s*indicator\s*=\s*"?(dots|bars|sheep)"?\s*$)re",
+                                             QRegularExpression::MultilineOption);
+        const auto match = line.match(QString::fromUtf8(file.readAll()));
+        if (match.hasMatch())
+            return match.captured(1);
+    }
+    return QStringLiteral("bars");
+}
+
+void Backend::setIndicator(const QString &style) {
+    const QString known = style == "dots" || style == "sheep" ? style : QStringLiteral("bars");
+    if (known == m_indicator)
+        return;
+    m_indicator = known;
+    emit indicatorChanged();
 }
 
 QString Backend::readCloseAction(const QString &configFile) {

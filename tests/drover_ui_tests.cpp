@@ -7,11 +7,15 @@
 #include <QQuickItem>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QElapsedTimer>
+#include <QPainter>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QtTest>
 
 #include "backend.h"
 #include "surface.h"
+#include "terminalfont.h"
 #include "terminalview.h"
 #include "theme.h"
 #include "translator.h"
@@ -41,7 +45,7 @@ struct Rig {
     QQuickWindow *window = nullptr;
     int quits = 0;
 
-    explicit Rig(const QByteArray &list) {
+    explicit Rig(const QByteArray &list, int expected = 2) {
         write(dir.filePath("agents.json"), list);
         write(dir.filePath("ws.json"), R"({"result":{"workspaces":[{"workspace_id":"w1","label":"garden"},{"workspace_id":"w2","label":"gate"}]}})");
         const QString herdr = dir.filePath("herdr");
@@ -80,7 +84,7 @@ esac
         window->show();
         window->requestActivate();
         QVERIFY(QTest::qWaitForWindowActive(window));
-        QTRY_COMPARE(backend->agents()->count(), 2);
+        QTRY_COMPARE(backend->agents()->count(), expected);
     }
 
     QString log() {
@@ -106,6 +110,18 @@ esac
             QTest::keyClick(window, c.toLatin1());
     }
 };
+
+// Four agents of a made-up garden herd, in the given states, for screenshots.
+QByteArray garden(const QStringList &states) {
+    static const char *tasks[][2] = {{"Plant the tomato beds", "garden"}, {"Repaint the shed door", "shed"},
+                                     {"Fix the fence gate", "fence"}, {"Clean up the pond pump", "pond"}};
+    QStringList rows;
+    for (int i = 0; i < 4; ++i)
+        rows << QString(R"({"agent":"claude","agent_status":"%1","cwd":"/home/ann/Work/%2","pane_id":"w%3:p1",)"
+                        R"("terminal_id":"term_%3","terminal_title_stripped":"%4","workspace_id":"w%3"})")
+                    .arg(states[i], tasks[i][1]).arg(i + 1).arg(tasks[i][0]);
+    return "{\"result\":{\"agents\":[" + rows.join(",").toUtf8() + "]}}";
+}
 
 } // namespace
 
@@ -329,6 +345,105 @@ private slots:
         auto *bar = rig.find("herdBar");
         QTRY_VERIFY_WITH_TIMEOUT(bar->property("level").toReal() > 1.0, 2000);
         QTRY_COMPARE_WITH_TIMEOUT(bar->property("level").toReal(), 0.45, 3000);
+    }
+
+    void sheepJumpIntoThePenWhenTheyFinish()
+    {
+        Rig rig(agents("working", "idle"));
+        rig.backend->setIndicator("sheep");
+        QQuickItem *field = nullptr;
+        QTRY_VERIFY((field = rig.find("herdSheep")));
+        QVERIFY(!rig.find("herdBars"));
+        QCOMPARE(field->property("penned").toInt(), 0);
+        write(rig.dir.filePath("agents.json"), agents("done", "idle"));
+        QTRY_COMPARE_WITH_TIMEOUT(field->property("penned").toInt(), 1, 6000);
+        // Back to work, it jumps out again.
+        write(rig.dir.filePath("agents.json"), agents("working", "idle"));
+        QTRY_COMPARE_WITH_TIMEOUT(field->property("penned").toInt(), 0, 6000);
+    }
+
+    void dotsCountTheStates()
+    {
+        Rig rig(agents("working", "working"));
+        rig.backend->setIndicator("dots");
+        QTRY_VERIFY(rig.find("herdDots"));
+        QVERIFY(!rig.find("herdBar"));
+    }
+
+    // Not a test: with DROVER_SCREENSHOTS=<dir> (bin/screenshots), draws
+    // the README's pictures there, a still of the panel and frames of each
+    // indicator style watching the herd change.
+    void screenshots()
+    {
+        const QString out = qEnvironmentVariable("DROVER_SCREENSHOTS");
+        if (out.isEmpty())
+            QSKIP("set DROVER_SCREENSHOTS to a directory to draw the README's pictures");
+        QDir().mkpath(out);
+        // As drover itself: everything in the terminal's font and size.
+        const QFont font = QGuiApplication::font();
+        QGuiApplication::setFont(TerminalFont::read(QDir::homePath()));
+        const auto restore = qScopeGuard([&] { QGuiApplication::setFont(font); });
+
+        Rig rig(garden({"working", "blocked", "done", "idle"}), 4);
+        // The selected agent's terminal shows a short exchange.
+        write(rig.dir.filePath("transcript"), QByteArray(
+            "\r\n\033[97m\xe2\x97\x8f\033[0m Reading \033[1mbeds.md\033[0m and the planting calendar.\r\n\r\n"
+            "\033[97m\xe2\x97\x8f\033[0m The south bed gets the most sun, so the tomatoes go there;\r\n"
+            "  basil between the rows keeps pests off.\r\n\r\n"
+            "\033[92m\xe2\x97\x8f\033[0m \033[1mUpdate\033[0m(beds.md)\r\n"
+            "  \xe2\x8e\xbf  Added \033[92m6\033[0m lines\r\n\r\n"
+            "\033[2m\xe2\x80\xbb recap: \033[3mplanting plan ready for review\033[0m\r\n"
+            "\033[90m\xe2\x9d\xaf\033[0m \r\n"
+            "  \033[33m\xe2\x8f\xb5\xe2\x8f\xb5 auto mode on\033[0m\033[1A\033[3G"));
+        QFile script(rig.dir.filePath("herdr"));
+        QVERIFY(script.open(QIODevice::ReadOnly));
+        QString text = QString::fromUtf8(script.readAll());
+        script.close();
+        text.replace("  \"terminal attach\")\n", QString("  \"terminal attach\")\n    cat '%1/transcript'; exec sleep 60 ;;\n  \"terminal attach-old\")\n").arg(rig.dir.path()));
+        write(rig.dir.filePath("herdr"), text.toUtf8());
+
+        // The window is see-through; the pictures put it on a black desktop.
+        const auto grab = [&](const QRect &rect) {
+            QImage image(rect.size(), QImage::Format_RGB32);
+            image.fill(Qt::black);
+            QPainter painter(&image);
+            painter.drawImage(0, 0, rig.window->grabWindow().copy(rect));
+            return image;
+        };
+        const auto pillRect = [&] {
+            return QRect(rig.window->property("pillX").toInt(), rig.window->property("pillY").toInt(), 176, 36);
+        };
+
+        // The panel, open on the first agent, with the bars beside it.
+        rig.expand();
+        QTest::qWait(1500);
+        const QRect panel = rig.window->property("panelRect").toRectF().toAlignedRect();
+        grab(panel.united(pillRect()).adjusted(-24, -24, 24, 24)).save(out + "/screenshot.png");
+        QMetaObject::invokeMethod(rig.window, "setExpanded", Q_ARG(QVariant, false));
+
+        // Each style, while one agent finishes, one gets to work and one asks.
+        const QList<QStringList> story = {
+            {"working", "working", "done", "idle"}, {"done", "working", "done", "idle"},
+            {"done", "working", "done", "working"}, {"done", "blocked", "done", "working"},
+        };
+        for (const char *style : {"dots", "bars", "sheep"}) {
+            write(rig.dir.filePath("agents.json"), garden(story[0]));
+            rig.backend->setIndicator(style);
+            QTest::qWait(2500);
+            const QString frames = out + "/" + style;
+            QDir().mkpath(frames);
+            int frame = 0;
+            QElapsedTimer clock;
+            clock.start();
+            for (int step = 1; step <= story.size(); ++step) {
+                if (step < story.size())
+                    write(rig.dir.filePath("agents.json"), garden(story[step]));
+                while (clock.elapsed() < step * 2200) {
+                    grab(pillRect().adjusted(-10, -10, 10, 10)).save(QString("%1/%2.png").arg(frames).arg(frame++, 4, 10, QChar('0')));
+                    QTest::qWait(40);
+                }
+            }
+        }
     }
 
     void thePanelNeverCoversThePill()

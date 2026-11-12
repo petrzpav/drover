@@ -1,16 +1,32 @@
 # Drover
 
 A floating indicator of your [herdr](https://herdr.dev) agents, on every
-Omarchy workspace. The pill is a small live herd, one bar per agent: working
-bars bounce, a bar that just finished shoots up and settles green, one that
-asks you something blinks red, idle ones lie low, and beside them the one
-state that matters most. Drag it wherever you like, and it stays there.
-Click it and a large panel opens beside it: every agent of the local herdr
+Omarchy workspace. The pill is a small live herd that shows what every agent
+is doing and lights up when one finishes or asks you something; drag it
+wherever you like, and it stays there. Click it and a large panel opens beside it: every agent of the local herdr
 session on the left, and on the right a real terminal attached to the selected
 agent, where you work with it exactly as in herdr (Shift+Tab, Esc, Ctrl+C, its
 menus and colors), without leaving the workspace you're on.
 
 ![Drover with four agents](docs/screenshot.png)
+
+### The pill
+
+Three looks, set in `~/.config/drover/config` (bars when there is none);
+drover reads it when it starts:
+
+```ini
+indicator = sheep
+```
+
+| `indicator` | Looks like | Shows |
+| ----------- | ---------- | ----- |
+| `bars` | ![bars](docs/pill-bars.gif) | A bar per agent: working bars bounce, a bar that finishes shoots up and settles green, one that asks you blinks red, idle ones lie low. Beside them the state that matters most: how many ask you, else work, else are done. |
+| `sheep` | ![sheep](docs/pill-sheep.gif) | A pixel sheep per agent, in its state's color: working sheep wander the pasture, one that finishes runs and jumps into the pen to graze, one that asks you stands under a blinking question mark, idle ones sleep. |
+| `dots` | ![dots](docs/pill-dots.gif) | How many agents work, ask you, are done, and are idle. |
+
+When an agent finishes, the pill's border flashes green (bars and sheep); when
+one asks you, it flashes red and stays red while anyone waits for you.
 
 ## Use
 
@@ -136,6 +152,7 @@ o.launch_on_start("drover")
 bin/build      # build/drover
 bin/test       # Qt Test, offscreen: the backend, and the real QML driven against a fake herdr
 bin/install    # makepkg -fsi: installs the binary, launcher entry, and icon
+bin/screenshots  # redraws the pictures in docs/ against a made-up herd (needs ffmpeg)
 ```
 
 Needs `qt6-base`, `qt6-declarative`, `qt6-wayland`, `layer-shell-qt`,

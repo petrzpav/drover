@@ -496,6 +496,18 @@ echo ok
         QCOMPARE(Backend::readAgentKind(dir.filePath("config")), QString("codex"));
     }
 
+    void readsTheIndicator()
+    {
+        QTemporaryDir dir;
+        QCOMPARE(Backend::readIndicator(dir.filePath("config")), QString("bars"));
+        write(dir.filePath("config"), "agent = codex\nindicator = sheep\n");
+        QCOMPARE(Backend::readIndicator(dir.filePath("config")), QString("sheep"));
+        write(dir.filePath("config"), "indicator = dots\n");
+        QCOMPARE(Backend::readIndicator(dir.filePath("config")), QString("dots"));
+        write(dir.filePath("config"), "indicator = goats\n");
+        QCOMPARE(Backend::readIndicator(dir.filePath("config")), QString("bars"));
+    }
+
     void themeGivesTheTerminalPalette()
     {
         QTemporaryDir dir;

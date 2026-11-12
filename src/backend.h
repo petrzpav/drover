@@ -54,6 +54,8 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList workspaces READ workspaces NOTIFY workspacesChanged)
     // The agent the picker starts, from ~/.config/drover/config (agent = ...).
     Q_PROPERTY(QString agentKind READ agentKind CONSTANT)
+    // How the pill shows the herd: "dots" (counts), "bars" or "sheep" (indicator = ... in the config).
+    Q_PROPERTY(QString indicator READ indicator WRITE setIndicator NOTIFY indicatorChanged)
 
 public:
     // Tests pass fake herdr and hyprctl scripts; empty means the ones on PATH.
@@ -78,6 +80,9 @@ public:
     QString agentKind() const { return m_agentKind; }
     void setAgentKind(const QString &kind) { m_agentKind = kind; }
     static QString readAgentKind(const QString &configFile);
+    QString indicator() const { return m_indicator; }
+    void setIndicator(const QString &style);
+    static QString readIndicator(const QString &configFile);
     // A herdr plugin action that closes a workspace instead of `herdr workspace
     // close`, as plugin_id.action_id (close_action = ... in the config): for
     // plugins that bring closed workspaces back unless their own action did it.
@@ -139,6 +144,7 @@ public:
 
 signals:
     void countsChanged();
+    void indicatorChanged();
     void errorChanged();
     // A different pane is selected.
     void selectedChanged();
@@ -175,6 +181,7 @@ private:
     QHash<QString, QString> m_workspaces;
     QString m_error, m_selected, m_notice, m_busy;
     QVariantList m_workspaceList;
+    QString m_indicator = QStringLiteral("bars");
     QString m_agentKind, m_pendingSelect, m_closeAction, m_socketPath;
     QString m_home = QDir::homePath();
     bool m_noticeIsError = false, m_listing = false;
