@@ -29,9 +29,10 @@ class QTimer;
 // there, herdr sees the agent working again and the stage lets it go.
 class Asker : public QObject {
     Q_OBJECT
-    // The request on stage: {id, kind ("question" or "permission"), pane,
-    // title, workspace, questions [{question, header, multiSelect, options
-    // [{label, description}]}], tool, detail, always}; empty when nothing asks.
+    // The request on stage: {id, kind ("question", "permission" or "reply"),
+    // pane, title, workspace, questions [{question, header, multiSelect,
+    // options [{label, description}]}], tool, detail, always, text (the end
+    // of the agent's message)}; empty when nothing asks.
     Q_PROPERTY(QVariantMap current READ current NOTIFY currentChanged)
     // How many wait behind it.
     Q_PROPERTY(int waiting READ waiting NOTIFY waitingChanged)
@@ -74,8 +75,16 @@ public:
     // Refuses the tool. With a message the agent goes on with it; without,
     // it stops and waits, as after "No" in Claude's own prompt.
     Q_INVOKABLE void deny(int id, const QString &message);
-    // Back to the terminal: Claude asks there itself.
+    // Back to the terminal: Claude asks there itself. For a turn's last
+    // question, just off the stage.
     Q_INVOKABLE void pass(int id);
+    // Answers a turn's last question: the text, as one line, is typed into
+    // the agent's pane (typeRequested).
+    Q_INVOKABLE void replyWith(int id, const QString &text);
+    // Whether turns ending with a question come on stage (ask_replies = no
+    // turns it off).
+    void setReplies(bool on) { m_replies = on; }
+    static bool readReplies(const QString &configFile);
 
     // What a permission is about, in a line or a few (a command, a file).
     static QString detail(const QString &tool, const QJsonObject &input);
@@ -92,6 +101,10 @@ signals:
     void askingChanged();
     // A new request arrived for the stage.
     void arrived();
+    // A request came from an agent the last listing doesn't know: list again.
+    void listingWanted();
+    // Type this answer into the agent's pane, if it still is that session.
+    void typeRequested(const QString &pane, const QString &session, const QString &text);
 
 private:
     struct Request {
@@ -103,6 +116,14 @@ private:
         QTimer *hold = nullptr;
     };
     void accept(QLocalSocket *socket, const QJsonObject &ask);
+    void admit(QLocalSocket *socket, const QJsonObject &ask);
+    bool known(const QJsonObject &ask) const;
+    struct Unsure {
+        int token = 0;
+        QPointer<QLocalSocket> socket;
+        QJsonObject ask;
+    };
+    QList<Unsure> m_unsure;
     void reply(int id, const QJsonObject &output);
     void remove(int id);
     int indexOf(int id) const;
@@ -114,5 +135,6 @@ private:
     std::function<bool(const QString &)> m_watching;
     int m_hold = 180;
     QString m_look = QStringLiteral("fence");
+    bool m_replies = true;
     int m_nextId = 1;
 };

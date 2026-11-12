@@ -123,6 +123,12 @@ public:
     // Panes whose agent has a question waiting in drover; they count as
     // asking you.
     void setAsking(const QSet<QString> &panes);
+    // Types an answer into an agent's pane and presses Enter, when it is
+    // still that session, done or idle, and its prompt is empty; otherwise
+    // says why not (and asks for the agent in the panel, answerInPanel).
+    Q_INVOKABLE void typeInto(const QString &pane, const QString &session, const QString &text);
+    // Whether the input line on a Claude screen is empty.
+    static bool promptIsEmpty(const QByteArray &screen);
     // The last listing as herdr reported it.
     const QList<Agent> &listedAgents() const { return m_listed; }
 
@@ -196,6 +202,8 @@ signals:
     void jumped();
     // Every listing of the agents, as herdr reported it.
     void listed(const QList<Agent> &agents);
+    // An answer couldn't be typed for the user; they answer in the panel.
+    void answerInPanel(const QString &pane);
     // The folder picker opens over the desktop, so the panel steps aside.
     void folderPickerOpened();
     void folderPickerClosed(bool chosen, const QString &text);

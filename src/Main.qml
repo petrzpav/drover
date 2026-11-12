@@ -148,6 +148,12 @@ ApplicationWindow {
     Connections {
         target: backend
         function onJumped() { win.expanded = false }
+        // An answer from the stage couldn't be typed: the agent, in the panel.
+        function onAnswerInPanel(pane) {
+            backend.select(pane)
+            win.expanded = true
+            win.focusForAgent()
+        }
         // The folder picker is a window, under this layer: the panel steps
         // aside, then comes back to the new agent or, on cancel, the picker.
         function onFolderPickerOpened() { win.expanded = false }

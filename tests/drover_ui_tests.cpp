@@ -143,6 +143,7 @@ esac
         QVERIFY(asker->listen(askServer));
         QObject::connect(backend.get(), &Backend::listed, asker.get(), &Asker::agentsListed);
         QObject::connect(asker.get(), &Asker::askingChanged, backend.get(), [this] { backend->setAsking(asker->askingPanes()); });
+        QObject::connect(asker.get(), &Asker::listingWanted, backend.get(), &Backend::refresh);
         engine.reset(new QQmlApplicationEngine);
         QObject::connect(engine.get(), &QQmlEngine::quit, engine.get(), [this] { ++quits; });
         engine->rootContext()->setContextProperty("translator", translator.get());
@@ -839,6 +840,46 @@ private slots:
             QVERIFY(s.left() >= 0 && s.right() <= rig.window->width() && s.top() >= 0 && s.bottom() <= rig.window->height());
         }
         rig.asker->pass(rig.asker->current().value("id").toInt());
+    }
+
+    void aTurnsLastQuestionIsAnsweredFromTheStage()
+    {
+        Rig rig(R"({"result":{"agents":[
+          {"agent":"claude","agent_status":"done","cwd":"/a","pane_id":"w1:p1","terminal_id":"term_1","terminal_title_stripped":"Plant the beds","workspace_id":"w1","agent_session":{"value":"s1"}},
+          {"agent":"claude","agent_status":"idle","cwd":"/b","pane_id":"w2:p1","terminal_id":"term_2","terminal_title_stripped":"Fix the gate","workspace_id":"w2","agent_session":{"value":"s2"}}]}})");
+        QSignalSpy typed(rig.asker.get(), &Asker::typeRequested);
+        auto *stage = rig.find("askStage");
+        const auto ask = [&] {
+            const QJsonObject stop{{"hook_event_name", "Stop"}, {"session_id", "s1"},
+                                   {"last_assistant_message", "The beds are planted.\n\nShall I water them too?"}};
+            QVERIFY(Hook::run(QJsonDocument(stop).toJson(), {{"HERDR_PANE_ID", "w1:p1"}}, rig.askServer).isEmpty());
+            QTRY_VERIFY(stage->isVisible());
+            QTRY_VERIFY(rig.find("stageQuestion")->property("text").toString().endsWith("Shall I water them too?"));
+            QMetaObject::invokeMethod(rig.window, "toggle");
+            QTRY_VERIFY(stage->property("hasKeyboard").toBool());
+        };
+        ask();
+        QTRY_COMPARE(rig.backend->blocked(), 1);
+        QTest::keyClick(rig.window, Qt::Key_1);
+        QTRY_COMPARE(typed.size(), 1);
+        QCOMPARE(typed.at(0).at(0).toString(), QString("w1:p1"));
+        QCOMPARE(typed.at(0).at(2).toString(), QString("Yes"));
+        QTRY_VERIFY(!stage->isVisible());
+
+        ask();
+        QTest::keyClick(rig.window, Qt::Key_2);
+        QTRY_VERIFY(rig.find("stageOwnField")->hasActiveFocus());
+        rig.type("only the tomatoes");
+        QTest::keyClick(rig.window, Qt::Key_Return);
+        QTRY_COMPARE(typed.size(), 2);
+        QCOMPARE(typed.at(1).at(2).toString(), QString("only the tomatoes"));
+        QTRY_VERIFY(!stage->isVisible());
+
+        // Esc leaves it for later: nothing is typed.
+        ask();
+        QTest::keyClick(rig.window, Qt::Key_Escape);
+        QTRY_VERIFY(!stage->isVisible());
+        QCOMPARE(typed.size(), 2);
     }
 
     void thePanelNeverCoversThePill()

@@ -125,13 +125,26 @@ asking wait in line; the next one peeks in from the wings.
 
 ![An agent's question on the stage](docs/stage.png)
 
+An agent that ends its turn with a plain question ("Shall I push it?")
+comes on stage too, with the end of its message: `1` answers yes, the last
+row takes your own words, and drover types the answer into the agent's
+terminal and presses Enter, as if you had. It types only into the same
+Claude session, done or idle, with nothing in its prompt; otherwise it
+says why and opens the agent in the panel. `Esc` leaves the question for
+later, and an answer typed in the terminal takes it off the stage. If that
+is too much, turn it off:
+
+```ini
+ask_replies = no
+```
+
 The stage never takes the keyboard on its own, so typing elsewhere can't
 answer it: click it, or press drover's key (`drover toggle`, `Super+H` with
 the binding above). It then keeps the keyboard until you answer; the same
 key hands it back and leaves the question waiting. `Esc` leaves the question to the agent's terminal, and
 **Open** (`Ctrl+O`) opens the agent in the panel.
 
-It needs two Claude Code hooks in `~/.claude/settings.json`; drover adds or
+It needs three Claude Code hooks in `~/.claude/settings.json`; drover adds or
 removes them, leaving the rest of the file as it was (a copy of the old one
 is kept beside it, as `settings.json.drover-backup`):
 

@@ -193,6 +193,75 @@ void Backend::refresh() {
     });
 }
 
+bool Backend::promptIsEmpty(const QByteArray &screen) {
+    // The screen with its colors: an empty prompt may show a hint in dim
+    // text (Try "…"), which isn't a draft.
+    static const QRegularExpression dim(R"(\x1b\[2m.*?(?=\x1b\[(?:0|22)?m|$))");
+    static const QRegularExpression escape(R"(\x1b\[[0-9;?]*[A-Za-z])");
+    const QStringList lines = QString::fromUtf8(screen).split('\n');
+    for (auto it = lines.crbegin(); it != lines.crend(); ++it) {
+        QString plain = *it;
+        plain.remove(escape);
+        if (!plain.trimmed().startsWith(QChar(0x276F)))  // ❯, Claude's prompt
+            continue;
+        QString line = *it;
+        line.remove(dim);
+        line.remove(escape);
+        line.remove(QChar(0x276F));
+        line.remove(QChar(0x00A0));
+        line.remove('\r');
+        return line.trimmed().isEmpty();
+    }
+    return false;
+}
+
+void Backend::typeInto(const QString &pane, const QString &session, const QString &text) {
+    const QString program = herdr();
+    if (program.isEmpty() || text.isEmpty())
+        return;
+    // Listed again right now: a pane that went back to a shell would run
+    // the answer as a command.
+    run(program, {"agent", "list"}, [this, program, pane, session, text](int code, const QByteArray &out,
+                                                                        const QByteArray &err) {
+        QString error = commandError(out, err, code);
+        QList<Agent> agents;
+        if (error.isEmpty())
+            agents = parseAgents(out, m_workspaces, QDir::homePath(), &error);
+        const auto agent = std::find_if(agents.cbegin(), agents.cend(), [&](const Agent &a) { return a.paneId == pane; });
+        if (!error.isEmpty() || agent == agents.cend() || agent->sessionId.isEmpty() || agent->sessionId != session) {
+            setNotice(tr("The agent that asked has gone, so the answer wasn't sent."), true);
+            return;
+        }
+        const QString title = agent->title;
+        if (agent->status != "idle" && agent->status != "done") {
+            setNotice(tr("%1 is busy again, so the answer wasn't sent.").arg(title), true);
+            emit answerInPanel(pane);
+            return;
+        }
+        run(program, {"pane", "read", pane, "--source", "visible", "--format", "ansi"},
+            [this, program, pane, text, title](int code, const QByteArray &out, const QByteArray &) {
+                // Typing after a draft would send the two together.
+                if (code != 0 || !promptIsEmpty(out)) {
+                    setNotice(tr("%1 has unsent text in its prompt, so answer it there.").arg(title), true);
+                    emit answerInPanel(pane);
+                    return;
+                }
+                run(program, {"pane", "send-text", pane, text},
+                    [this, program, pane, title](int code, const QByteArray &out, const QByteArray &err) {
+                        if (code != 0) {
+                            setNotice(tr("Couldn't answer %1: %2").arg(title, commandError(out, err, code)), true);
+                            return;
+                        }
+                        run(program, {"pane", "send-keys", pane, "enter"},
+                            [this, title](int code, const QByteArray &out, const QByteArray &err) {
+                                if (code != 0)
+                                    setNotice(tr("Couldn't answer %1: %2").arg(title, commandError(out, err, code)), true);
+                            });
+                    });
+            });
+    });
+}
+
 void Backend::setAsking(const QSet<QString> &panes) {
     if (panes == m_asking)
         return;

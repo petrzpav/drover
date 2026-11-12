@@ -21,6 +21,36 @@ QString serverName() {
     return runtime + QStringLiteral("/drover-ask");
 }
 
+bool endsWithQuestion(const QString &message) {
+    const QStringList lines = message.split('\n', Qt::SkipEmptyParts);
+    for (auto it = lines.crbegin(); it != lines.crend(); ++it) {
+        QString line = *it;
+        // Markdown around the end of the sentence: **bold?**, `code?`, _x?_
+        static const QRegularExpression trailing(R"([\s*_`)\]"'»“”]+$)");
+        line.remove(trailing);
+        if (line.isEmpty())
+            continue;
+        return line.endsWith('?');
+    }
+    return false;
+}
+
+QString lastLines(const QString &message, int limit) {
+    // The paragraph with the question, and what leads up to it, as far as
+    // it fits.
+    const QStringList paragraphs = message.trimmed().split(QRegularExpression(R"(\n\s*\n)"), Qt::SkipEmptyParts);
+    QString text;
+    for (auto it = paragraphs.crbegin(); it != paragraphs.crend(); ++it) {
+        const QString next = text.isEmpty() ? it->trimmed() : it->trimmed() + "\n\n" + text;
+        if (!text.isEmpty() && next.size() > limit)
+            break;
+        text = next;
+    }
+    if (text.size() > limit)
+        text = QString::fromUtf8("…") + text.right(limit);
+    return text;
+}
+
 QJsonObject request(const QJsonObject &input, const QHash<QString, QString> &env) {
     const QString pane = env.value("HERDR_PANE_ID");
     if (pane.isEmpty())
@@ -32,6 +62,22 @@ QJsonObject request(const QJsonObject &input, const QHash<QString, QString> &env
     const QString tool = input.value("tool_name").toString();
     const QJsonObject toolInput = input.value("tool_input").toObject();
     QString kind;
+    if (event == "Stop") {
+        // A turn that ends with a question: the agent waits for an answer
+        // with no dialog. Never while a Stop hook already made it go on.
+        if (input.value("stop_hook_active").toBool())
+            return {};
+        const QString text = input.value("last_assistant_message").toString();
+        if (!endsWithQuestion(text))
+            return {};
+        return QJsonObject{
+            {"kind", "reply"},
+            {"pane", pane},
+            {"session", input.value("session_id").toString()},
+            {"cwd", input.value("cwd").toString()},
+            {"input", QJsonObject{{"text", lastLines(text)}}},
+        };
+    }
     if (event == "PreToolUse" && tool == "AskUserQuestion") {
         const QJsonArray questions = toolInput.value("questions").toArray();
         if (questions.isEmpty())
@@ -75,6 +121,11 @@ QByteArray run(const QByteArray &input, const QHash<QString, QString> &env, cons
         return {};
     socket.write(QJsonDocument(ask).toJson(QJsonDocument::Compact) + '\n');
     if (!socket.waitForBytesWritten(1000))
+        return {};
+    // An answer to a turn's last question is typed into the agent's pane
+    // later; the agent doesn't wait, and a Stop hook that printed something
+    // could make it go on.
+    if (ask.value("kind").toString() == "reply")
         return {};
     // Drover answers whenever the user does; Claude's own timeout or the user
     // pressing Esc in the terminal ends the wait from the other side.
@@ -128,7 +179,7 @@ namespace {
 // a question back to the terminal; this only ends a hook nobody answers.
 constexpr int waitLimit = 86400;
 
-const char *const events[] = {"PreToolUse", "PermissionRequest"};
+const char *const events[] = {"PreToolUse", "PermissionRequest", "Stop"};
 
 bool isOurs(const QJsonValue &group) {
     for (const auto &hook : group.toObject().value("hooks").toArray())
@@ -211,7 +262,11 @@ QString install(const QString &settingsFile) {
     const QJsonObject matchers{{"PreToolUse", "AskUserQuestion"}, {"PermissionRequest", "*"}};
     for (const char *event : events) {
         QJsonArray groups = hooks.value(event).toArray();
-        groups.append(QJsonObject{{"matcher", matchers.value(event)}, {"hooks", QJsonArray{hook}}});
+        // Stop has no matcher, and its hook only hands the question over.
+        if (QLatin1String(event) == QLatin1String("Stop"))
+            groups.append(QJsonObject{{"hooks", QJsonArray{QJsonObject{{"type", "command"}, {"command", command}, {"timeout", 10}}}}});
+        else
+            groups.append(QJsonObject{{"matcher", matchers.value(event)}, {"hooks", QJsonArray{hook}}});
         hooks.insert(event, groups);
     }
     settings.insert("hooks", hooks);

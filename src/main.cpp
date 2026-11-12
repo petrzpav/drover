@@ -179,6 +179,9 @@ int main(int argc, char *argv[]) {
     Asker asker;
     asker.setHold(Asker::readHold(QDir::homePath() + "/.config/drover/config"));
     asker.setLook(Asker::readLook(QDir::homePath() + "/.config/drover/config"));
+    asker.setReplies(Asker::readReplies(QDir::homePath() + "/.config/drover/config"));
+    QObject::connect(&asker, &Asker::typeRequested, &backend, &Backend::typeInto);
+    QObject::connect(&asker, &Asker::listingWanted, &backend, &Backend::refresh);
     if (!asker.listen(Hook::serverName()))
         fprintf(stderr, "drover: can't listen on %s, so agents ask in their terminals\n", qPrintable(Hook::serverName()));
     QObject::connect(&backend, &Backend::listed, &asker, &Asker::agentsListed);

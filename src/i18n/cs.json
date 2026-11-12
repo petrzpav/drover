@@ -1,4 +1,6 @@
 {
+  "%1 has unsent text in its prompt, so answer it there.": "%1 má v poli rozepsaný text, odpověz tedy tam.",
+  "%1 is busy again, so the answer wasn't sent.": "%1 už zase pracuje, takže odpověď neodešla.",
   "%1 is not installed.": "%1 není nainstalovaný.",
   "%n agents": {
     "one": "%n agent",
@@ -16,6 +18,7 @@
     "few": "%n pracují",
     "other": "%n pracuje"
   },
+  "1–%1 pick · Esc later": "1–%1 vybrat · Esc později",
   "1–%1 pick · Esc terminal": "1–%1 vybrat · Esc do terminálu",
   "1–%1 tick · Enter send · Esc terminal": "1–%1 označit · Enter odeslat · Esc do terminálu",
   "agent": "agent",
@@ -32,6 +35,7 @@
   "Close the picker or help; outside the terminal, hide the panel": "Zavřít výběr nebo nápovědu; mimo terminál skrýt panel",
   "Close this workspace": "Zavřít tento workspace",
   "Closed %1.": "%1 zavřen.",
+  "Couldn't answer %1: %2": "%1 nejde odpovědět: %2",
   "Couldn't bring herdr forward: %1": "Okno herdr nejde přenést dopředu: %1",
   "Couldn't close %1: %2": "%1 nejde zavřít: %2",
   "Couldn't create %1: %2": "%1 nejde vytvořit: %2",
@@ -94,6 +98,7 @@
   "Starting %1 in %2…": "Spouštím %1 v %2…",
   "Switch between the agent and the editor beside it": "Přepnout mezi agentem a editorem vedle něj",
   "the agent stops and waits for you": "agent se zastaví a počká na tebe",
+  "The agent that asked has gone, so the answer wasn't sent.": "Agent, který se ptal, už tu není, takže odpověď neodešla.",
   "The agent you were talking to is gone. Pick another one.": "Agent, se kterým jste mluvili, skončil. Vyberte jiného.",
   "the picker ended with an error.": "výběr skončil chybou.",
   "The terminal was detached from the agent.": "Terminál se od agenta odpojil.",

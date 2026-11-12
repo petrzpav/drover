@@ -10,8 +10,10 @@
 // The Claude Code hook that brings an agent's question to drover.
 //
 // Claude Code runs `drover hook` before it shows a question dialog
-// (PreToolUse for AskUserQuestion) and while it shows a permission prompt
-// (PermissionRequest). The hook hands the request to the running drover over
+// (PreToolUse for AskUserQuestion), while it shows a permission prompt
+// (PermissionRequest), and when a turn ends (Stop): a turn that ends with a
+// question goes on the stage too, and its answer is typed into the agent's
+// pane, so for that one the hook doesn't wait. The hook hands the request to the running drover over
 // a local socket and waits; drover answers with what the hook prints back
 // (the user's answers, or allow/deny), or with nothing, and Claude shows its
 // own dialog as if drover weren't there.
@@ -33,6 +35,11 @@ QByteArray run(const QByteArray &input, const QHash<QString, QString> &env, cons
 // The request drover gets for a hook input, or an empty object when drover
 // has nothing to do with it.
 QJsonObject request(const QJsonObject &input, const QHash<QString, QString> &env);
+
+// Whether an agent's last message ends with a question to the user.
+bool endsWithQuestion(const QString &message);
+// The end of a message, about `limit` characters: its last paragraphs.
+QString lastLines(const QString &message, int limit = 600);
 
 // What the hook prints for an answer.
 QJsonObject questionOutput(const QJsonObject &toolInput, const QStringList &answers);

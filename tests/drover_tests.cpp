@@ -1026,6 +1026,196 @@ echo ok
         QCOMPARE(Asker::readHold(dir.filePath("config")), 0);
     }
 
+    void hookSeesATurnEndingWithAQuestion()
+    {
+        QVERIFY(Hook::endsWithQuestion("Hotovo, testy prošly.\n\nMám to commitnout a pushnout?"));
+        QVERIFY(Hook::endsWithQuestion("Done.\n\n**Release it?**\n"));
+        QVERIFY(Hook::endsWithQuestion("Which one do you want (`a` or `b`)?"));
+        QVERIFY(!Hook::endsWithQuestion("Is it ok? Yes, it is.\n\nAll done."));
+        QVERIFY(!Hook::endsWithQuestion(""));
+        const QHash<QString, QString> pane{{"HERDR_PANE_ID", "w1:p1"}};
+        QJsonObject stop{{"hook_event_name", "Stop"}, {"session_id", "s1"},
+                         {"last_assistant_message", "Fixed the gate.\n\nShall I paint it too?"}};
+        const QJsonObject ask = Hook::request(stop, pane);
+        QCOMPARE(ask.value("kind").toString(), QString("reply"));
+        QCOMPARE(ask.value("input").toObject().value("text").toString(), QString("Fixed the gate.\n\nShall I paint it too?"));
+        stop.insert("stop_hook_active", true);
+        QVERIFY(Hook::request(stop, pane).isEmpty());
+        stop.insert("stop_hook_active", false);
+        stop.insert("last_assistant_message", "Fixed the gate.");
+        QVERIFY(Hook::request(stop, pane).isEmpty());
+        // A long message: its end, as far as it fits.
+        const QString longText = QString("word ").repeated(300) + "\n\nShall I go on?";
+        QCOMPARE(Hook::lastLines(longText), QString("Shall I go on?"));
+        QVERIFY(Hook::lastLines(QString("x").repeated(900) + "?").startsWith(QString::fromUtf8("…")));
+    }
+
+    void hookDoesntWaitAtTheEndOfATurn()
+    {
+        Asker asker;
+        const QString name = listen(asker);
+        asker.agentsListed({agent("w1:p1", "working", "s1")});
+        const QJsonObject stop{{"hook_event_name", "Stop"}, {"session_id", "s1"},
+                               {"last_assistant_message", "Shall I paint it too?"}};
+        QElapsedTimer timer;
+        timer.start();
+        // On this thread: drover's loop doesn't run until the hook is done.
+        QVERIFY(Hook::run(QJsonDocument(stop).toJson(), pane("w1:p1"), name).isEmpty());
+        QVERIFY(timer.elapsed() < 1000);
+        QTRY_COMPARE(asker.current().value("kind").toString(), QString("reply"));
+        QCOMPARE(asker.current().value("text").toString(), QString("Shall I paint it too?"));
+        QCOMPARE(asker.askingPanes(), QSet<QString>{"w1:p1"});
+    }
+
+    void askerPutsTurnQuestionsBehindDialogs()
+    {
+        Asker asker;
+        const QString name = listen(asker);
+        asker.agentsListed({agent("w1:p1", "done", "s1"), agent("w2:p1", "working", "s2")});
+        Hook::run(QJsonDocument(QJsonObject{{"hook_event_name", "Stop"}, {"session_id", "s1"},
+                                            {"last_assistant_message", "Push it?"}}).toJson(), pane("w1:p1"), name);
+        QTRY_COMPARE(asker.current().value("kind").toString(), QString("reply"));
+        QJsonObject dialog = question();
+        dialog.insert("session_id", "s2");
+        QByteArray output;
+        std::thread hook([&] { output = Hook::run(QJsonDocument(dialog).toJson(), pane("w2:p1"), name); });
+        QTRY_COMPARE(asker.current().value("kind").toString(), QString("question"));
+        QCOMPARE(asker.waiting(), 1);
+        asker.answer(asker.current().value("id").toInt(), {"Red", "Small"});
+        hook.join();
+        QCOMPARE(asker.current().value("kind").toString(), QString("reply"));
+        QString typedPane, typedSession, typed;
+        connect(&asker, &Asker::typeRequested, this, [&](const QString &p, const QString &s, const QString &t) {
+            typedPane = p; typedSession = s; typed = t;
+        });
+        asker.replyWith(asker.current().value("id").toInt(), "  yes,\nand release it  ");
+        QCOMPARE(typedPane, QString("w1:p1"));
+        QCOMPARE(typedSession, QString("s1"));
+        QCOMPARE(typed, QString("yes, and release it"));
+        QVERIFY(asker.current().isEmpty());
+    }
+
+    void askerDropsATurnQuestionAnsweredInTheTerminal()
+    {
+        Asker asker;
+        const QString name = listen(asker);
+        asker.agentsListed({agent("w1:p1", "working", "s1")});
+        Hook::run(QJsonDocument(QJsonObject{{"hook_event_name", "Stop"}, {"session_id", "s1"},
+                                            {"last_assistant_message", "Push it?"}}).toJson(), pane("w1:p1"), name);
+        QTRY_VERIFY(asker.current().contains("id"));
+        // herdr may still see it working when the turn ends.
+        asker.agentsListed({agent("w1:p1", "working", "s1")});
+        QVERIFY(asker.current().contains("id"));
+        asker.agentsListed({agent("w1:p1", "done", "s1")});
+        QVERIFY(asker.current().contains("id"));
+        asker.agentsListed({agent("w1:p1", "working", "s1")});
+        QVERIFY(asker.current().isEmpty());
+    }
+
+    void askerWaitsForAListingThatKnowsANewSession()
+    {
+        Asker asker;
+        const QString name = listen(asker);
+        QSignalSpy wanted(&asker, &Asker::listingWanted);
+        asker.agentsListed({agent("w1:p1", "done", "old")});
+        // A new Claude in the pane (a restart, /clear) asks before drover
+        // has listed it.
+        Hook::run(QJsonDocument(QJsonObject{{"hook_event_name", "Stop"}, {"session_id", "s1"},
+                                            {"last_assistant_message", "Push it?"}}).toJson(), pane("w1:p1"), name);
+        QTRY_COMPARE(wanted.size(), 1);
+        QVERIFY(asker.current().isEmpty());
+        asker.agentsListed({agent("w1:p1", "done", "s1")});
+        QCOMPARE(asker.current().value("kind").toString(), QString("reply"));
+
+        // A dialog from a session that never shows up goes to the terminal.
+        QJsonObject stranger = question();
+        stranger.insert("session_id", "nobody");
+        QElapsedTimer timer;
+        timer.start();
+        QVERIFY(ask(QJsonDocument(stranger).toJson(), pane("w1:p1"), name).isEmpty());
+        QVERIFY(timer.elapsed() >= 1400);
+    }
+
+    void askerLeavesTurnQuestionsOfUnknownSessionsAlone()
+    {
+        Asker asker;
+        const QString name = listen(asker);
+        asker.agentsListed({agent("w1:p1", "done", "")});  // herdr doesn't know its session
+        Hook::run(QJsonDocument(QJsonObject{{"hook_event_name", "Stop"}, {"session_id", "s1"},
+                                            {"last_assistant_message", "Push it?"}}).toJson(), pane("w1:p1"), name);
+        QTest::qWait(100);
+        QVERIFY(asker.current().isEmpty());
+        // Or when they're turned off.
+        Asker off;
+        off.setReplies(false);
+        const QString other = listen(off);
+        off.agentsListed({agent("w1:p1", "done", "s1")});
+        Hook::run(QJsonDocument(QJsonObject{{"hook_event_name", "Stop"}, {"session_id", "s1"},
+                                            {"last_assistant_message", "Push it?"}}).toJson(), pane("w1:p1"), other);
+        QTest::qWait(100);
+        QVERIFY(off.current().isEmpty());
+    }
+
+    void readsAskReplies()
+    {
+        QTemporaryDir dir;
+        QVERIFY(Asker::readReplies(dir.filePath("missing")));
+        write(dir.filePath("config"), "ask_replies = no\n");
+        QVERIFY(!Asker::readReplies(dir.filePath("config")));
+        write(dir.filePath("config"), "ask_replies = yes\n");
+        QVERIFY(Asker::readReplies(dir.filePath("config")));
+    }
+
+    void typesAnAnswerOnlyIntoTheSameIdleAgentWithAnEmptyPrompt()
+    {
+        QTemporaryDir dir;
+        Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
+        QTRY_VERIFY(backend.agents()->count() > 0);
+        QStringList inPanel;
+        connect(&backend, &Backend::answerInPanel, this, [&](const QString &p) { inPanel << p; });
+        const auto agentList = [&](const char *status, const char *session) {
+            const QJsonObject agent{{"agent", "claude"}, {"agent_status", status}, {"pane_id", "w1:p1"},
+                                    {"terminal_id", "t1"}, {"workspace_id", "w1"},
+                                    {"terminal_title_stripped", "Paint the gate"},
+                                    {"agent_session", QJsonObject{{"value", session}}}};
+            write(dir.filePath("agent-list.out"),
+                  QJsonDocument(QJsonObject{{"result", QJsonObject{{"agents", QJsonArray{agent}}}}}).toJson());
+        };
+        const QByteArray empty = "● Shall I paint it too?\n\n────\n\xe2\x9d\xaf\n────\n  ? for shortcuts\n";
+        const QByteArray draft = "● Shall I paint it too?\n\n────\n\xe2\x9d\xaf\xc2\xa0half a thought\r\n────\n";
+        // An empty prompt with Claude's dim hint in it.
+        QVERIFY(Backend::promptIsEmpty("\xe2\x9d\xaf\xc2\xa0\x1b[0m\x1b[2mTry \"edit backend.cpp to...\"\x1b[0m\r\n────\n"));
+        QVERIFY(!Backend::promptIsEmpty("\x1b[1m\xe2\x9d\xaf\x1b[0m\xc2\xa0draft\r\n"));
+        QVERIFY(Backend::promptIsEmpty(empty));
+        QVERIFY(!Backend::promptIsEmpty(draft));
+        QVERIFY(!Backend::promptIsEmpty("$ \n"));  // no Claude prompt at all
+        agentList("done", "s1");
+        write(dir.filePath("pane-read.out"), empty);
+        backend.typeInto("w1:p1", "s1", QString::fromUtf8("Ano, a červeně"));
+        QTRY_VERIFY(log(dir).contains("pane send-keys w1:p1 enter"));
+        QVERIFY(log(dir).contains(QString::fromUtf8("pane send-text w1:p1 Ano, a červeně")));
+        QVERIFY(inPanel.isEmpty());
+
+        // A draft in the prompt: not typed, the panel instead.
+        QFile::remove(dir.filePath("log"));
+        write(dir.filePath("pane-read.out"), draft);
+        backend.typeInto("w1:p1", "s1", "yes");
+        QTRY_COMPARE(inPanel, QStringList{"w1:p1"});
+        QVERIFY(!log(dir).contains("send-text"));
+        QVERIFY(backend.noticeIsError());
+
+        // Working again, or another session in the pane: not typed.
+        write(dir.filePath("pane-read.out"), empty);
+        agentList("working", "s1");
+        backend.typeInto("w1:p1", "s1", "yes");
+        QTRY_COMPARE(inPanel.size(), 2);
+        agentList("idle", "s2");
+        backend.typeInto("w1:p1", "s1", "yes");
+        QTest::qWait(300);
+        QVERIFY(!log(dir).contains("send-text"));
+        QVERIFY(!log(dir).contains("pane read w1:p1 --source visible\npane read"));
+    }
+
     void readsTheStageLook()
     {
         QTemporaryDir dir;
@@ -1063,6 +1253,8 @@ echo ok
         QCOMPARE(hooks.value("PreToolUse").toArray().size(), 2);
         QCOMPARE(hooks.value("PreToolUse").toArray().at(1).toObject().value("matcher").toString(), QString("AskUserQuestion"));
         QCOMPARE(hooks.value("PermissionRequest").toArray().size(), 1);
+        QCOMPARE(hooks.value("Stop").toArray().size(), 1);
+        QVERIFY(!hooks.value("Stop").toArray().at(0).toObject().contains("matcher"));
 
         QCOMPARE(Hook::uninstall(settings), QString());
         QVERIFY(!Hook::installed(settings));
@@ -1071,6 +1263,7 @@ echo ok
         const QJsonObject left = QJsonDocument::fromJson(again.readAll()).object().value("hooks").toObject();
         QCOMPARE(left.value("PreToolUse").toArray().size(), 1);
         QVERIFY(!left.contains("PermissionRequest"));
+        QVERIFY(!left.contains("Stop"));
         QCOMPARE(left.value("SessionStart").toArray().size(), 1);
     }
 

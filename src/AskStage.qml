@@ -28,6 +28,8 @@ FocusScope {
     property var request: ({})
     readonly property bool shown: request.id !== undefined
     readonly property bool isQuestion: request.kind === "question"
+    // A turn that ended with a question: the answer is typed into the pane.
+    readonly property bool isReply: request.kind === "reply"
     readonly property var questions: isQuestion ? request.questions : []
     property int step: 0
     property var answers: []
@@ -44,6 +46,7 @@ FocusScope {
 
     readonly property var question: isQuestion && step < questions.length ? questions[step] : ({})
     readonly property var options: isQuestion ? (question.options || [])
+                                 : isReply ? [{ label: qsTr("Yes"), description: "" }]
                                  : request.kind === "permission" ? permissionOptions() : []
     // Rows: the options, then the field for your own answer.
     readonly property int rows: options.length + 1
@@ -152,6 +155,8 @@ FocusScope {
         }
         if (isQuestion)
             give(options[row].label)
+        else if (isReply)
+            answerReply(options[row].label)
         else
             decide(options[row].action, "")
     }
@@ -172,6 +177,8 @@ FocusScope {
             return
         if (isQuestion)
             give(text)
+        else if (isReply)
+            answerReply(text)
         else
             decide("deny", text)
     }
@@ -192,6 +199,12 @@ FocusScope {
         const id = request.id
         leave(true)
         asker.answer(id, list)
+    }
+
+    function answerReply(text) {
+        const id = request.id
+        leave(true)
+        asker.replyWith(id, text)
     }
 
     function back() {
@@ -464,7 +477,8 @@ FocusScope {
                     text: "<b>" + stage.html(stage.request.title || "") + "</b>"
                           + "<font color='" + Qt.alpha(theme.foreground, 0.55) + "'> · "
                           + stage.html(stage.isQuestion ? (stage.question.header || qsTr("asks you"))
-                                                          : qsTr("wants to use %1").arg(stage.request.tool || ""))
+                                       : stage.isReply ? qsTr("asks you")
+                                       : qsTr("wants to use %1").arg(stage.request.tool || ""))
                           + "</font>"
                 }
 
@@ -512,11 +526,12 @@ FocusScope {
                         objectName: "stageQuestion"
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
-                        maximumLineCount: 4
+                        maximumLineCount: stage.isReply ? 8 : 4
                         elide: Text.ElideRight
                         color: theme.foreground
                         text: stage.isQuestion ? (stage.question.question || "")
-                                               : qsTr("Allow %1?").arg(stage.request.tool || "")
+                            : stage.isReply ? (stage.request.text || "")
+                            : qsTr("Allow %1?").arg(stage.request.tool || "")
                     }
                     Text {
                         Layout.alignment: Qt.AlignTop
@@ -661,8 +676,8 @@ FocusScope {
                                     visible: ownAnswer.text === ""
                                     elide: Text.ElideRight
                                     color: Qt.alpha(theme.foreground, 0.4)
-                                    text: stage.isQuestion ? qsTr("Your own answer…")
-                                                           : qsTr("No, and do this instead…")
+                                    text: stage.isQuestion || stage.isReply ? qsTr("Your own answer…")
+                                                                            : qsTr("No, and do this instead…")
                                 }
                                 TapHandler { onTapped: { stage.takeKeyboard(); ownAnswer.forceActiveFocus() } }
                             }
@@ -688,6 +703,7 @@ FocusScope {
                     text: !stage.hasKeyboard ? qsTr("Click to answer, or press drover's key")
                         : stage.isQuestion && stage.question.multiSelect
                           ? qsTr("1–%1 tick · Enter send · Esc terminal").arg(stage.rows)
+                          : stage.isReply ? qsTr("1–%1 pick · Esc later").arg(stage.rows)
                           : qsTr("1–%1 pick · Esc terminal").arg(stage.rows)
                 }
                 IconButton {

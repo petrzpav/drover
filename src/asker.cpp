@@ -70,32 +70,66 @@ QString Asker::readLook(const QString &configFile) {
     return QStringLiteral("fence");
 }
 
+bool Asker::known(const QJsonObject &ask) const {
+    // Only an agent drover knows, and its own session: a Claude started
+    // inside an agent's pane (a script, `claude -p`) inherits the pane.
+    const auto agent = m_agents.constFind(ask.value("pane").toString());
+    if (agent == m_agents.constEnd())
+        return false;
+    const QString session = ask.value("session").toString();
+    // An answer typed into the pane later must reach this very agent.
+    if (ask.value("kind").toString() == "reply")
+        return !agent->sessionId.isEmpty() && agent->sessionId == session;
+    return agent->sessionId.isEmpty() || session.isEmpty() || agent->sessionId == session;
+}
+
 void Asker::accept(QLocalSocket *socket, const QJsonObject &ask) {
     const QString kind = ask.value("kind").toString();
     const QString pane = ask.value("pane").toString();
+    const bool reply = kind == "reply";
+    if ((kind != "question" && kind != "permission" && !(reply && m_replies)) || pane.isEmpty()) {
+        socket->write("{}\n");
+        socket->flush();
+        socket->disconnectFromServer();
+        return;
+    }
+    if (known(ask)) {
+        admit(socket, ask);
+        return;
+    }
+    // A new agent, or a new session in its pane (/clear, a restart), isn't
+    // in the last listing yet: ask for another and decide on that one.
+    const int token = m_nextId++;
+    m_unsure.append({token, socket, ask});
+    emit listingWanted();
+    QTimer::singleShot(1500, this, [this, token] {
+        for (int i = 0; i < m_unsure.size(); ++i) {
+            if (m_unsure.at(i).token != token)
+                continue;
+            const Unsure unsure = m_unsure.takeAt(i);
+            if (unsure.socket && unsure.socket->state() == QLocalSocket::ConnectedState) {
+                unsure.socket->write("{}\n");
+                unsure.socket->flush();
+                unsure.socket->disconnectFromServer();
+            }
+            return;
+        }
+    });
+}
+
+void Asker::admit(QLocalSocket *socket, const QJsonObject &ask) {
+    const QString kind = ask.value("kind").toString();
+    const QString pane = ask.value("pane").toString();
+    const bool reply = kind == "reply";
     const auto passNow = [socket] {
+        if (!socket || socket->state() != QLocalSocket::ConnectedState)
+            return;
         socket->write("{}\n");
         socket->flush();
         socket->disconnectFromServer();
     };
-    if ((kind != "question" && kind != "permission") || pane.isEmpty()) {
-        passNow();
-        return;
-    }
-    // Only an agent drover knows, and its own session: a Claude started
-    // inside an agent's pane (a script, `claude -p`) inherits the pane.
-    const auto agent = m_agents.constFind(pane);
-    if (agent == m_agents.constEnd()) {
-        passNow();
-        return;
-    }
-    const QString session = ask.value("session").toString();
-    if (!agent->sessionId.isEmpty() && !session.isEmpty() && agent->sessionId != session) {
-        passNow();
-        return;
-    }
     // A question for the agent the user is looking at goes to its terminal.
-    if (kind == "question" && m_watching && m_watching(pane)) {
+    if (kind != "permission" && m_watching && m_watching(pane)) {
         passNow();
         return;
     }
@@ -112,9 +146,19 @@ void Asker::accept(QLocalSocket *socket, const QJsonObject &ask) {
 
     Request request;
     request.id = m_nextId++;
-    request.socket = socket;
     request.ask = ask;
     const int id = request.id;
+    if (reply) {
+        // Nothing waits for it: the hook has already gone. It stands behind
+        // the dialogs and prompts, which hold an agent up.
+        if (socket)
+            socket->disconnectFromServer();
+        m_requests.append(request);
+        changed(first, count, asking);
+        emit arrived();
+        return;
+    }
+    request.socket = socket;
     if (kind == "question" && m_hold > 0) {
         request.hold = new QTimer(this);
         request.hold->setSingleShot(true);
@@ -132,9 +176,41 @@ void Asker::accept(QLocalSocket *socket, const QJsonObject &ask) {
         remove(id);
         changed(first, count, asking);
     });
-    m_requests.append(request);
+    int at = m_requests.size();
+    for (int i = 0; i < m_requests.size(); ++i) {
+        if (m_requests.at(i).ask.value("kind").toString() == "reply") {
+            at = i;
+            break;
+        }
+    }
+    m_requests.insert(at, request);
     changed(first, count, asking);
     emit arrived();
+}
+
+void Asker::replyWith(int id, const QString &text) {
+    const int i = indexOf(id);
+    if (i < 0 || m_requests.at(i).ask.value("kind").toString() != "reply")
+        return;
+    // One line: a newline would send what comes before it on its own.
+    const QString line = QString(text).replace(QRegularExpression("[\\r\\n]+"), " ").trimmed();
+    if (line.isEmpty())
+        return;
+    const QJsonObject ask = m_requests.at(i).ask;
+    pass(id);
+    emit typeRequested(ask.value("pane").toString(), ask.value("session").toString(), line);
+}
+
+bool Asker::readReplies(const QString &configFile) {
+    QFile file(configFile);
+    if (file.open(QIODevice::ReadOnly)) {
+        static const QRegularExpression line(R"re(^\s*ask_replies\s*=\s*"?(\w+)"?\s*$)re",
+                                             QRegularExpression::MultilineOption);
+        const auto match = line.match(QString::fromUtf8(file.readAll()));
+        if (match.hasMatch())
+            return !QStringList{"no", "off", "false", "0"}.contains(match.captured(1).toLower());
+    }
+    return true;
 }
 
 int Asker::indexOf(int id) const {
@@ -227,7 +303,7 @@ void Asker::pass(int id) {
 QSet<QString> Asker::askingPanes() const {
     QSet<QString> panes;
     for (const auto &request : m_requests)
-        if (request.ask.value("kind").toString() == "question")
+        if (request.ask.value("kind").toString() != "permission")
             panes.insert(request.ask.value("pane").toString());
     return panes;
 }
@@ -252,6 +328,8 @@ QVariantMap Asker::current() const {
     };
     if (ask.value("kind").toString() == "question") {
         map.insert("questions", input.value("questions").toArray().toVariantList());
+    } else if (ask.value("kind").toString() == "reply") {
+        map.insert("text", input.value("text").toString());
     } else {
         map.insert("detail", detail(tool, input));
         map.insert("always", alwaysWhat(ask.value("suggestions").toArray()));
@@ -320,6 +398,19 @@ void Asker::agentsListed(const QList<Agent> &agents) {
     m_agents.clear();
     for (const auto &agent : agents)
         m_agents.insert(agent.paneId, agent);
+    // Requests waiting for a listing that knows their agent.
+    for (int i = 0; i < m_unsure.size();) {
+        if (known(m_unsure.at(i).ask)) {
+            const Unsure unsure = m_unsure.takeAt(i);
+            const bool gone = !unsure.socket || unsure.socket->state() != QLocalSocket::ConnectedState;
+            // A hook that stopped waiting meanwhile is over, unless it never
+            // waits (a turn's last question).
+            if (!gone || unsure.ask.value("kind").toString() == "reply")
+                admit(unsure.socket, unsure.ask);
+        } else {
+            ++i;
+        }
+    }
 
     const QVariantMap first = current();
     const int count = m_requests.size();
@@ -338,6 +429,15 @@ void Asker::agentsListed(const QList<Agent> &agents) {
             continue;
         }
         request.missingSince = 0;
+        // A turn's last question: once the agent has stopped and then works
+        // again, someone answered it in the terminal.
+        if (request.ask.value("kind").toString() == "reply") {
+            if (agent->status == "idle" || agent->status == "done")
+                request.seenBlocked = true;
+            else if (request.seenBlocked)
+                gone << request.id;
+            continue;
+        }
         if (request.ask.value("kind").toString() != "permission")
             continue;
         // herdr sees the prompt in the terminal; once it doesn't any more,
