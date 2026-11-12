@@ -36,6 +36,9 @@ class TerminalView : public QQuickPaintedItem {
     // form), for programs that tell them from Ctrl+letter, like editors.
     // Off, they go as Ctrl+letter, which is all most programs know.
     Q_PROPERTY(bool extendedKeys READ extendedKeys WRITE setExtendedKeys)
+    // Sends Ctrl+B twice: `herdr terminal attach` (0.9.1) takes Ctrl+B as its
+    // prefix whatever the config says, and passes it on only when doubled.
+    Q_PROPERTY(bool doubleCtrlB READ doubleCtrlB WRITE setDoubleCtrlB)
     Q_PROPERTY(bool running READ running NOTIFY runningChanged)
     Q_PROPERTY(int columns READ columns NOTIFY gridChanged)
     Q_PROPERTY(int rows READ rows NOTIFY gridChanged)
@@ -61,6 +64,8 @@ public:
     QStringList reservedShortcuts() const { return m_reserved; }
     void setReservedShortcuts(const QStringList &shortcuts) { m_reserved = shortcuts; }
     bool extendedKeys() const { return m_extendedKeys; }
+    bool doubleCtrlB() const { return m_doubleCtrlB; }
+    void setDoubleCtrlB(bool on) { m_doubleCtrlB = on; }
     void setExtendedKeys(bool on) { m_extendedKeys = on; }
     bool running() const { return m_pid > 0; }
     int columns() const { return m_cols; }
@@ -131,6 +136,7 @@ private:
     QString m_program;
     QStringList m_arguments, m_colors, m_reserved;
     bool m_extendedKeys = false;
+    bool m_doubleCtrlB = false;
     QFont m_font, m_bold, m_italic, m_boldItalic;
     QColor m_background{"#101315"}, m_foreground{"#cacccc"}, m_selectionColor{"#505a5f"};
     qreal m_cellWidth = 8, m_cellHeight = 16, m_ascent = 12;

@@ -315,7 +315,7 @@ Rectangle {
                         width: terminalArea.width
                         height: terminalArea.height
                         onDetached: terminalArea.detached = true
-                        Component.onCompleted: if (panel.attached && visible) focusTerminal()
+                        Component.onCompleted: if (panel.attached && visible && !panel.picker.open && !panel.helpVisible) focusTerminal()
                     }
                 }
                 Repeater {
@@ -332,7 +332,7 @@ Rectangle {
                         height: terminalArea.height - (terminalArea.shellHeight > 0 ? terminalArea.shellHeight + 1 : 0)
                         // An editor that quits closes its pane: back to the agent.
                         onDetached: backend.editorClosed()
-                        Component.onCompleted: if (panel.attached && visible) focusTerminal()
+                        Component.onCompleted: if (panel.attached && visible && !panel.picker.open && !panel.helpVisible) focusTerminal()
                     }
                 }
                 Rectangle {
@@ -358,7 +358,7 @@ Rectangle {
                         height: Math.round(terminalArea.height * 0.35)
                         // Its shell exited: the terminal is gone.
                         onDetached: backend.shellClosed()
-                        Component.onCompleted: if (panel.attached && visible) focusTerminal()
+                        Component.onCompleted: if (panel.attached && visible && !panel.picker.open && !panel.helpVisible) focusTerminal()
                     }
                 }
 

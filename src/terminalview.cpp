@@ -572,6 +572,8 @@ void TerminalView::keyPressEvent(QKeyEvent *event) {
         } else if (c >= 'A' && c <= 'Z') {
             c = (mods & Qt::ShiftModifier) && !(mods & Qt::ControlModifier) ? c : c - 'A' + 'a';
         }
+        if (c && m_doubleCtrlB && c == 'b' && modifiers == VTERM_MOD_CTRL)
+            vterm_keyboard_unichar(m_vt, c, VTERM_MOD_CTRL);
         if (c)
             vterm_keyboard_unichar(m_vt, c, VTermModifier(modifiers & ~VTERM_MOD_SHIFT));
     } else if (!event->text().isEmpty()) {

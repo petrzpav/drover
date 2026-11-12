@@ -458,15 +458,24 @@ private slots:
     void altEOpensAnEditorBesideTheAgent()
     {
         Rig rig(agents("working", "idle"));
-        rig.backend->setEditor("sh");
+        // A stand-in fresh on PATH: Ctrl+Shift letters go as such only to Fresh.
+        write(rig.dir.filePath("fresh"), "#!/bin/sh\n");
+        QFile::setPermissions(rig.dir.filePath("fresh"), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        const QByteArray path = qgetenv("PATH");
+        qputenv("PATH", rig.dir.path().toUtf8() + ":" + path);
+        const auto restore = qScopeGuard([&] { qputenv("PATH", path); });
+        rig.backend->setEditor("fresh");
         rig.expand();
         QTRY_VERIFY(rig.log().contains("terminal attach term_1"));
+        // herdr's attach takes a lone Ctrl+B as its prefix: it goes doubled.
+        QTest::keyClick(rig.window, Qt::Key_B, Qt::ControlModifier);
+        QTRY_VERIFY(rig.log().contains("key 02\nkey 02\n"));
         QTest::keyClick(rig.window, Qt::Key_E, Qt::AltModifier);
         QTRY_VERIFY(rig.backend->editing());
         QCOMPARE(rig.backend->editorTerminal(), QString("term_9"));
         QVERIFY(rig.log().contains("pane split w1:p1 --direction right --cwd /a --no-focus"));
         QVERIFY(rig.log().contains("pane rename w1:p9 editor"));
-        QVERIFY(rig.log().contains("pane run w1:p9 exec sh"));
+        QVERIFY(rig.log().contains("pane run w1:p9 exec fresh"));
         QTRY_VERIFY(rig.log().contains("terminal attach term_9"));
 
         // The desktop's Ctrl+P goes to the editor, not to the picker.
@@ -552,10 +561,38 @@ private slots:
           {"pane_id":"w1:p4","tab_id":"w1:t1","terminal_id":"term_e","label":"editor"},
           {"pane_id":"w2:p1","tab_id":"w2:t1","terminal_id":"term_2"}]}})");
         write(rig.dir.filePath("agents.json"), R"({"result":{"agents":[]}})");
-        QTRY_VERIFY(rig.log().contains("pane close w1:p4"));
+        QTRY_VERIFY_WITH_TIMEOUT(rig.log().contains("pane close w1:p4"), 8000);
         QTRY_VERIFY(rig.log().contains("pane close w1:p1"));
         QTest::qWait(300);
         QVERIFY(!rig.log().contains("pane close w2:p1"));
+    }
+
+    void anAgentMissingForAMomentKeepsItsEditor()
+    {
+        Rig rig(agents("working", "idle"));
+        write(rig.dir.filePath("panes.json"), R"({"result":{"panes":[
+          {"pane_id":"w1:p1","tab_id":"w1:t1","terminal_id":"term_1"},
+          {"pane_id":"w1:p4","tab_id":"w1:t1","terminal_id":"term_e","label":"editor"}]}})");
+        // herdr doesn't see the agents for one poll, then does again.
+        write(rig.dir.filePath("agents.json"), R"({"result":{"agents":[]}})");
+        QTRY_COMPARE(rig.backend->agents()->count(), 0);
+        write(rig.dir.filePath("agents.json"), agents("working", "idle"));
+        QTRY_COMPARE(rig.backend->agents()->count(), 2);
+        QTest::qWait(3500);
+        QVERIFY(!rig.log().contains("pane close"));
+    }
+
+    void anEditorSharedWithAnotherAgentStays()
+    {
+        Rig rig(agents("working", "idle"));
+        write(rig.dir.filePath("panes.json"), R"({"result":{"panes":[
+          {"pane_id":"w1:p1","tab_id":"w1:t1","terminal_id":"term_1"},
+          {"pane_id":"w1:p2","tab_id":"w1:t1","terminal_id":"term_3","agent":"codex"},
+          {"pane_id":"w1:p4","tab_id":"w1:t1","terminal_id":"term_e","label":"editor"}]}})");
+        write(rig.dir.filePath("agents.json"), R"({"result":{"agents":[
+          {"agent":"claude","agent_status":"idle","cwd":"/b","pane_id":"w2:p1","terminal_id":"term_2","workspace_id":"w2"}]}})");
+        QTest::qWait(4500);
+        QVERIFY(!rig.log().contains("pane close"));
     }
 
     void aPaneWhereAnAgentStillRunsIsNotClosed()
@@ -566,7 +603,7 @@ private slots:
           {"pane_id":"w1:p4","tab_id":"w1:t1","terminal_id":"term_e","label":"editor"}]}})");
         write(rig.dir.filePath("agents.json"), R"({"result":{"agents":[
           {"agent":"claude","agent_status":"idle","cwd":"/b","pane_id":"w2:p1","terminal_id":"term_2","workspace_id":"w2"}]}})");
-        QTRY_VERIFY(rig.log().contains("pane close w1:p4"));
+        QTRY_VERIFY_WITH_TIMEOUT(rig.log().contains("pane close w1:p4"), 8000);
         QTest::qWait(300);
         QVERIFY(!rig.log().contains("pane close w1:p1"));
     }

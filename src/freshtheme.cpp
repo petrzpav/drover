@@ -10,6 +10,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QSaveFile>
+#include <QTimer>
 
 #include <cmath>
 
@@ -151,24 +153,34 @@ QByteArray FreshTheme::build(const Theme &theme) {
 // and applies this one, so open editors follow a theme switch at once.
 void FreshTheme::update() {
     const QByteArray json = build(*m_theme);
-    QFile file(m_path);
-    if (file.open(QIODevice::ReadOnly) && file.readAll() == json)
+    QFile current(m_path);
+    if (current.open(QIODevice::ReadOnly) && current.readAll() == json)
         return;
-    file.close();
+    current.close();
     QDir().mkpath(QFileInfo(m_path).absolutePath());
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    // Replaced whole, so a Fresh loading it never reads half a theme.
+    QSaveFile file(m_path);
+    if (!file.open(QIODevice::WriteOnly) || file.write(json) != json.size() || !file.commit())
         return;
-    file.write(json);
-    file.close();
 
+    // Each call ends within a few seconds, done or not, and is cleaned up.
+    const auto bounded = [this](QProcess *process) {
+        connect(process, &QProcess::errorOccurred, process, [process](QProcess::ProcessError error) {
+            if (error == QProcess::FailedToStart)
+                process->deleteLater();
+        });
+        QTimer::singleShot(5000, process, [process] { process->kill(); });
+    };
     auto *list = new QProcess(this);
-    connect(list, &QProcess::finished, this, [this, list] {
+    bounded(list);
+    connect(list, &QProcess::finished, this, [this, list, bounded] {
         list->deleteLater();
         for (const QString &line : QString::fromUtf8(list->readAllStandardOutput()).split('\n')) {
             // "Running daemons:" then one indented name per line.
             if (!line.startsWith("  ") || line.trimmed().contains(' '))
                 continue;
             auto *apply = new QProcess(this);
+            bounded(apply);
             connect(apply, &QProcess::finished, apply, &QObject::deleteLater);
             apply->start(m_fresh, {"--cmd", "script", "run", "--session", line.trimmed(), "-"});
             apply->write("editor.reloadThemes(); return editor.applyTheme(\"omarchy\");\n");

@@ -46,7 +46,8 @@ Item {
         reservedShortcuts: root.shell ? ["Alt+E", "Ctrl+;", "Ctrl+W", "Ctrl+Shift+O", "F1", "Ctrl+Q"]
                          : root.editor ? ["Alt+E", "Ctrl+;", "Ctrl+Shift+O", "F1", "Ctrl+Q"]
                                        : ["Alt+Up", "Alt+Down", "Alt+E", "Ctrl+P", "Ctrl+Shift+O", "F1", "Ctrl+Q"]
-        extendedKeys: root.editor
+        extendedKeys: root.editor && backend.editor === "fresh"
+        doubleCtrlB: true
         onFinished: root.detached()
         Component.onCompleted: start()
     }

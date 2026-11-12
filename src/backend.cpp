@@ -181,10 +181,25 @@ void Backend::refresh() {
 
 void Backend::applyAgents(const QList<Agent> &agents) {
     const QString before = selectedTitle() + '\n' + selectedStatus() + '\n' + QString::number(selectedIndex());
-    QList<Agent> gone;
+    // An agent counts as ended once it is missing from three polls in a row,
+    // so a moment herdr doesn't see it never closes its editor.
+    const auto listed = [&](const QString &paneId) {
+        return std::any_of(agents.begin(), agents.end(), [&](const Agent &a) { return a.paneId == paneId; });
+    };
     for (const auto &agent : m_model.agents()) {
-        if (std::none_of(agents.begin(), agents.end(), [&](const Agent &a) { return a.paneId == agent.paneId; }))
-            gone << agent;
+        if (!listed(agent.paneId))
+            m_vanished.insert(agent.paneId, {agent, 0});
+    }
+    QList<Agent> gone;
+    for (auto it = m_vanished.begin(); it != m_vanished.end();) {
+        if (listed(it.key())) {
+            it = m_vanished.erase(it);
+        } else if (++it->second >= 3) {
+            gone << it->first;
+            it = m_vanished.erase(it);
+        } else {
+            ++it;
+        }
     }
     m_model.setAgents(agents);
     if (!gone.isEmpty())
@@ -520,6 +535,7 @@ void Backend::closeEditorsOf(const QList<Agent> &gone) {
         for (const auto &agent : gone) {
             QJsonObject own, editor;
             QStringList shells;
+            bool otherAgent = false;
             for (const auto &value : panes) {
                 const auto pane = value.toObject();
                 if (pane.value("pane_id").toString() == agent.paneId)
@@ -530,17 +546,20 @@ void Backend::closeEditorsOf(const QList<Agent> &gone) {
                 const auto pane = value.toObject();
                 if (tab.isEmpty() || pane.value("tab_id").toString() != tab || pane.value("pane_id").toString() == agent.paneId)
                     continue;
+                if (!pane.value("agent").toString().isEmpty())
+                    otherAgent = true;
                 if (pane.value("label").toString() == "editor")
                     editor = pane;
                 else if (pane.value("label").toString() == "shell")
                     shells << pane.value("pane_id").toString();
             }
-            if (editor.isEmpty())
+            // Another agent still works in this tab: its editor stays.
+            if (editor.isEmpty() || otherAgent)
                 continue;
             for (const QString &shell : shells)
                 run(program, {"pane", "close", shell}, [](int, const QByteArray &, const QByteArray &) {});
             run(program, {"pane", "close", editor.value("pane_id").toString()}, [](int, const QByteArray &, const QByteArray &) {});
-            if (!own.isEmpty() && !own.contains("agent"))
+            if (!own.isEmpty() && own.value("agent").toString().isEmpty())
                 run(program, {"pane", "close", agent.paneId}, [](int, const QByteArray &, const QByteArray &) {});
         }
     });

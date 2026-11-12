@@ -60,6 +60,7 @@ class Backend : public QObject {
     // panel shows it instead of the agent, and its terminal.
     Q_PROPERTY(bool editing READ editing NOTIFY editorChanged)
     Q_PROPERTY(QString editorTerminal READ editorTerminal NOTIFY editorChanged)
+    Q_PROPERTY(QString editor READ editor CONSTANT)
     // A terminal below the editor, in the agent's folder: whether it shows,
     // and its terminal (it stays attached while hidden).
     Q_PROPERTY(bool shellShown READ shellShown NOTIFY shellChanged)
@@ -218,6 +219,8 @@ private:
     void openBeside(const QString &label, const QString &from, const QString &direction, const QString &command,
                     const std::function<void(const QString &, const QString &)> &found);
     void closeEditorsOf(const QList<Agent> &gone);
+    // Agents missing from the list, and for how many polls in a row.
+    QHash<QString, std::pair<Agent, int>> m_vanished;
     QString m_agentKind, m_pendingSelect, m_closeAction, m_socketPath;
     QString m_home = QDir::homePath();
     bool m_noticeIsError = false, m_listing = false;
