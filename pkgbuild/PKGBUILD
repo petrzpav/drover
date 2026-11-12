@@ -5,6 +5,7 @@ pkgdesc='A floating indicator of your herdr agents, on every workspace'
 arch=('x86_64' 'aarch64')
 license=('MIT')
 depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'layer-shell-qt' 'libvterm' 'herdr')
+optdepends=('fresh-editor: the editor beside an agent (Alt+E)')
 makedepends=('gcc' 'make')
 source=()
 sha256sums=()

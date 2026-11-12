@@ -7,6 +7,7 @@
 #include <QLocalSocket>
 #include <QLockFile>
 #include <QStandardPaths>
+#include <memory>
 #include <QThread>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -19,6 +20,7 @@
 #include "backend.h"
 #include "surface.h"
 #include "terminalview.h"
+#include "freshtheme.h"
 #include "terminalfont.h"
 #include "theme.h"
 #include "translator.h"
@@ -97,6 +99,13 @@ int main(int argc, char *argv[]) {
     Theme theme;
     Backend backend;
     Surface surface;
+
+    // Fresh, the editor beside the agents, wears the Omarchy theme too.
+    std::unique_ptr<FreshTheme> freshTheme;
+    const QString fresh = QStandardPaths::findExecutable("fresh");
+    if (backend.editor() == "fresh" && !fresh.isEmpty())
+        freshTheme.reset(new FreshTheme(&theme, QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
+                                                    + "/fresh/themes", fresh));
 
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);

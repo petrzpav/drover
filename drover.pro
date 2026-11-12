@@ -14,6 +14,7 @@ LIBS += -lvterm -lutil
 HEADERS += \
     src/agentmodel.h \
     src/backend.h \
+    src/freshtheme.h \
     src/surface.h \
     src/terminalview.h \
     src/terminalfont.h \
@@ -24,6 +25,7 @@ SOURCES += \
     src/main.cpp \
     src/agentmodel.cpp \
     src/backend.cpp \
+    src/freshtheme.cpp \
     src/surface.cpp \
     src/terminalview.cpp \
     src/terminalfont.cpp \

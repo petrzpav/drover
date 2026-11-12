@@ -56,6 +56,10 @@ class Backend : public QObject {
     Q_PROPERTY(QString agentKind READ agentKind CONSTANT)
     // How the pill shows the herd: "dots" (counts), "bars" or "sheep" (indicator = ... in the config).
     Q_PROPERTY(QString indicator READ indicator WRITE setIndicator NOTIFY indicatorChanged)
+    // The editor beside the selected agent, in its herdr tab: whether the
+    // panel shows it instead of the agent, and its terminal.
+    Q_PROPERTY(bool editing READ editing NOTIFY editorChanged)
+    Q_PROPERTY(QString editorTerminal READ editorTerminal NOTIFY editorChanged)
 
 public:
     // Tests pass fake herdr and hyprctl scripts; empty means the ones on PATH.
@@ -83,6 +87,12 @@ public:
     QString indicator() const { return m_indicator; }
     void setIndicator(const QString &style);
     static QString readIndicator(const QString &configFile);
+    // The editor run beside an agent (editor = ... in the config; fresh).
+    static QString readEditor(const QString &configFile);
+    void setEditor(const QString &command) { m_editor = command; }
+    QString editor() const { return m_editor; }
+    bool editing() const { return m_editing; }
+    QString editorTerminal() const { return m_editorTerminal; }
     // A herdr plugin action that closes a workspace instead of `herdr workspace
     // close`, as plugin_id.action_id (close_action = ... in the config): for
     // plugins that bring closed workspaces back unless their own action did it.
@@ -102,6 +112,11 @@ public:
     Q_INVOKABLE void select(const QString &paneId);
     Q_INVOKABLE void selectNext(int step);
     Q_INVOKABLE void jump();
+    // Shows the editor beside the selected agent, splitting its tab and
+    // starting the editor there the first time; again, back to the agent.
+    Q_INVOKABLE void toggleEditor();
+    // The editor's terminal went away (the editor quit): back to the agent.
+    Q_INVOKABLE void editorClosed();
     // Opens a tab in the workspace and starts the default agent in it, then
     // selects that agent.
     Q_INVOKABLE void startAgent(const QString &workspaceId);
@@ -145,6 +160,7 @@ public:
 signals:
     void countsChanged();
     void indicatorChanged();
+    void editorChanged();
     void errorChanged();
     // A different pane is selected.
     void selectedChanged();
@@ -182,6 +198,11 @@ private:
     QString m_error, m_selected, m_notice, m_busy;
     QVariantList m_workspaceList;
     QString m_indicator = QStringLiteral("bars");
+    QString m_editor = QStringLiteral("fresh");
+    bool m_editing = false;
+    QString m_editorTerminal;
+    void showEditor(const QString &terminalId);
+    void closeEditorsOf(const QList<Agent> &gone);
     QString m_agentKind, m_pendingSelect, m_closeAction, m_socketPath;
     QString m_home = QDir::homePath();
     bool m_noticeIsError = false, m_listing = false;

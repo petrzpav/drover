@@ -47,6 +47,9 @@ struct Rig {
 
     explicit Rig(const QByteArray &list, int expected = 2) {
         write(dir.filePath("agents.json"), list);
+        write(dir.filePath("panes.json"), R"({"result":{"panes":[
+          {"pane_id":"w1:p1","tab_id":"w1:t1","terminal_id":"term_1","cwd":"/a"},
+          {"pane_id":"w2:p1","tab_id":"w2:t1","terminal_id":"term_2","cwd":"/b"}]}})");
         write(dir.filePath("ws.json"), R"({"result":{"workspaces":[{"workspace_id":"w1","label":"garden"},{"workspace_id":"w2","label":"gate"}]}})");
         const QString herdr = dir.filePath("herdr");
         write(herdr, QString(R"sh(#!/bin/sh
@@ -54,6 +57,8 @@ echo "$@" >> '%1/log'
 case "$1 $2" in
   "workspace list") cat '%1/ws.json' ;;
   "agent list") cat '%1/agents.json' ;;
+  "pane list") cat '%1/panes.json' ;;
+  "pane split") echo '{"result":{"pane":{"pane_id":"w1:p9","terminal_id":"term_9","tab_id":"w1:t1"}}}' ;;
   "terminal attach")
     trap 'echo "detached $3" >> "%1/log"; exit 0' HUP TERM INT
     stty raw -echo 2>/dev/null
@@ -444,6 +449,84 @@ private slots:
                 }
             }
         }
+    }
+
+    void altEOpensAnEditorBesideTheAgent()
+    {
+        Rig rig(agents("working", "idle"));
+        rig.backend->setEditor("sh");
+        rig.expand();
+        QTRY_VERIFY(rig.log().contains("terminal attach term_1"));
+        QTest::keyClick(rig.window, Qt::Key_E, Qt::AltModifier);
+        QTRY_VERIFY(rig.backend->editing());
+        QCOMPARE(rig.backend->editorTerminal(), QString("term_9"));
+        QVERIFY(rig.log().contains("pane split w1:p1 --direction right --cwd /a --no-focus"));
+        QVERIFY(rig.log().contains("pane rename w1:p9 editor"));
+        QVERIFY(rig.log().contains("pane run w1:p9 exec sh"));
+        QTRY_VERIFY(rig.log().contains("terminal attach term_9"));
+
+        // The desktop's Ctrl+P goes to the editor, not to the picker.
+        QMetaObject::invokeMethod(rig.window, "openPicker");
+        QTRY_VERIFY(rig.log().contains("key 10"));
+        QVERIFY(!rig.find("panel")->property("picker").value<QObject *>()->property("open").toBool());
+        // Ctrl+Shift+letters reach it as such.
+        QTest::keyClick(rig.window, Qt::Key_K, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_VERIFY(rig.log().contains("key 1b\nkey 5b\nkey 31\nkey 30\nkey 37\nkey 3b\nkey 36\nkey 75"));
+
+        // Alt+E again: back to the agent.
+        QTest::keyClick(rig.window, Qt::Key_E, Qt::AltModifier);
+        QTRY_VERIFY(!rig.backend->editing());
+        QTRY_COMPARE(rig.log().count("terminal attach term_1"), 2);
+    }
+
+    void anEditorAlreadyInTheTabIsReused()
+    {
+        Rig rig(agents("working", "idle"));
+        rig.backend->setEditor("sh");
+        write(rig.dir.filePath("panes.json"), R"({"result":{"panes":[
+          {"pane_id":"w1:p1","tab_id":"w1:t1","terminal_id":"term_1","cwd":"/a"},
+          {"pane_id":"w1:p4","tab_id":"w1:t1","terminal_id":"term_e","label":"editor"},
+          {"pane_id":"w2:p4","tab_id":"w2:t1","terminal_id":"term_other","label":"editor"}]}})");
+        rig.expand();
+        QTest::keyClick(rig.window, Qt::Key_E, Qt::AltModifier);
+        QTRY_VERIFY(rig.backend->editing());
+        QCOMPARE(rig.backend->editorTerminal(), QString("term_e"));
+        QVERIFY(!rig.log().contains("pane split"));
+        // Alt+Down belongs to the editor (moving lines) while it is in front.
+        QTest::keyClick(rig.window, Qt::Key_Down, Qt::AltModifier);
+        QTRY_VERIFY(rig.log().contains("key 1b\nkey 5b\nkey 31\nkey 3b\nkey 33\nkey 42"));
+        QVERIFY(rig.backend->editing());
+        // Another agent: the panel shows that agent, not an editor.
+        rig.backend->selectNext(1);
+        QTRY_VERIFY(!rig.backend->editing());
+    }
+
+    void anAgentThatEndsTakesItsEditorAndShellAlong()
+    {
+        Rig rig(agents("working", "idle"));
+        // w1's agent has an editor beside it; w2's has none.
+        write(rig.dir.filePath("panes.json"), R"({"result":{"panes":[
+          {"pane_id":"w1:p1","tab_id":"w1:t1","terminal_id":"term_1"},
+          {"pane_id":"w1:p4","tab_id":"w1:t1","terminal_id":"term_e","label":"editor"},
+          {"pane_id":"w2:p1","tab_id":"w2:t1","terminal_id":"term_2"}]}})");
+        write(rig.dir.filePath("agents.json"), R"({"result":{"agents":[]}})");
+        QTRY_VERIFY(rig.log().contains("pane close w1:p4"));
+        QTRY_VERIFY(rig.log().contains("pane close w1:p1"));
+        QTest::qWait(300);
+        QVERIFY(!rig.log().contains("pane close w2:p1"));
+    }
+
+    void aPaneWhereAnAgentStillRunsIsNotClosed()
+    {
+        Rig rig(agents("working", "idle"));
+        write(rig.dir.filePath("panes.json"), R"({"result":{"panes":[
+          {"pane_id":"w1:p1","tab_id":"w1:t1","terminal_id":"term_1","agent":"claude"},
+          {"pane_id":"w1:p4","tab_id":"w1:t1","terminal_id":"term_e","label":"editor"}]}})");
+        write(rig.dir.filePath("agents.json"), R"({"result":{"agents":[
+          {"agent":"claude","agent_status":"idle","cwd":"/b","pane_id":"w2:p1","terminal_id":"term_2","workspace_id":"w2"}]}})");
+        QTRY_VERIFY(rig.log().contains("pane close w1:p4"));
+        QTest::qWait(300);
+        QVERIFY(!rig.log().contains("pane close w1:p1"));
     }
 
     void thePanelNeverCoversThePill()

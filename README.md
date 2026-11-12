@@ -56,6 +56,7 @@ o.bind("SUPER + H", "Herdr agents", "drover toggle")
 | `Shift`+drag        | Select text                                                |
 | `Ctrl+Shift+C` `Ctrl+Shift+V` | Copy the selection, paste (bracketed)            |
 | `Alt+↑` `Alt+↓`     | Pick an agent                                              |
+| `Alt+E`             | Switch between the agent and the editor beside it          |
 | `Ctrl+P`            | Pick a workspace and start the default agent there         |
 | `Ctrl+O` (picker)   | Pick the folder for a new workspace                        |
 | `Ctrl+D` (picker)   | Close the highlighted workspace; press again to confirm    |
@@ -70,6 +71,32 @@ takes exactly what herdr's own window does. While the panel is open the pane
 takes the panel's size; closing the panel detaches, and the pane gets herdr's
 size back. Opening an agent focuses it in herdr (`herdr agent focus`) and
 brings the herdr window forward, wherever it is.
+
+### The editor beside an agent
+
+`Alt+E` (or **editor** in the panel's header) shows an editor next to the
+selected agent, in its folder; `Alt+E` again goes back to the agent. The first
+time, drover splits the agent's herdr tab and starts the editor in the new
+pane (labelled `editor`), so herdr shows it beside the agent too; after that,
+both drover and herdr reuse that pane, and quitting the editor closes it.
+
+The editor is [Fresh](https://github.com/sinelaw/fresh) (`fresh-editor` in
+the AUR): keys and mouse as in VS Code, a file explorer, `Ctrl+P` to find
+files, LSP. While it is in front, `Ctrl+P` is its own (the desktop's binding
+reaches it through drover), and `Ctrl+Shift` shortcuts reach it as such.
+Another terminal editor goes in the config:
+
+```ini
+editor = micro
+```
+
+drover keeps Fresh in the Omarchy theme: it writes a Fresh theme from the
+theme's colors to `~/.config/fresh/themes/omarchy.json` and has every running
+Fresh apply it whenever the theme changes. Use it in `~/.config/fresh/config.json`:
+
+```json
+{ "theme": "omarchy.json" }
+```
 
 ### The default agent
 
@@ -156,7 +183,7 @@ bin/screenshots  # redraws the pictures in docs/ against a made-up herd (needs f
 ```
 
 Needs `qt6-base`, `qt6-declarative`, `qt6-wayland`, `layer-shell-qt`,
-`libvterm`, and `herdr`.
+`libvterm`, and `herdr`; `fresh-editor` for the editor beside an agent.
 
 ## License
 

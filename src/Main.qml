@@ -59,6 +59,11 @@ ApplicationWindow {
     }
 
     function openPicker() {
+        // The desktop sends Ctrl+P here; in front, the editor gets it.
+        if (expanded && backend.editing && !panel.picker.open && !panel.helpVisible) {
+            panel.sendControl("p")
+            return
+        }
         expanded = true
         panel.helpVisible = false
         panel.picker.show()
@@ -96,11 +101,13 @@ ApplicationWindow {
                        win.expanded = false
                    }
                } }
-    Shortcut { sequence: "Ctrl+P"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: win.openPicker() }
+    Shortcut { sequence: "Ctrl+P"; enabled: win.expanded && !backend.editing; context: Qt.ApplicationShortcut; onActivated: win.openPicker() }
+    Shortcut { sequence: "Alt+E"; enabled: win.expanded && !panel.picker.open; autoRepeat: false; context: Qt.ApplicationShortcut
+               onActivated: { panel.helpVisible = false; backend.toggleEditor(); win.focusForAgent() } }
     Shortcut { sequence: "Ctrl+Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
     Shortcut { sequence: "F1"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: panel.helpVisible = !panel.helpVisible }
-    Shortcut { sequence: "Alt+Up"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: { backend.selectNext(-1); win.focusForAgent() } }
-    Shortcut { sequence: "Alt+Down"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: { backend.selectNext(1); win.focusForAgent() } }
+    Shortcut { sequence: "Alt+Up"; enabled: win.expanded && !backend.editing; context: Qt.ApplicationShortcut; onActivated: { backend.selectNext(-1); win.focusForAgent() } }
+    Shortcut { sequence: "Alt+Down"; enabled: win.expanded && !backend.editing; context: Qt.ApplicationShortcut; onActivated: { backend.selectNext(1); win.focusForAgent() } }
     Shortcut { sequence: "Ctrl+Shift+O"; enabled: win.expanded; autoRepeat: false; context: Qt.ApplicationShortcut; onActivated: backend.jump() }
 
     Connections {

@@ -19,6 +19,8 @@ Rectangle {
     property int attachRound: 0
     readonly property Item terminal: terminals.count > 0 ? terminals.itemAt(0) : null
     readonly property bool terminalFocused: terminal !== null && terminal.terminalFocused
+    // The terminal on the right: the selected agent's, or its editor's.
+    readonly property string shownTerminal: backend.editing ? backend.editorTerminal : backend.selectedTerminal
 
     // The terminal claims every key it gets, Esc included, so help takes the
     // keyboard while it is shown and hands it back after.
@@ -29,6 +31,11 @@ Rectangle {
             focusTerminal()
     }
 
+    // Ctrl and a letter for the terminal, for a key the desktop took first.
+    function sendControl(letter) {
+        if (terminal)
+            terminal.sendControl(letter)
+    }
     function focusTerminal() {
         if (terminal)
             terminal.focusTerminal()
@@ -166,16 +173,63 @@ Rectangle {
                 spacing: 10
 
                 StatusDot { opacity: backend.selected !== "" ? 1 : 0; status: backend.selectedStatus }
+                // The title as long as it fits, its state right after it.
                 Text {
                     Layout.fillWidth: true
+                    Layout.maximumWidth: implicitWidth
                     text: backend.selectedTitle
                     color: theme.foreground
                     elide: Text.ElideRight
                 }
                 Text {
                     visible: backend.selected !== ""
-                    text: panel.statusLabel(backend.selectedStatus)
+                    text: "·  " + panel.statusLabel(backend.selectedStatus)
                     color: panel.statusColor(backend.selectedStatus)
+                }
+                Item { Layout.fillWidth: true }
+                // The agent or the editor beside it, in its herdr tab: two
+                // segments in a frame, the current one filled with the accent.
+                Rectangle {
+                    objectName: "viewSwitch"
+                    implicitWidth: segments.implicitWidth + 6
+                    implicitHeight: segments.implicitHeight + 6
+                    radius: theme.radius
+                    color: "transparent"
+                    border.width: 1
+                    border.color: panel.line
+                    opacity: backend.selected !== "" ? 1 : 0.4
+
+                    Rectangle {
+                        readonly property Item current: segmentButtons.count === 2 ? segmentButtons.itemAt(backend.editing ? 1 : 0) : null
+                        x: current ? segments.x + current.x : 0
+                        y: 3
+                        width: current ? current.width : 0
+                        height: parent.height - 6
+                        radius: Math.max(0, theme.radius - 3)
+                        color: theme.accent
+                        Behavior on x { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                    }
+                    Row {
+                        id: segments
+                        x: 3
+                        y: 3
+                        Repeater {
+                            id: segmentButtons
+                            model: [{ view: "agent", icon: "󰚩", label: qsTr("agent") },
+                                    { view: "editor", icon: "", label: qsTr("editor") }]
+                            delegate: IconButton {
+                                required property var modelData
+                                readonly property bool current: (modelData.view === "editor") === backend.editing
+                                label: modelData.icon + "  " + modelData.label
+                                tint: current ? theme.accentForeground : panel.dim
+                                hint: modelData.view === "editor" ? qsTr("Edit files beside the agent") : qsTr("Back to the agent")
+                                shortcut: "Alt+E"
+                                enabled: backend.selected !== ""
+                                busy: modelData.view === "editor" && backend.busy === "editor"
+                                onClicked: if (!current) backend.toggleEditor()
+                            }
+                        }
+                    }
                 }
                 IconButton {
                     icon: ""
@@ -212,18 +266,21 @@ Rectangle {
                 Connections {
                     target: backend
                     function onSelectedChanged() { terminalArea.detached = false }
+                    function onEditorChanged() { terminalArea.detached = false }
                 }
 
                 Repeater {
                     id: terminals
-                    model: panel.attached && !terminalArea.detached && backend.selectedTerminal !== ""
-                           && backend.herdrPath !== "" ? [backend.selectedTerminal + "#" + panel.attachRound] : []
+                    model: panel.attached && !terminalArea.detached && panel.shownTerminal !== ""
+                           && backend.herdrPath !== "" ? [panel.shownTerminal + "#" + panel.attachRound] : []
                     delegate: AgentTerminal {
                         required property string modelData
                         terminalId: modelData.split("#")[0]
+                        editor: backend.editing
                         width: terminalArea.width
                         height: terminalArea.height
-                        onDetached: terminalArea.detached = true
+                        // An editor that quits closes its pane: back to the agent.
+                        onDetached: if (editor) backend.editorClosed(); else terminalArea.detached = true
                         Component.onCompleted: if (panel.attached) focusTerminal()
                     }
                 }
@@ -314,9 +371,10 @@ Rectangle {
                 Repeater {
                     model: [
                         qsTr("Any key"), qsTr("Goes to the agent's terminal, as in herdr"),
-                        "Alt+↑ Alt+↓", qsTr("Pick an agent"),
+                        "Alt+↑ Alt+↓", qsTr("Pick an agent (in the editor: move lines)"),
                         "Ctrl+P", qsTr("Start an agent in a workspace, or create one"),
                         "Ctrl+D", qsTr("In the picker: close a workspace (press twice)"),
+                        "Alt+E", qsTr("Switch between the agent and the editor beside it"),
                         "Ctrl+Shift+O", qsTr("Open the agent in herdr"),
                         "Super+H", qsTr("Show or hide the panel"),
                         "Esc", qsTr("Close the picker or help; outside the terminal, hide the panel"),

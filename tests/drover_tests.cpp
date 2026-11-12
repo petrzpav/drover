@@ -8,9 +8,11 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QtTest>
+#include <QJsonArray>
 
 #include "agentmodel.h"
 #include "backend.h"
+#include "freshtheme.h"
 #include "terminalfont.h"
 #include "terminalview.h"
 #include "theme.h"
@@ -508,6 +510,14 @@ echo ok
         QCOMPARE(Backend::readIndicator(dir.filePath("config")), QString("bars"));
     }
 
+    void readsTheEditor()
+    {
+        QTemporaryDir dir;
+        QCOMPARE(Backend::readEditor(dir.filePath("config")), QString("fresh"));
+        write(dir.filePath("config"), "editor = micro\n");
+        QCOMPARE(Backend::readEditor(dir.filePath("config")), QString("micro"));
+    }
+
     void themeGivesTheTerminalPalette()
     {
         QTemporaryDir dir;
@@ -519,6 +529,33 @@ echo ok
         QCOMPARE(palette.at(1), QString("#ff6188"));
         QCOMPARE(palette.at(14), QString("#95e5ee"));
         QCOMPARE(palette.at(2), QString("#0dbc79"));
+    }
+
+    void freshWearsTheOmarchyTheme()
+    {
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("theme");
+        write(dir.path() + "/theme/colors.toml", "accent = \"#ffd866\"\nbackground = \"#2d2a2e\"\n"
+                                                 "foreground = \"#fcfcfa\"\nyellow = \"#ffd866\"\n");
+        Theme theme(dir.path());
+        auto json = QJsonDocument::fromJson(FreshTheme::build(theme)).object();
+        QCOMPARE(json.value("name").toString(), QString("omarchy"));
+        QCOMPARE(json.value("extends").toString(), QString("builtin://dark"));
+        QCOMPARE(json.value("editor").toObject().value("bg").toArray(), QJsonArray({0x2d, 0x2a, 0x2e}));
+        QCOMPARE(json.value("editor").toObject().value("cursor").toArray(), QJsonArray({0xff, 0xd8, 0x66}));
+        QCOMPARE(json.value("syntax").toObject().value("string").toArray(), QJsonArray({0xff, 0xd8, 0x66}));
+
+        // Written into the given folder, never Fresh's real one; a fake fresh
+        // lists no running editors to tell.
+        FreshTheme fresh(&theme, dir.filePath("themes"), "/bin/true");
+        QFile file(dir.filePath("themes/omarchy.json"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), FreshTheme::build(theme));
+
+        write(dir.path() + "/theme/colors.toml", "background = \"#faf4ed\"\nforeground = \"#575279\"\n");
+        Theme light(dir.path());
+        QCOMPARE(QJsonDocument::fromJson(FreshTheme::build(light)).object().value("extends").toString(),
+                 QString("builtin://light"));
     }
 
     void terminalShowsWhatTheProgramPrints()

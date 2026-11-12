@@ -528,6 +528,11 @@ bool TerminalView::event(QEvent *event) {
     return QQuickPaintedItem::event(event);
 }
 
+void TerminalView::sendControl(const QString &letter) {
+    if (letter.size() == 1 && letter.at(0).isLetter())
+        vterm_keyboard_unichar(m_vt, letter.at(0).toLower().unicode(), VTERM_MOD_CTRL);
+}
+
 void TerminalView::sendText(const QString &text, VTermModifier modifiers) {
     for (const char32_t c : text.toUcs4())
         vterm_keyboard_unichar(m_vt, c, modifiers);
@@ -559,9 +564,16 @@ void TerminalView::keyPressEvent(QKeyEvent *event) {
         // Ctrl and Alt combinations name the key itself, not the control
         // character Qt puts in the text.
         char32_t c = char32_t(event->key());
-        if (c >= 'A' && c <= 'Z')
+        if (m_extendedKeys && c >= 'A' && c <= 'Z' && (mods & Qt::ControlModifier) && (mods & Qt::ShiftModifier)) {
+            // CSI codepoint ; 1 + shift(1) + alt(2) + ctrl(4) u
+            const QByteArray csi = QStringLiteral("\x1b[%1;%2u").arg(int(c - 'A' + 'a')).arg(1 + modifiers).toLatin1();
+            writePty(csi.constData(), size_t(csi.size()));
+            c = 0;
+        } else if (c >= 'A' && c <= 'Z') {
             c = (mods & Qt::ShiftModifier) && !(mods & Qt::ControlModifier) ? c : c - 'A' + 'a';
-        vterm_keyboard_unichar(m_vt, c, VTermModifier(modifiers & ~VTERM_MOD_SHIFT));
+        }
+        if (c)
+            vterm_keyboard_unichar(m_vt, c, VTermModifier(modifiers & ~VTERM_MOD_SHIFT));
     } else if (!event->text().isEmpty()) {
         // The layout already applied Shift (and AltGr) to the text.
         sendText(event->text(), VTermModifier(modifiers & ~VTERM_MOD_SHIFT & ~VTERM_MOD_ALT));

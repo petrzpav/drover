@@ -42,6 +42,9 @@ public:
     // xterm's where the theme has none.
     QStringList terminalPalette() const;
 
+    // One of the theme's named colors (colors.toml), or the fallback.
+    QString color(const QString &key, const QString &fallback) const { return m_colors.value(key, fallback); }
+
     static QString readAccent(const QString &path);
     static QHash<QString, QString> readColors(const QString &path);
 
@@ -53,7 +56,6 @@ private:
     void refreshRounding();
 
     QString m_directory;
-    QString color(const QString &key, const QString &fallback) const { return m_colors.value(key, fallback); }
 
     QString m_accent = "#FFD60A";
     QHash<QString, QString> m_colors;

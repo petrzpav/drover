@@ -32,6 +32,10 @@ class TerminalView : public QQuickPaintedItem {
     // The 16 basic colors, as "#rrggbb".
     Q_PROPERTY(QStringList colors READ colors WRITE setColors NOTIFY colorsChanged)
     Q_PROPERTY(QStringList reservedShortcuts READ reservedShortcuts WRITE setReservedShortcuts)
+    // Sends Ctrl+Shift+letter as such (CSI u, the kitty keyboard protocol's
+    // form), for programs that tell them from Ctrl+letter, like editors.
+    // Off, they go as Ctrl+letter, which is all most programs know.
+    Q_PROPERTY(bool extendedKeys READ extendedKeys WRITE setExtendedKeys)
     Q_PROPERTY(bool running READ running NOTIFY runningChanged)
     Q_PROPERTY(int columns READ columns NOTIFY gridChanged)
     Q_PROPERTY(int rows READ rows NOTIFY gridChanged)
@@ -56,6 +60,8 @@ public:
     void setColors(const QStringList &colors);
     QStringList reservedShortcuts() const { return m_reserved; }
     void setReservedShortcuts(const QStringList &shortcuts) { m_reserved = shortcuts; }
+    bool extendedKeys() const { return m_extendedKeys; }
+    void setExtendedKeys(bool on) { m_extendedKeys = on; }
     bool running() const { return m_pid > 0; }
     int columns() const { return m_cols; }
     int rows() const { return m_rows; }
@@ -64,6 +70,8 @@ public:
     Q_INVOKABLE void start();
     Q_INVOKABLE void copy();
     Q_INVOKABLE void paste();
+    // Sends Ctrl and a letter, as if typed (for a shortcut the desktop took).
+    Q_INVOKABLE void sendControl(const QString &letter);
     // What the screen shows, one line per row, trailing spaces trimmed.
     Q_INVOKABLE QString screenText() const;
     // The color a cell's text is drawn in.
@@ -122,6 +130,7 @@ private:
 
     QString m_program;
     QStringList m_arguments, m_colors, m_reserved;
+    bool m_extendedKeys = false;
     QFont m_font, m_bold, m_italic, m_boldItalic;
     QColor m_background{"#101315"}, m_foreground{"#cacccc"}, m_selectionColor{"#505a5f"};
     qreal m_cellWidth = 8, m_cellHeight = 16, m_ascent = 12;

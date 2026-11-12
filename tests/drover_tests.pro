@@ -6,5 +6,5 @@ TEMPLATE = app
 INCLUDEPATH += ../src
 LIBS += -lvterm -lutil
 
-HEADERS += ../src/agentmodel.h ../src/backend.h ../src/terminalview.h ../src/theme.h ../src/translator.h ../src/terminalfont.h
-SOURCES += drover_tests.cpp ../src/agentmodel.cpp ../src/backend.cpp ../src/terminalview.cpp ../src/theme.cpp ../src/translator.cpp ../src/terminalfont.cpp
+HEADERS += ../src/agentmodel.h ../src/backend.h ../src/terminalview.h ../src/theme.h ../src/freshtheme.h ../src/translator.h ../src/terminalfont.h
+SOURCES += drover_tests.cpp ../src/agentmodel.cpp ../src/backend.cpp ../src/terminalview.cpp ../src/theme.cpp ../src/freshtheme.cpp ../src/translator.cpp ../src/terminalfont.cpp
