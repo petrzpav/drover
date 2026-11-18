@@ -882,6 +882,63 @@ private slots:
         QCOMPARE(typed.size(), 2);
     }
 
+    void aTurnsOpenQuestionTakesOnlyWords()
+    {
+        Rig rig(R"({"result":{"agents":[
+          {"agent":"claude","agent_status":"done","cwd":"/a","pane_id":"w1:p1","terminal_id":"term_1","terminal_title_stripped":"Plant the beds","workspace_id":"w1","agent_session":{"value":"s1"}},
+          {"agent":"claude","agent_status":"idle","cwd":"/b","pane_id":"w2:p1","terminal_id":"term_2","terminal_title_stripped":"Fix the gate","workspace_id":"w2","agent_session":{"value":"s2"}}]}})");
+        QSignalSpy typed(rig.asker.get(), &Asker::typeRequested);
+        auto *stage = rig.find("askStage");
+        const QJsonObject stop{{"hook_event_name", "Stop"}, {"session_id", "s1"},
+                               {"last_assistant_message", QString("word ").repeated(110) + "\n\nWhich bed is next?"}};
+        QVERIFY(Hook::run(QJsonDocument(stop).toJson(), {{"HERDR_PANE_ID", "w1:p1"}}, rig.askServer).isEmpty());
+        QTRY_VERIFY(stage->isVisible());
+        // No "Yes" to "which": only your own answer, and the question shows.
+        QVERIFY(!rig.find("stageOption0"));
+        auto *question = rig.find("stageQuestion");
+        const QRectF shown = question->parentItem()->mapRectToScene(QRectF(0, 0, question->parentItem()->width(),
+                                                                           question->parentItem()->height()));
+        const QRectF last = question->mapRectToScene(QRectF(0, question->height() - 4, question->width(), 4));
+        QVERIFY(shown.contains(last));
+        QMetaObject::invokeMethod(rig.window, "toggle");
+        QTRY_VERIFY(rig.find("stageOwnField")->hasActiveFocus());
+        rig.type("the north one");
+        QTest::keyClick(rig.window, Qt::Key_Return);
+        QTRY_COMPARE(typed.size(), 1);
+        QCOMPARE(typed.at(0).at(2).toString(), QString("the north one"));
+    }
+
+    void nothingComesOnStageWhileThePanelIsOpen()
+    {
+        Rig rig(agents("working", "idle"));
+        rig.expand();
+        auto *stage = rig.find("askStage");
+        AskingHook hook(questionInput(false), "w2:p1", rig.askServer, rig.asker.get());
+        QTRY_VERIFY(rig.asker->current().contains("id"));
+        QTest::qWait(300);
+        QVERIFY(!stage->isVisible());
+        // It waits, marked in the list, and comes once the panel closes.
+        QMetaObject::invokeMethod(rig.window, "setExpanded", Q_ARG(QVariant, false));
+        QTRY_VERIFY(stage->isVisible());
+        rig.asker->pass(rig.asker->current().value("id").toInt());
+    }
+
+    void pickingTheAgentThatAsksGivesItsTerminalTheQuestion()
+    {
+        Rig rig(agents("working", "idle"));
+        rig.asker->setWatching([&rig](const QString &pane) {
+            return rig.window->property("expanded").toBool() && rig.backend->selected() == pane;
+        });
+        rig.expand();
+        AskingHook hook(questionInput(false), "w2:p1", rig.askServer, rig.asker.get());
+        QTRY_VERIFY(rig.asker->current().contains("id"));
+        QCOMPARE(rig.backend->selected(), QString("w1:p1"));
+        rig.backend->select("w2:p1");
+        QTRY_VERIFY(rig.asker->current().isEmpty());
+        QTRY_VERIFY(hook.done);
+        QVERIFY(hook.output.isEmpty());
+    }
+
     void thePanelNeverCoversThePill()
     {
         Rig rig(agents("idle", "idle"));

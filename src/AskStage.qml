@@ -39,6 +39,10 @@ FocusScope {
     // True from an answer until the next request is on stage.
     property bool leaving: false
     readonly property bool hasKeyboard: activeFocus
+    // While drover's panel is open nothing comes on stage: the user is busy
+    // there. What asks waits, and comes once the panel closes.
+    property bool held: false
+    onHeldChanged: sync()
     signal wantsKeyboard()
     signal releasedKeyboard()
     // Opens the agent in drover's panel.
@@ -46,7 +50,7 @@ FocusScope {
 
     readonly property var question: isQuestion && step < questions.length ? questions[step] : ({})
     readonly property var options: isQuestion ? (question.options || [])
-                                 : isReply ? [{ label: qsTr("Yes"), description: "" }]
+                                 : isReply ? (request.yesNo ? [{ label: qsTr("Yes"), description: "" }] : [])
                                  : request.kind === "permission" ? permissionOptions() : []
     // Rows: the options, then the field for your own answer.
     readonly property int rows: options.length + 1
@@ -73,7 +77,7 @@ FocusScope {
     Component.onCompleted: sync()
 
     function sync() {
-        const next = asker.current
+        const next = held ? ({}) : asker.current
         if (shown && next.id === request.id) {
             request = next  // the title or workspace changed
             return
@@ -116,7 +120,7 @@ FocusScope {
     function finished() {
         leaving = false
         request = ({})
-        const next = asker.current
+        const next = held ? ({}) : asker.current
         if (next.id !== undefined) {
             // The next one in line keeps the keyboard, if it was given.
             enter(next)
@@ -136,7 +140,11 @@ FocusScope {
     function takeKeyboard() {
         wantsKeyboard()
         stage.forceActiveFocus()
-        keys.forceActiveFocus()
+        // Nothing to pick (a question no yes answers): straight to the field.
+        if (options.length === 0)
+            ownAnswer.forceActiveFocus()
+        else
+            keys.forceActiveFocus()
     }
 
     function choose(row) {
@@ -522,16 +530,28 @@ FocusScope {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
-                    Text {
-                        objectName: "stageQuestion"
+                    // The end of an agent's message is cut from the top: its
+                    // question is last and always shows.
+                    Item {
                         Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        maximumLineCount: stage.isReply ? 8 : 4
-                        elide: Text.ElideRight
-                        color: theme.foreground
-                        text: stage.isQuestion ? (stage.question.question || "")
-                            : stage.isReply ? (stage.request.text || "")
-                            : qsTr("Allow %1?").arg(stage.request.tool || "")
+                        implicitHeight: stage.isReply ? Math.min(questionText.implicitHeight, 8 * questionMetrics.lineSpacing)
+                                                      : questionText.implicitHeight
+                        clip: stage.isReply
+                        FontMetrics { id: questionMetrics; font: questionText.font }
+                        Text {
+                            id: questionText
+                            objectName: "stageQuestion"
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            wrapMode: Text.Wrap
+                            maximumLineCount: stage.isReply ? 1000 : 4
+                            elide: stage.isReply ? Text.ElideNone : Text.ElideRight
+                            color: theme.foreground
+                            text: stage.isQuestion ? (stage.question.question || "")
+                                : stage.isReply ? (stage.request.text || "")
+                                : qsTr("Allow %1?").arg(stage.request.tool || "")
+                        }
                     }
                     Text {
                         Layout.alignment: Qt.AlignTop
@@ -703,6 +723,7 @@ FocusScope {
                     text: !stage.hasKeyboard ? qsTr("Click to answer, or press drover's key")
                         : stage.isQuestion && stage.question.multiSelect
                           ? qsTr("1–%1 tick · Enter send · Esc terminal").arg(stage.rows)
+                          : stage.isReply && stage.options.length === 0 ? qsTr("Enter send · Esc later")
                           : stage.isReply ? qsTr("1–%1 pick · Esc later").arg(stage.rows)
                           : qsTr("1–%1 pick · Esc terminal").arg(stage.rows)
                 }

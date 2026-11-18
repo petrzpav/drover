@@ -32,7 +32,8 @@ class Asker : public QObject {
     // The request on stage: {id, kind ("question", "permission" or "reply"),
     // pane, title, workspace, questions [{question, header, multiSelect,
     // options [{label, description}]}], tool, detail, always, text (the end
-    // of the agent's message)}; empty when nothing asks.
+    // of the agent's message), yesNo (a yes answers it)}; empty when
+    // nothing asks.
     Q_PROPERTY(QVariantMap current READ current NOTIFY currentChanged)
     // How many wait behind it.
     Q_PROPERTY(int waiting READ waiting NOTIFY waitingChanged)
@@ -88,12 +89,17 @@ public:
 
     // What a permission is about, in a line or a few (a command, a file).
     static QString detail(const QString &tool, const QJsonObject &input);
+    // A tool's name as people read it: an MCP tool as its server and name.
+    static QString toolLabel(const QString &tool);
     // What "always" would allow from Claude's suggestions, or empty.
     static QString alwaysWhat(const QJsonArray &suggestions);
 
 public slots:
     // Every listing of the agents, as herdr reported it.
     void agentsListed(const QList<Agent> &agents);
+    // The user may look at another agent now (the panel opened, another
+    // agent picked): what that agent asks goes to its terminal.
+    void recheck();
 
 signals:
     void currentChanged();

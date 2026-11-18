@@ -895,6 +895,27 @@ echo ok
         QVERIFY(asker.current().isEmpty());
     }
 
+    void askerGivesTheTerminalWhatTheUserNowLooksAt()
+    {
+        Asker asker;
+        const QString name = listen(asker);
+        asker.agentsListed({agent("w1:p1", "working", "s1"), agent("w2:p1", "working", "s2")});
+        QByteArray output = "unset";
+        std::thread hook([&] { output = Hook::run(QJsonDocument(question()).toJson(), pane("w1:p1"), name); });
+        QTRY_VERIFY(asker.current().contains("id"));
+        // Looking at another agent changes nothing.
+        QString looking = "w2:p1";
+        asker.setWatching([&looking](const QString &p) { return p == looking; });
+        asker.recheck();
+        QVERIFY(asker.current().contains("id"));
+        // Picking the one that asks hands its question to the terminal.
+        looking = "w1:p1";
+        asker.recheck();
+        QVERIFY(asker.current().isEmpty());
+        hook.join();
+        QVERIFY(output.isEmpty());
+    }
+
     void askerGivesAQuestionBackAfterAWhile()
     {
         Asker asker;
@@ -1012,6 +1033,14 @@ echo ok
             QJsonObject{{"type", "setMode"}, {"mode", "acceptEdits"}, {"destination", "session"}},
             QJsonObject{{"type", "addDirectories"}, {"directories", QJsonArray{QDir::homePath() + "/scratch"}}},
         };
+        // An MCP tool: its arguments as lines, never JSON.
+        const QString detail = Asker::detail("mcp__claude_ai_Linear__save_status_update",
+            {{"project", "P-IG-17"}, {"health", "onTrack"}, {"body", "Vedení chce **nabídku**."},
+             {"labels", QJsonArray{"a", "b"}}, {"extra", QJsonObject{{"x", 1}}}});
+        QCOMPARE(detail, QString("body: Vedení chce **nabídku**.\nhealth: onTrack\nlabels: a, b\nproject: P-IG-17"));
+        QCOMPARE(Asker::toolLabel("mcp__claude_ai_Linear__save_status_update"), QString("Linear save_status_update"));
+        QCOMPARE(Asker::toolLabel("mcp__claude-in-chrome__navigate"), QString("claude-in-chrome navigate"));
+        QCOMPARE(Asker::toolLabel("Bash"), QString("Bash"));
         QCOMPARE(Asker::alwaysWhat(suggestions), QString("file edits, ~/scratch"));
         QVERIFY(Asker::alwaysWhat({}).isEmpty());
     }
@@ -1048,6 +1077,66 @@ echo ok
         const QString longText = QString("word ").repeated(300) + "\n\nShall I go on?";
         QCOMPARE(Hook::lastLines(longText), QString("Shall I go on?"));
         QVERIFY(Hook::lastLines(QString("x").repeated(900) + "?").startsWith(QString::fromUtf8("…")));
+    }
+
+    void hookOffersYesOnlyToAYesOrNoQuestion()
+    {
+        // From a real session: open questions, this-or-that, two at once.
+        QVERIFY(!Hook::yesNoQuestion("Status update je v Linearu.\n\nKterý projekt dál?"));
+        QVERIFY(!Hook::yesNoQuestion("Co mám v textu změnit?"));
+        QVERIFY(!Hook::yesNoQuestion("Status update jsem nepsal. Mám tam přidat krátký update, že je naplánovaný, "
+                                     "nebo jdeme na další projekt?"));
+        QVERIFY(!Hook::yesNoQuestion("Update pro OAR je v Linearu.\n\nCo chceš u výběru dalšího projektu upřesnit? "
+                                     "Máš vlastní pořadí, nebo mi pošleš další odkaz?"));
+        QVERIFY(!Hook::yesNoQuestion("Mám přidat první status update, že se Periodic rozjíždí do konce příštího "
+                                     "týdne? A cílové datum mám smazat, nebo ho posunout, třeba na konec ledna?"));
+        QVERIFY(!Hook::yesNoQuestion("A který z nich?"));
+        QVERIFY(!Hook::yesNoQuestion("Which one do you want (`a` or `b`)?"));
+        QVERIFY(!Hook::yesNoQuestion("So, how should it look?"));
+        // Dates end no sentence.
+        QVERIFY(!Hook::yesNoQuestion("Jaký termín mám dát IG-354, 27. 11.?"));
+        QVERIFY(!Hook::yesNoQuestion("Mám termín nechat na 30. 11., nebo ho posunout na 31. 1.?"));
+        QVERIFY(Hook::yesNoQuestion("Termín je 27. 11. Mám ho nechat na 30. 11.?"));
+        // A yes answers these.
+        QVERIFY(Hook::yesNoQuestion("Hotovo, testy prošly.\n\nMám to commitnout a pushnout?"));
+        QVERIFY(Hook::yesNoQuestion("Fixed it. Tests pass.\n\n**Shall I release 1.2.0?**"));
+        QVERIFY(Hook::yesNoQuestion("Is it ok? I think so.\n\nMám přidat status update do [OAR](https://linear.app/x)?"));
+        // The flag rides along with the request.
+        const QHash<QString, QString> pane{{"HERDR_PANE_ID", "w1:p1"}};
+        QJsonObject stop{{"hook_event_name", "Stop"}, {"session_id", "s1"},
+                         {"last_assistant_message", "Done.\n\nKterý projekt dál?"}};
+        QCOMPARE(Hook::request(stop, pane).value("input").toObject().value("yesNo").toBool(), false);
+        stop.insert("last_assistant_message", "Done.\n\nShall I push it?");
+        QCOMPARE(Hook::request(stop, pane).value("input").toObject().value("yesNo").toBool(), true);
+    }
+
+    void hookShowsAMessageAsItReads()
+    {
+        QCOMPARE(Hook::plainText("OAR update je venku: [update](https://linear.app/internetguru/project/oar#update-815baa1c)."),
+                 QString("OAR update je venku: update."));
+        QCOMPARE(Hook::plainText("- **Termín:** pátek, `dev` branch"), QString("- Termín: pátek, dev branch"));
+        QCOMPARE(Hook::plainText("Edit __init__.py and mcp__x__y"), QString("Edit __init__.py and mcp__x__y"));
+        QCOMPARE(Hook::plainText("## Hotovo\n```json\n{\"a\": 1}\n```"), QString("Hotovo\n{\"a\": 1}\n"));
+        const QHash<QString, QString> pane{{"HERDR_PANE_ID", "w1:p1"}};
+        const QJsonObject stop{{"hook_event_name", "Stop"}, {"session_id", "s1"},
+                               {"last_assistant_message", "See [IG-1](https://linear.app/i/IG-1).\n\n**Push it?**"}};
+        QCOMPARE(Hook::request(stop, pane).value("input").toObject().value("text").toString(),
+                 QString("See IG-1.\n\nPush it?"));
+    }
+
+    void hookLeavesClaudesOwnDialogsToTheTerminal()
+    {
+        // A question with previews or a plan: Claude asks for "permission" to
+        // show its own dialog, which is no yes-or-no for the stage.
+        const QHash<QString, QString> pane{{"HERDR_PANE_ID", "w1:p1"}};
+        for (const char *tool : {"AskUserQuestion", "ExitPlanMode"}) {
+            const QJsonObject input{{"hook_event_name", "PermissionRequest"}, {"tool_name", tool}, {"session_id", "s1"},
+                                    {"tool_input", QJsonObject{{"questions", QJsonArray{}}, {"plan", "x"}}}};
+            QVERIFY(Hook::request(input, pane).isEmpty());
+        }
+        const QJsonObject bash{{"hook_event_name", "PermissionRequest"}, {"tool_name", "Bash"}, {"session_id", "s1"},
+                               {"tool_input", QJsonObject{{"command", "ls"}}}};
+        QCOMPARE(Hook::request(bash, pane).value("kind").toString(), QString("permission"));
     }
 
     void hookDoesntWaitAtTheEndOfATurn()

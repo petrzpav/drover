@@ -38,6 +38,11 @@ QJsonObject request(const QJsonObject &input, const QHash<QString, QString> &env
 
 // Whether an agent's last message ends with a question to the user.
 bool endsWithQuestion(const QString &message);
+// Whether that question is answered with a yes: one question, not "which",
+// "what", "how", nor "this or that".
+bool yesNoQuestion(const QString &message);
+// Markdown as it reads: links as their text, no emphasis or code marks.
+QString plainText(const QString &markdown);
 // The end of a message, about `limit` characters: its last paragraphs.
 QString lastLines(const QString &message, int limit = 600);
 

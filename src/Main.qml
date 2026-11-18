@@ -109,6 +109,9 @@ ApplicationWindow {
 
     onExpandedChanged: {
         surface.setExpanded(expanded)
+        // The agent the panel now shows may ask on the stage: its terminal
+        // takes the question.
+        asker.recheck()
         panel.helpVisible = false
         panel.picker.close()
         if (expanded)
@@ -168,6 +171,7 @@ ApplicationWindow {
         // A newly selected agent (picked, or started from the picker) gets
         // the keyboard, unless the picker is still open.
         function onSelectedChanged() {
+            asker.recheck()
             if (win.expanded && !panel.picker.open)
                 win.focusForAgent()
         }
@@ -203,6 +207,7 @@ ApplicationWindow {
         // The sheep comes from the pasture's middle.
         origin: Qt.point(win.pillX + 40, win.pillY + win.pillHeight - 6)
         look: asker.look
+        held: win.expanded
         onWantsKeyboard: surface.setStageFocus(true)
         onReleasedKeyboard: {
             surface.setStageFocus(false)

@@ -80,10 +80,14 @@ beside the herd. Pick an option with `1`–`9`, or take the last row for your ow
 words. Permission prompts offer yes, yes and don't ask again, no, or no with
 what to do instead. If an agent ends its turn with a plain question ("Shall I
 push it?"), that comes on stage too, and drover types your answer into its
-terminal.
+terminal. Only a yes-or-no question gets a "Yes" row; "Which one next?" takes
+just your own words.
 
 The stage never steals the keyboard. Click it or press `Super+H` to answer;
-`Esc` leaves the question to the agent's terminal.
+`Esc` leaves the question to the agent's terminal. While drover's panel is
+open, nothing comes on stage: questions wait, the agent shows as asking in the
+list, and they come once you close the panel. Picking the agent that asks gives
+its question to its terminal.
 
 <details>
 <summary>How the stage hooks work</summary>
@@ -101,7 +105,7 @@ prints nothing and Claude shows its own dialog as before. That happens when:
 - drover isn't running;
 - the session isn't an agent in herdr (scripts, `claude -p`);
 - you are already looking at that agent;
-- the options carry previews.
+- the options carry previews, or Claude asks to approve a plan.
 
 While drover holds a question, the herdr window shows the agent as working.
 After `ask_hold` seconds without an answer, the question goes back to the

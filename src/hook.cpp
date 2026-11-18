@@ -8,6 +8,7 @@
 #include <QLocalSocket>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QSet>
 #include <unistd.h>
 
 namespace Hook {
@@ -33,6 +34,92 @@ bool endsWithQuestion(const QString &message) {
         return line.endsWith('?');
     }
     return false;
+}
+
+QString plainText(const QString &markdown) {
+    QString text = markdown;
+    // Code blocks: their content, without the fences.
+    static const QRegularExpression fence(R"(^\s*```[^\n]*$\n?)", QRegularExpression::MultilineOption);
+    text.remove(fence);
+    // [text](url) and ![alt](url): the text.
+    static const QRegularExpression link(R"(!?\[([^\]\n]*)\]\([^)\s]*\))");
+    text.replace(link, "\\1");
+    // <https://...>: the address.
+    static const QRegularExpression angled(R"(<(https?://[^>\s]+)>)");
+    text.replace(angled, "\\1");
+    // Headings, emphasis and code marks.
+    static const QRegularExpression heading(R"(^\s{0,3}#{1,6}\s+)", QRegularExpression::MultilineOption);
+    text.remove(heading);
+    // Only **: __ is in names (__init__.py, mcp__server__tool).
+    static const QRegularExpression strong(R"(\*\*(?=\S)(.+?)(?<=\S)\*\*)");
+    text.replace(strong, "\\1");
+    static const QRegularExpression code(R"(`([^`\n]+)`)");
+    text.replace(code, "\\1");
+    return text;
+}
+
+namespace {
+
+// The sentences of a paragraph, each with its end mark. A period after a
+// digit ends no sentence: Czech dates ("do 27. 11.") and ordinals.
+QStringList sentences(const QString &paragraph) {
+    QStringList list;
+    static const QRegularExpression end(R"((?:(?<!\d)\.|[!?…])[.!?…]*(?=\s|$))");
+    int from = 0;
+    auto it = end.globalMatch(paragraph);
+    while (it.hasNext()) {
+        const auto match = it.next();
+        const QString sentence = paragraph.mid(from, match.capturedEnd() - from).trimmed();
+        if (!sentence.isEmpty())
+            list << sentence;
+        from = match.capturedEnd();
+    }
+    const QString rest = paragraph.mid(from).trimmed();
+    if (!rest.isEmpty())
+        list << rest;
+    return list;
+}
+
+} // namespace
+
+bool yesNoQuestion(const QString &message) {
+    const QStringList paragraphs = plainText(message).trimmed().split(QRegularExpression(R"(\n\s*\n)"), Qt::SkipEmptyParts);
+    if (paragraphs.isEmpty())
+        return false;
+    // The last paragraph asks; more than one question in it wants more than
+    // a yes ("Shall I add it? And the date, delete or move it?").
+    const QStringList list = sentences(paragraphs.last().simplified());
+    QStringList questions;
+    for (const QString &sentence : list) {
+        QString bare = sentence;
+        static const QRegularExpression trailing(R"([\s*_`)\]"'»“”]+$)");
+        bare.remove(trailing);
+        if (bare.endsWith('?'))
+            questions << bare;
+    }
+    if (questions.size() != 1 || !list.last().contains('?'))
+        return false;
+    const QString question = questions.first().toLower();
+    // Either this or that.
+    static const QRegularExpression either(R"(\b(nebo|or|anebo|či)\b)",
+                                           QRegularExpression::UseUnicodePropertiesOption);
+    if (either.match(question).hasMatch())
+        return false;
+    // Which, what, how...: no yes answers it. Also after a word
+    // ("A který dál?", "So which one?", "Na kdy to dát?").
+    static const QSet<QString> asking{
+        "what", "which", "who", "whom", "whose", "where", "when", "why", "how",
+        "co", "čeho", "čemu", "čím", "kdo", "koho", "komu", "kým", "kde", "kam", "kdy", "kudy", "odkud",
+        "dokdy", "proč", "kolik", "kolikrát", "nakolik", "čí", "čího", "jak", "jaký", "jaká", "jaké",
+        "jakou", "jakého", "jakém", "jakým", "jací", "který", "která", "které", "kterou", "kterého",
+        "kterém", "kterým", "kteří", "kterými", "kterých",
+    };
+    static const QRegularExpression word(R"(\w+)", QRegularExpression::UseUnicodePropertiesOption);
+    auto words = word.globalMatch(question);
+    for (int i = 0; i < 2 && words.hasNext(); ++i)
+        if (asking.contains(words.next().captured()))
+            return false;
+    return true;
 }
 
 QString lastLines(const QString &message, int limit) {
@@ -75,7 +162,7 @@ QJsonObject request(const QJsonObject &input, const QHash<QString, QString> &env
             {"pane", pane},
             {"session", input.value("session_id").toString()},
             {"cwd", input.value("cwd").toString()},
-            {"input", QJsonObject{{"text", lastLines(text)}}},
+            {"input", QJsonObject{{"text", lastLines(plainText(text))}, {"yesNo", yesNoQuestion(text)}}},
         };
     }
     if (event == "PreToolUse" && tool == "AskUserQuestion") {
@@ -94,6 +181,10 @@ QJsonObject request(const QJsonObject &input, const QHash<QString, QString> &env
         }
         kind = "question";
     } else if (event == "PermissionRequest" && !tool.isEmpty()) {
+        // Claude's own dialogs (a question with previews, a plan to approve)
+        // are no permission to say yes to: they stay in the terminal.
+        if (tool == "AskUserQuestion" || tool == "ExitPlanMode")
+            return {};
         kind = "permission";
     } else {
         return {};

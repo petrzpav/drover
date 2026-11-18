@@ -128,8 +128,9 @@ void Asker::admit(QLocalSocket *socket, const QJsonObject &ask) {
         socket->flush();
         socket->disconnectFromServer();
     };
-    // A question for the agent the user is looking at goes to its terminal.
-    if (kind != "permission" && m_watching && m_watching(pane)) {
+    // A question for the agent the user is looking at goes to its terminal;
+    // a permission prompt is there already.
+    if (m_watching && m_watching(pane)) {
         passNow();
         return;
     }
@@ -186,6 +187,23 @@ void Asker::admit(QLocalSocket *socket, const QJsonObject &ask) {
     m_requests.insert(at, request);
     changed(first, count, asking);
     emit arrived();
+}
+
+void Asker::recheck() {
+    if (!m_watching || m_requests.isEmpty())
+        return;
+    // The user now looks at an agent that asks here: the terminal has it.
+    QList<int> watched;
+    QHash<QString, bool> looked;
+    for (const auto &request : std::as_const(m_requests)) {
+        const QString pane = request.ask.value("pane").toString();
+        if (!looked.contains(pane))
+            looked.insert(pane, m_watching(pane));
+        if (looked.value(pane))
+            watched << request.id;
+    }
+    for (int id : watched)
+        pass(id);
 }
 
 void Asker::replyWith(int id, const QString &text) {
@@ -324,12 +342,13 @@ QVariantMap Asker::current() const {
         {"title", agent.title},
         {"workspace", agent.workspace},
         {"cwd", agent.cwd},
-        {"tool", tool},
+        {"tool", toolLabel(tool)},
     };
     if (ask.value("kind").toString() == "question") {
         map.insert("questions", input.value("questions").toArray().toVariantList());
     } else if (ask.value("kind").toString() == "reply") {
         map.insert("text", input.value("text").toString());
+        map.insert("yesNo", input.value("yesNo").toBool());
     } else {
         map.insert("detail", detail(tool, input));
         map.insert("always", alwaysWhat(ask.value("suggestions").toArray()));
@@ -361,7 +380,43 @@ QString Asker::detail(const QString &tool, const QJsonObject &input) {
         return text("command");
     if (!text("description").isEmpty())
         return text("description");
-    return QString::fromUtf8(QJsonDocument(input).toJson(QJsonDocument::Compact)).left(400);
+    // Anything else (an MCP tool's arguments): its values as lines, not JSON.
+    QStringList lines;
+    for (auto it = input.constBegin(); it != input.constEnd(); ++it) {
+        QString value;
+        if (it->isString())
+            value = it->toString();
+        else if (it->isDouble() || it->isBool())
+            value = it->toVariant().toString();
+        else if (it->isArray()) {
+            QStringList items;
+            for (const auto &item : it->toArray())
+                if (item.isString() || item.isDouble())
+                    items << item.toVariant().toString();
+            value = items.join(", ");
+        }
+        value = value.simplified();
+        if (value.isEmpty())
+            continue;
+        if (value.size() > 160)
+            value = value.left(160) + QString::fromUtf8("…");
+        lines << it.key() + ": " + value;
+    }
+    return lines.join('\n');
+}
+
+QString Asker::toolLabel(const QString &tool) {
+    // mcp__claude_ai_Linear__save_issue: Linear save_issue.
+    if (!tool.startsWith("mcp__"))
+        return tool;
+    const QStringList parts = tool.mid(5).split("__");
+    if (parts.size() < 2)
+        return tool;
+    QString server = parts.first();
+    if (server.startsWith("claude_ai_"))
+        server = server.mid(10);
+    server.replace('_', ' ');
+    return server + ' ' + parts.mid(1).join("__");
 }
 
 QString Asker::alwaysWhat(const QJsonArray &suggestions) {

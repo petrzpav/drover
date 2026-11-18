@@ -54,6 +54,7 @@
   "done": "hotovo",
   "Edit files beside the agent": "Upravovat soubory vedle agenta",
   "editor": "editor",
+  "Enter send · Esc later": "Enter odeslat · Esc později",
   "Enter creates it there and starts %1 · Ctrl+O picks another folder": "Enter ho tam vytvoří a spustí %1 · Ctrl+O vybere jinou složku",
   "Enter makes the folder, creates it there and starts %1 · Ctrl+O picks another": "Enter vytvoří složku i workspace v ní a spustí %1 · Ctrl+O vybere jinou",
   "Enter or Ctrl+O picks its folder, then %1 starts there · Esc closes": "Enter nebo Ctrl+O vybere jeho složku, pak v ní poběží %1 · Esc zavře",
