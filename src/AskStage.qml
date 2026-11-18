@@ -673,7 +673,15 @@ FocusScope {
                                     selectionColor: Qt.alpha(theme.foreground, 0.35)
                                     selectedTextColor: theme.foreground
                                     clip: true
-                                    onActiveFocusChanged: if (activeFocus) stage.highlighted = ownRow.index
+                                    // However the field got here (a click right into it,
+                                    // which its row's tap never sees), drover asks the
+                                    // compositor for the keyboard, or typing lands in the
+                                    // window beneath.
+                                    onActiveFocusChanged: if (activeFocus) {
+                                        stage.highlighted = ownRow.index
+                                        stage.wantsKeyboard()
+                                    }
+                                    TapHandler { onPressedChanged: if (pressed) stage.wantsKeyboard() }
                                     Keys.onShortcutOverride: (event) => {
                                         event.accepted = event.key === Qt.Key_Escape || event.key === Qt.Key_Return
                                                        || event.key === Qt.Key_Enter

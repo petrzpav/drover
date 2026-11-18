@@ -908,6 +908,25 @@ private slots:
         QCOMPARE(typed.at(0).at(2).toString(), QString("the north one"));
     }
 
+    void aClickIntoTheOwnAnswerTakesTheKeyboard()
+    {
+        Rig rig(agents("working", "idle"));
+        auto *stage = rig.find("askStage");
+        QSignalSpy wants(stage, SIGNAL(wantsKeyboard()));
+        AskingHook hook(questionInput(false), "w1:p1", rig.askServer, rig.asker.get());
+        QTRY_VERIFY(stage->isVisible());
+        QTRY_COMPARE(stage->property("opacity").toReal(), 1.0);
+        QTest::qWait(700);  // the entrance
+        // Right into the field, not its row: drover must ask the compositor
+        // for the keyboard, or the typing lands in the window beneath.
+        auto *field = rig.find("stageOwnField");
+        const QPointF center = field->mapToScene(QPointF(field->width() / 2, field->height() / 2));
+        QTest::mouseClick(rig.window, Qt::LeftButton, {}, center.toPoint());
+        QTRY_VERIFY(field->hasActiveFocus());
+        QVERIFY(wants.size() >= 1);
+        QVERIFY(stage->property("hasKeyboard").toBool());
+    }
+
     void nothingComesOnStageWhileThePanelIsOpen()
     {
         Rig rig(agents("working", "idle"));
