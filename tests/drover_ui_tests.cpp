@@ -675,6 +675,37 @@ private slots:
         QVERIFY(!rig.log().contains("pane close w2:p1"));
     }
 
+    void anAgentThatEndsTakesItsTabAlong()
+    {
+        Rig rig(agents("working", "idle"));
+        // w1's agent ran in a tab of its own beside the workspace's first;
+        // w2's runs in the workspace's only tab, which keeps it open.
+        write(rig.dir.filePath("panes.json"), R"({"result":{"panes":[
+          {"pane_id":"w1:p9","tab_id":"w1:t1","terminal_id":"term_9","workspace_id":"w1"},
+          {"pane_id":"w1:p1","tab_id":"w1:t2","terminal_id":"term_1","workspace_id":"w1"},
+          {"pane_id":"w1:p4","tab_id":"w1:t2","terminal_id":"term_e","workspace_id":"w1","label":"editor"},
+          {"pane_id":"w2:p1","tab_id":"w2:t1","terminal_id":"term_2","workspace_id":"w2"}]}})");
+        write(rig.dir.filePath("agents.json"), R"({"result":{"agents":[]}})");
+        QTRY_VERIFY_WITH_TIMEOUT(rig.log().contains("tab close w1:t2"), 8000);
+        QTest::qWait(300);
+        QVERIFY(!rig.log().contains("tab close w1:t1"));
+        QVERIFY(!rig.log().contains("tab close w2:t1"));
+        QVERIFY(!rig.log().contains("pane close"));
+    }
+
+    void aTabWhereAnotherAgentWorksStays()
+    {
+        Rig rig(agents("working", "idle"));
+        write(rig.dir.filePath("panes.json"), R"({"result":{"panes":[
+          {"pane_id":"w1:p9","tab_id":"w1:t1","terminal_id":"term_9","workspace_id":"w1"},
+          {"pane_id":"w1:p1","tab_id":"w1:t2","terminal_id":"term_1","workspace_id":"w1"},
+          {"pane_id":"w1:p3","tab_id":"w1:t2","terminal_id":"term_3","workspace_id":"w1","agent":"codex"},
+          {"pane_id":"w2:p1","tab_id":"w2:t1","terminal_id":"term_2","workspace_id":"w2"}]}})");
+        write(rig.dir.filePath("agents.json"), R"({"result":{"agents":[]}})");
+        QTest::qWait(4500);
+        QVERIFY(!rig.log().contains("tab close"));
+    }
+
     void anAgentMissingForAMomentKeepsItsEditor()
     {
         Rig rig(agents("working", "idle"));

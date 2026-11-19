@@ -27,7 +27,8 @@ who needs you, and you answer them without leaving what you're doing.
 - **An editor beside every agent.** `Alt+E` opens [Fresh](https://github.com/sinelaw/fresh)
   in the agent's folder, and `Ctrl+;` opens a shell below it.
 - **New agents in a keystroke.** `Ctrl+P` picks or creates a workspace and
-  starts your default agent there.
+  starts your default agent there. An agent that ends takes its tab along,
+  editor and shell included; the workspace's last tab stays.
 - **Feels like part of Omarchy.** It uses the theme's colors, border and
   rounding and your terminal's font, and it follows theme switches live, Fresh
   included.

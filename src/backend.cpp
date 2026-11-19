@@ -624,9 +624,12 @@ void Backend::closeShell() {
     shellClosed();
 }
 
-// An agent that ended takes its editor along: the panes labelled "editor"
-// and "shell" in its tab close, and so does the agent's own pane if only a shell is left in
-// it (herdr names no agent there). Tabs without an editor stay as they are.
+// An agent that ended takes its tab along, when its workspace has another
+// one: nothing is left there but the shell it ran in (herdr names no agent
+// there), an editor or a shell beside it. In the workspace's only tab, which
+// keeps the workspace open, the panes labelled "editor" and "shell" close,
+// and so does the agent's own pane if only a shell is left in it. A tab where
+// another agent works stays as it is.
 void Backend::closeEditorsOf(const QList<Agent> &gone) {
     const QString program = herdr();
     if (program.isEmpty())
@@ -656,8 +659,24 @@ void Backend::closeEditorsOf(const QList<Agent> &gone) {
                 else if (pane.value("label").toString() == "shell")
                     shells << pane.value("pane_id").toString();
             }
-            // Another agent still works in this tab: its editor stays.
-            if (editor.isEmpty() || otherAgent)
+            // Another agent still works in this tab: it stays.
+            if (otherAgent)
+                continue;
+            const auto workspaceOf = [](const QJsonObject &pane) {
+                const QString id = pane.value("workspace_id").toString();
+                return !id.isEmpty() ? id : pane.value("tab_id").toString().section(':', 0, 0);
+            };
+            const QString workspace = tab.section(':', 0, 0);
+            QSet<QString> tabs;
+            for (const auto &value : panes)
+                if (workspaceOf(value.toObject()) == workspace)
+                    tabs.insert(value.toObject().value("tab_id").toString());
+            const bool shellOnly = own.isEmpty() || own.value("agent").toString().isEmpty();
+            if (!tab.isEmpty() && tabs.contains(tab) && tabs.size() > 1 && shellOnly) {
+                run(program, {"tab", "close", tab}, [](int, const QByteArray &, const QByteArray &) {});
+                continue;
+            }
+            if (editor.isEmpty())
                 continue;
             for (const QString &shell : shells)
                 run(program, {"pane", "close", shell}, [](int, const QByteArray &, const QByteArray &) {});
