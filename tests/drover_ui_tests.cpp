@@ -8,6 +8,7 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QElapsedTimer>
+#include <QWheelEvent>
 #include <QPainter>
 #include <QScopeGuard>
 #include <QTemporaryDir>
@@ -684,6 +685,41 @@ private slots:
         QFile file(rig.dir.filePath("order"));
         QVERIFY(file.open(QIODevice::ReadOnly));
         QVERIFY(file.readAll().startsWith("w1:p1\nw3:p1\nw4:p1\nw2:p1"));
+    }
+
+    void draggingARowLeavesTheListWhereItIs()
+    {
+        // More agents than the list shows, so it could scroll.
+        QStringList rows;
+        for (int i = 1; i <= 20; ++i)
+            rows << QString(R"({"agent":"claude","agent_status":"idle","cwd":"/a","pane_id":"w%1:p1",)"
+                            R"("terminal_id":"term_%1","terminal_title_stripped":"Agent %1","workspace_id":"w%1"})").arg(i);
+        Rig rig("{\"result\":{\"agents\":[" + rows.join(",").toUtf8() + "]}}", 20);
+        rig.expand();
+        QTest::qWait(300);
+        auto *row = rig.find("agentRow_w3:p1");
+        QVERIFY(row);
+        auto *view = row->parentItem()->parentItem();
+        QVERIFY(view->inherits("QQuickListView"));
+        QCOMPARE(view->property("contentY").toReal(), 0.0);
+        const QPointF before = row->mapToScene(QPointF(0, 0));
+        const QPoint at = row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint();
+        QTest::mousePress(rig.window, Qt::LeftButton, {}, at);
+        // The first pixels of a drag move the row only, never the list.
+        for (int i = 1; i <= 30; ++i) {
+            QTest::mouseMove(rig.window, at + QPoint(0, i));
+            QCOMPARE(view->property("contentY").toReal(), 0.0);
+            const qreal y = row->mapToScene(QPointF(0, 0)).y() - before.y();
+            QVERIFY2(y >= -0.5 && y <= i + 0.5, qPrintable(QString("row at %1 after %2 px").arg(y).arg(i)));
+        }
+        QTest::mouseRelease(rig.window, Qt::LeftButton, {}, at + QPoint(0, 30));
+        QTest::qWait(300);
+        QCOMPARE(view->property("contentY").toReal(), 0.0);
+        // The wheel still scrolls it.
+        QWheelEvent wheel(at, rig.window->mapToGlobal(at), QPoint(), QPoint(0, -360), Qt::NoButton, Qt::NoModifier,
+                          Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(rig.window, &wheel);
+        QTRY_VERIFY(view->property("contentY").toReal() > 0);
     }
 
     void anAgentEndingMidDragLeavesNothingAskew()

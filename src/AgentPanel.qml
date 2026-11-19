@@ -135,6 +135,9 @@ Rectangle {
                     boundsBehavior: Flickable.StopAtBounds
                     highlightMoveDuration: 0
                     ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                    // A mouse drag moves an agent, never the list: the wheel
+                    // and the scroll bar scroll it.
+                    acceptedButtons: Qt.NoButton
 
                     // Dragging a row moves its agent: the row follows the
                     // pointer within the list, the rows it passes make room,
@@ -191,8 +194,9 @@ Rectangle {
                         dragTranslation = translation
                         dragStartContentY = contentY
                         dragDy = 0
+                        // Its place first, so no row moves for a moment.
+                        dragTo = backend.agents.indexOf(paneId)
                         dragPane = paneId
-                        dragTo = dragFrom
                     }
                     function cancelDrag() {
                         settling = true
