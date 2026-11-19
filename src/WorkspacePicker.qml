@@ -361,25 +361,24 @@ Rectangle {
                                 color: row.marked ? theme.urgent : theme.foreground
                                 elide: Text.ElideRight
                             }
-                            // An agent's state, in the width of the longest one,
-                            // so the title never re-elides when it changes.
-                            Text {
-                                visible: row.modelData.agent === true
-                                Layout.preferredWidth: Math.max(...["working", "blocked", "done", "idle", "unknown"].map(
-                                    s => statusMetrics.advanceWidth(picker.statusLabel(s))))
-                                text: picker.statusLabel(row.modelData.status ?? "")
-                                color: picker.dim
-                                FontMetrics { id: statusMetrics }
-                            }
+                            // On the right, flush with the workspaces' agent counts: an
+                            // agent's state and workspace, as wide as its longest state,
+                            // so the title never re-elides when the state changes.
                             Text {
                                 visible: row.modelData.agent || row.modelData.create || row.modelData.agents > 0
-                                text: row.modelData.agent ? row.modelData.workspace
+                                text: row.modelData.agent ? picker.statusLabel(row.modelData.status) + " · " + row.modelData.workspace
                                     : !row.modelData.create ? qsTr("%n agents", "", row.modelData.agents)
                                     : row.modelData.found ? row.modelData.folder
                                     : row.modelData.makeFolder ? qsTr("new folder %1").arg(row.modelData.folder) : qsTr("pick a folder")
                                 color: row.marked ? theme.urgent : picker.dim
+                                horizontalAlignment: Text.AlignRight
                                 elide: Text.ElideMiddle
+                                Layout.preferredWidth: row.modelData.agent
+                                    ? Math.ceil(Math.max(...["working", "blocked", "done", "idle", "unknown"].map(
+                                          s => statusMetrics.advanceWidth(picker.statusLabel(s) + " · " + row.modelData.workspace))))
+                                    : -1
                                 Layout.maximumWidth: row.width / 2
+                                FontMetrics { id: statusMetrics }
                             }
                             // Always takes its place, so rows line up whether or not it shows.
                             Item {
