@@ -34,7 +34,10 @@ ApplicationWindow {
     }
     // The full-screen panel covers the herd's corner, so the herd steps aside
     // until the panel has faded out.
-    readonly property bool pillShown: !(fullscreen && panel.visible)
+    readonly property bool pillShown: !((fullscreen || morphing) && panel.visible)
+    // The open panel glides between its own size and the whole screen.
+    property bool morphing: false
+    Timer { id: morphEnd; interval: 200; onTriggered: win.morphing = false }
 
     function clamp(value, low, high) {
         return Math.max(low, Math.min(high, value))
@@ -109,6 +112,8 @@ ApplicationWindow {
             expanded = true
             return
         }
+        morphing = true
+        morphEnd.restart()
         surface.fullscreen = !fullscreen
         // Grown over the window that had the keyboard, it takes it back.
         if (fullscreen)
@@ -222,6 +227,11 @@ ApplicationWindow {
         y: win.panelRect.y
         width: win.panelRect.width
         height: win.panelRect.height
+        Behavior on x { enabled: win.morphing; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+        Behavior on y { enabled: win.morphing; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+        Behavior on width { enabled: win.morphing; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+        Behavior on height { enabled: win.morphing; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+        morphing: win.morphing
         attached: win.expanded
         fullscreen: win.fullscreen
         onFullscreenToggled: win.toggleFullscreen()

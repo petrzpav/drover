@@ -41,7 +41,8 @@ class TerminalView : public QQuickPaintedItem {
     // prefix whatever the config says, and passes it on only when doubled.
     Q_PROPERTY(bool doubleCtrlB READ doubleCtrlB WRITE setDoubleCtrlB)
     Q_PROPERTY(bool running READ running NOTIFY runningChanged)
-    // The program has drawn something: the terminal is worth showing.
+    // The program has drawn its first screen and paused: the terminal is
+    // worth showing.
     Q_PROPERTY(bool ready READ ready NOTIFY readyChanged)
     Q_PROPERTY(int columns READ columns NOTIFY gridChanged)
     Q_PROPERTY(int rows READ rows NOTIFY gridChanged)
@@ -150,6 +151,11 @@ private:
     void repaintAll();
     bool m_stale = false;
     bool m_ready = false, m_drawn = false;
+    // Ready once the first screen has settled: herdr draws it in pieces,
+    // the cursor last, and the program may redraw at its new size.
+    // A program that never pauses (an agent at work) is shown after a
+    // moment anyway.
+    QTimer m_settleTimer, m_settleCap;
     // A size the program was told of, applied with its redraw.
     void applyPendingSize();
     int m_pendingCols = 0, m_pendingRows = 0;

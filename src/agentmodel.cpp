@@ -37,6 +37,7 @@ void AgentModel::setAgents(const QList<Agent> &agents) {
     // Rows are removed, moved, inserted, and updated in place rather than
     // reset, so the list keeps its scroll position and nothing flickers.
     const int before = m_agents.size();
+    const QVariantList rowsBefore = rows();
     QSet<QString> wanted;
     for (const auto &agent : agents)
         wanted.insert(agent.paneId);
@@ -76,4 +77,15 @@ void AgentModel::setAgents(const QList<Agent> &agents) {
 
     if (m_agents.size() != before)
         emit countChanged();
+    // Only what the rows show: herdr's focus and session ids change often.
+    if (rows() != rowsBefore)
+        emit rowsChanged();
+}
+
+QVariantList AgentModel::rows() const {
+    QVariantList list;
+    for (const Agent &agent : m_agents)
+        list.append(QVariantMap{{"paneId", agent.paneId}, {"title", agent.title}, {"kind", agent.kind},
+                                {"status", agent.status}, {"workspace", agent.workspace}, {"cwd", agent.cwd}});
+    return list;
 }

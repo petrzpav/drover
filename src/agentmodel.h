@@ -3,6 +3,7 @@
 #include <QAbstractListModel>
 #include <QList>
 #include <QString>
+#include <QVariantList>
 
 // One coding agent herdr recognized in one of its panes.
 struct Agent {
@@ -29,6 +30,9 @@ struct Agent {
 class AgentModel : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    // The same agents as plain rows, for lists drawn from JavaScript (the
+    // workspace picker): [{paneId, title, kind, status, workspace, cwd}].
+    Q_PROPERTY(QVariantList rows READ rows NOTIFY rowsChanged)
 
 public:
     enum Role { PaneIdRole = Qt::UserRole + 1, TitleRole, KindRole, StatusRole, WorkspaceRole, CwdRole };
@@ -42,11 +46,13 @@ public:
     int count() const { return m_agents.size(); }
     const QList<Agent> &agents() const { return m_agents; }
     int indexOf(const QString &paneId) const;
+    QVariantList rows() const;
 
     void setAgents(const QList<Agent> &agents);
 
 signals:
     void countChanged();
+    void rowsChanged();
 
 private:
     QList<Agent> m_agents;

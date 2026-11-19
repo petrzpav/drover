@@ -296,10 +296,67 @@ private slots:
         auto *field = rig.find("pickerField");
         QVERIFY(field && field->hasActiveFocus());
         rig.type("ga");
+        // Typed text starts on a workspace it names, past the agents that
+        // work there; "garden" and "gate" both start with "ga", and Down
+        // picks the second.
         QTest::keyClick(rig.window, Qt::Key_Down);
         QTest::keyClick(rig.window, Qt::Key_Return);
-        // "garden" and "gate" both start with "ga"; Down picked the second.
         QTRY_VERIFY(rig.log().contains("tab create --workspace w2"));
+    }
+
+    void pickerGoesToARunningAgent()
+    {
+        Rig rig(agents("working", "blocked"));
+        rig.expand();
+        QTRY_COMPARE(rig.backend->selected(), QString("w1:p1"));
+        QTest::keyClick(rig.window, Qt::Key_P, Qt::ControlModifier);
+        auto *panel = rig.find("panel");
+        auto *picker = panel->property("picker").value<QObject *>();
+        QTRY_VERIFY(picker->property("open").toBool());
+        // The agents come first, the highlight on the one not in front:
+        // Ctrl+P, Enter switches, like Alt+Tab.
+        QTRY_COMPARE(picker->property("current").toMap().value("pane").toString(), QString("w2:p1"));
+        QTest::keyClick(rig.window, Qt::Key_Return);
+        QTRY_COMPARE(rig.backend->selected(), QString("w2:p1"));
+        QVERIFY(!picker->property("open").toBool());
+        QTRY_VERIFY(panel->property("terminalFocused").toBool());
+        QVERIFY(!rig.log().contains("tab create"));
+
+        // Again: back to the agent before, like Alt+Tab.
+        QTest::keyClick(rig.window, Qt::Key_P, Qt::ControlModifier);
+        QTRY_VERIFY(picker->property("open").toBool());
+        QCOMPARE(picker->property("current").toMap().value("pane").toString(), QString("w1:p1"));
+        // Typing narrows them by title or workspace, unless it names a
+        // workspace: then that one, to start an agent there.
+        rig.type("gat");
+        QTRY_COMPARE(picker->property("current").toMap().value("label").toString(), QString("gate"));
+        rig.find("pickerField")->setProperty("text", "");
+        rig.type("plant");
+        QTRY_COMPARE(picker->property("current").toMap().value("pane").toString(), QString("w1:p1"));
+        // Ctrl+D leaves an agent alone.
+        QTest::keyClick(rig.window, Qt::Key_D, Qt::ControlModifier);
+        QTest::qWait(50);
+        QVERIFY(picker->property("armed").toString().isEmpty());
+        QTest::keyClick(rig.window, Qt::Key_Return);
+        QTRY_COMPARE(rig.backend->selected(), QString("w1:p1"));
+        QVERIFY(!rig.log().contains("tab create"));
+        QVERIFY(!rig.log().contains("workspace close"));
+
+        // An agent's state changing keeps the rows and the highlight where
+        // they are, the Create row too.
+        QTest::keyClick(rig.window, Qt::Key_P, Qt::ControlModifier);
+        QTRY_VERIFY(picker->property("open").toBool());
+        rig.type("ga");
+        QTest::keyClick(rig.window, Qt::Key_Down);
+        QTest::keyClick(rig.window, Qt::Key_Down);
+        QTRY_VERIFY(picker->property("current").toMap().value("create").toBool());
+        auto *row = rig.find("pickerFolder");
+        QVERIFY(row);
+        write(rig.dir.filePath("agents.json"), agents("idle", "done"));
+        QTRY_COMPARE(rig.backend->selectedStatus(), QString("idle"));
+        QTest::qWait(100);
+        QVERIFY(picker->property("current").toMap().value("create").toBool());
+        QCOMPARE(rig.find("pickerFolder"), row);
     }
 
     void pickerCreatesAWorkspaceInAPickedFolder()
@@ -663,7 +720,26 @@ private slots:
         QMetaObject::invokeMethod(rig.window, "toggleFullscreen");
         QVERIFY(rig.window->property("expanded").toBool());
         QVERIFY(panelRect().width() < whole.width());
-        QVERIFY(pill->isVisible());
+        // The herd comes back once the panel has shrunk past it.
+        QVERIFY(!pill->isVisible());
+        QTRY_VERIFY(pill->isVisible());
+        // The panel glides; the terminal keeps its size until the end, then
+        // takes the new one.
+        QTRY_VERIFY(panel->property("agentTerminal").value<QQuickItem *>());
+        auto *terminal = panel->property("agentTerminal").value<QQuickItem *>();
+        QTRY_COMPARE(panel->width(), panelRect().width());
+        QTest::qWait(300);
+        const qreal small = terminal->width();
+        QMetaObject::invokeMethod(rig.window, "toggleFullscreen");
+        QTest::qWait(60);
+        QVERIFY(panel->width() > panelRect().x() && panel->width() < whole.width());
+        QCOMPARE(terminal->width(), small);
+        QVERIFY(!pill->isVisible());
+        QTRY_COMPARE(panel->width(), whole.width());
+        QTRY_VERIFY(terminal->width() > small + 100);
+        QMetaObject::invokeMethod(rig.window, "toggleFullscreen");
+        QTRY_VERIFY(pill->isVisible());
+        QTRY_COMPARE(terminal->width(), small);
         auto *button = rig.find("fullscreenButton");
         QTRY_COMPARE(panel->width(), panelRect().width());
         QTest::qWait(50);
@@ -732,6 +808,37 @@ private slots:
         QTRY_VERIFY(rig.log().contains("pane close w1:p10"));
         QVERIFY(!rig.backend->shellShown());
         QCOMPARE(rig.backend->shellTerminal(), QString());
+    }
+
+    // The terminal shows once herdr's first screen has settled, so the cursor
+    // never jumps across it; an agent whose output never pauses shows soon
+    // anyway, well before the 400 ms patience.
+    void aTerminalShowsOnceItsScreenSettles()
+    {
+        for (const QString mode : {"burst", "stream"}) {
+            Rig rig(agents("idle", "idle"));
+            const QString herdr = rig.dir.filePath("herdr");
+            QFile file(herdr);
+            QVERIFY(file.open(QIODevice::ReadOnly));
+            QString script = QString::fromUtf8(file.readAll());
+            file.close();
+            const QString out = mode == "burst" ? "printf 'hello\\r\\n'; sleep 30"
+                                                : "while :; do printf x; sleep 0.02; done";
+            const QString marker = "\"terminal attach\")";
+            QVERIFY(script.contains(marker));
+            script.replace(marker, marker + "\n    " + out + " ;;\n  \"never used\")");
+            QFile::remove(herdr);
+            write(herdr, script.toUtf8());
+            QFile::setPermissions(herdr, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+            QElapsedTimer timer;
+            timer.start();
+            rig.expand();
+            QQuickItem *view = nullptr;
+            QTRY_VERIFY((view = rig.find("agentTerminal")));
+            QTRY_VERIFY_WITH_TIMEOUT(view->property("ready").toBool(), 2000);
+            // The view's own readiness, not the 400 ms patience behind it.
+            QVERIFY2(timer.elapsed() < 380, qPrintable(mode + QString(" took %1 ms").arg(timer.elapsed())));
+        }
     }
 
     void switchingAgentsKeepsTheOldTerminalUntilTheNewOneDraws()

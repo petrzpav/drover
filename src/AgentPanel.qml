@@ -12,6 +12,8 @@ Rectangle {
     id: panel
     property alias picker: workspacePicker
     property bool helpVisible: false
+    // The panel is gliding to another size: the terminals wait for its end.
+    property bool morphing: false
     // The agent list on the left (Ctrl+B); hidden, the terminal takes its
     // room. With no agent picked there is nothing else to look at, so the
     // list shows anyway.
@@ -305,6 +307,20 @@ Rectangle {
                 Layout.fillHeight: true
 
                 property bool detached: false
+                // The terminals' size: while the panel glides to another size
+                // they keep theirs, clipped, and take the new one once at the
+                // end, so the agent's screen is redrawn once, not every frame.
+                clip: true
+                property real areaWidth: 0
+                property real areaHeight: 0
+                Binding {
+                    target: terminalArea; property: "areaWidth"; value: terminalArea.width
+                    when: !panel.morphing; restoreMode: Binding.RestoreNone
+                }
+                Binding {
+                    target: terminalArea; property: "areaHeight"; value: terminalArea.height
+                    when: !panel.morphing; restoreMode: Binding.RestoreNone
+                }
                 Connections {
                     target: backend
                     function onSelectedChanged() { terminalArea.detached = false }
@@ -328,7 +344,7 @@ Rectangle {
                 // The editor's side, split when its terminal shows: the editor
                 // above, the terminal below over the whole width.
                 readonly property real shellHeight: backend.editing && backend.shellShown
-                    ? Math.round(terminalArea.height * 0.35) : 0
+                    ? Math.round(terminalArea.areaHeight * 0.35) : 0
 
                 // Switching agents keeps the previous terminal on screen until
                 // the new one has drawn, so nothing flashes blank.
@@ -361,8 +377,8 @@ Rectangle {
                         // While the editor is still drawing, the agent stays in view.
                         visible: !backend.editing || !(panel.editorTerminal && panel.editorTerminal.ready)
                         opacity: !newest || ready ? 1 : 0
-                        width: terminalArea.width
-                        height: terminalArea.height
+                        width: terminalArea.areaWidth
+                        height: terminalArea.areaHeight
                         onReadyChanged: if (ready && newest) terminalArea.dropOlderAgentTerminals()
                         onDetached: if (newest) terminalArea.detached = true
                         Component.onCompleted: if (panel.attached && !backend.editing && !panel.picker.open && !panel.helpVisible) focusTerminal()
@@ -379,8 +395,8 @@ Rectangle {
                         editor: true
                         visible: backend.editing
                         opacity: ready ? 1 : 0
-                        width: terminalArea.width
-                        height: terminalArea.height - (terminalArea.shellHeight > 0 ? terminalArea.shellHeight + 1 : 0)
+                        width: terminalArea.areaWidth
+                        height: terminalArea.areaHeight - (terminalArea.shellHeight > 0 ? terminalArea.shellHeight + 1 : 0)
                         // An editor that quits closes its pane: back to the agent.
                         onDetached: backend.editorClosed()
                         Component.onCompleted: if (panel.attached && visible && !panel.picker.open && !panel.helpVisible) focusTerminal()
@@ -388,8 +404,8 @@ Rectangle {
                 }
                 Rectangle {
                     visible: terminalArea.shellHeight > 0
-                    y: terminalArea.height - terminalArea.shellHeight - 1
-                    width: terminalArea.width
+                    y: terminalArea.areaHeight - terminalArea.shellHeight - 1
+                    width: terminalArea.areaWidth
                     height: 1
                     color: panel.line
                 }
@@ -404,9 +420,9 @@ Rectangle {
                         shell: true
                         // Hidden, it keeps its size, so its pane isn't squeezed.
                         visible: backend.editing && terminalArea.shellHeight > 0
-                        y: terminalArea.height - height
-                        width: terminalArea.width
-                        height: Math.round(terminalArea.height * 0.35)
+                        y: terminalArea.areaHeight - height
+                        width: terminalArea.areaWidth
+                        height: Math.round(terminalArea.areaHeight * 0.35)
                         // Its shell exited: the terminal is gone.
                         onDetached: backend.shellClosed()
                         Component.onCompleted: if (panel.attached && visible && !panel.picker.open && !panel.helpVisible) focusTerminal()
@@ -506,7 +522,7 @@ Rectangle {
                     model: [
                         qsTr("Any key"), qsTr("Goes to the agent's terminal, as in herdr"),
                         "Alt+↑ Alt+↓", qsTr("Pick an agent"),
-                        "Ctrl+P", qsTr("Start an agent in a workspace, or create one"),
+                        "Ctrl+P", qsTr("Go to an agent, or start one in a workspace"),
                         "Ctrl+D", qsTr("In the picker: close a workspace (press twice)"),
                         "Alt+E", qsTr("Switch between the agent and the editor beside it"),
                         "Ctrl+;", qsTr("In the editor: show or hide a terminal below it (Ctrl+W closes it)"),
@@ -562,6 +578,14 @@ Rectangle {
 
     WorkspacePicker {
         id: workspacePicker
+        statusLabel: panel.statusLabel
+        onAgentChosen: (pane) => {
+            // Going to the agent in front, from its editor, means its terminal.
+            if (pane === backend.selected && backend.editing)
+                backend.toggleEditor()
+            backend.select(pane)
+            panel.agentPicked()
+        }
         anchors.fill: parent
         anchors.margins: 2
     }

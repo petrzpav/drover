@@ -27,8 +27,9 @@ who needs you, and you answer them without leaving what you're doing.
   over the whole screen, and `Ctrl+B` hides the agent list.
 - **An editor beside every agent.** `Alt+E` opens [Fresh](https://github.com/sinelaw/fresh)
   in the agent's folder, and `Ctrl+;` opens a shell below it.
-- **New agents in a keystroke.** `Ctrl+P` picks or creates a workspace and
-  starts your default agent there. An agent that ends takes its tab along,
+- **New agents in a keystroke.** `Ctrl+P` lists your running agents to jump
+  to, then the workspaces: pick or create one and your default agent starts
+  there. An agent that ends takes its tab along,
   editor and shell included; the workspace's last tab stays.
 - **Feels like part of Omarchy.** It uses the theme's colors, border and
   rounding and your terminal's font, and it follows theme switches live, Fresh
@@ -134,7 +135,7 @@ size while it's open and gets herdr's size back when you close it.
 | `Alt+↑` `Alt+↓` | Pick an agent |
 | `Alt+E` | Switch between the agent and its editor |
 | `Ctrl+;` (editor) | Show or hide a shell below the editor |
-| `Ctrl+P` | Pick a workspace and start an agent; `Ctrl+O` picks a new folder, `Ctrl+D` twice closes one |
+| `Ctrl+P` | Go to a running agent, or pick a workspace and start one there; `Ctrl+O` picks a new folder, `Ctrl+D` twice closes a workspace |
 | `Ctrl+Shift+O` | Open the agent in herdr |
 | `Shift`+drag, `Ctrl+Shift+C` `V` | Select, copy, paste |
 | `F1` | All shortcuts |
@@ -177,8 +178,11 @@ drover quit
 <details>
 <summary>Workspace picker details</summary>
 
-`Ctrl+P` opens a new tab in the chosen workspace, in the folder it already works
-in, and starts the default agent. A name no workspace has yet adds a
+`Ctrl+P` lists the running agents first, with the highlight on the one you
+were at before, so `Ctrl+P` `Enter` switches back and forth; typing narrows
+them by title or workspace. Below them are the workspaces: typing a
+workspace's name puts the highlight on it, and Enter opens a new tab there, in
+the folder it already works in, and starts the default agent. A name no workspace has yet adds a
 **Create** row. Enter opens the desktop's folder picker (the xdg portal), unless
 the text is already a folder under your home (`~/Work/orchard`). A folder that
 doesn't exist yet, inside one that does, shows **new folder** and is made first.

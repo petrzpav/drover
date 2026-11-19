@@ -81,6 +81,20 @@ TerminalView::TerminalView(QQuickItem *parent) : QQuickPaintedItem(parent) {
     m_resizeTimer.setSingleShot(true);
     m_resizeTimer.setInterval(100);
     connect(&m_resizeTimer, &QTimer::timeout, this, &TerminalView::applyPendingSize);
+    m_settleTimer.setSingleShot(true);
+    m_settleTimer.setInterval(60);
+    m_settleCap.setSingleShot(true);
+    m_settleCap.setInterval(150);
+    auto settle = [this] {
+        m_settleTimer.stop();
+        m_settleCap.stop();
+        if (!m_ready) {
+            m_ready = true;
+            emit readyChanged();
+        }
+    };
+    connect(&m_settleTimer, &QTimer::timeout, this, settle);
+    connect(&m_settleCap, &QTimer::timeout, this, settle);
 
     m_vt = vterm_new(m_rows, m_cols);
     vterm_set_utf8(m_vt, 1);
@@ -312,9 +326,12 @@ void TerminalView::readPty() {
         break;
     }
     vterm_screen_flush_damage(m_screen);
+    // Shown once the output pauses, so the screen comes up whole, with the
+    // cursor already where it belongs.
     if (m_drawn && !m_ready) {
-        m_ready = true;
-        emit readyChanged();
+        m_settleTimer.start();
+        if (!m_settleCap.isActive())
+            m_settleCap.start();
     }
     if (ended) {
         stop();
