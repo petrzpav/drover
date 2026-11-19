@@ -99,7 +99,7 @@ int main(int argc, char *argv[]) {
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("drover");
-    app.setApplicationVersion("0.6.8");
+    app.setApplicationVersion("0.6.9");
 
     // Matches the window to drover.desktop, so the compositor (Wayland app_id)
     // and the launcher pick up the installed icon.
