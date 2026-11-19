@@ -23,6 +23,48 @@ Surface::Surface(const QString &stateFile, QObject *parent)
         if (okX && okY && x >= 0 && y >= 0)
             m_offset = {std::round(x), std::round(y)};
     }
+    // The panel's state, as "key value" lines beside the position.
+    m_panelFile = QFileInfo(m_stateFile).absolutePath() + "/panel";
+    QFile panel(m_panelFile);
+    if (panel.open(QIODevice::ReadOnly)) {
+        for (const QString &line : QString::fromUtf8(panel.readAll()).split('\n')) {
+            const auto parts = line.split(' ', Qt::SkipEmptyParts);
+            if (parts.size() != 2)
+                continue;
+            if (parts[0] == "fullscreen")
+                m_fullscreen = parts[1] == "1";
+            else if (parts[0] == "list")
+                m_listHidden = parts[1] == "hidden";
+        }
+    }
+}
+
+void Surface::setFullscreen(bool fullscreen) {
+    if (fullscreen == m_fullscreen)
+        return;
+    m_fullscreen = fullscreen;
+    savePanelState();
+    emit panelStateChanged();
+}
+
+void Surface::setListHidden(bool hidden) {
+    if (hidden == m_listHidden)
+        return;
+    m_listHidden = hidden;
+    savePanelState();
+    emit panelStateChanged();
+}
+
+void Surface::savePanelState() {
+    QDir().mkpath(QFileInfo(m_panelFile).absolutePath());
+    QSaveFile file(m_panelFile);
+    if (!file.open(QIODevice::WriteOnly))
+        return;
+    file.write(QStringLiteral("fullscreen %1\nlist %2\n")
+                   .arg(m_fullscreen ? 1 : 0)
+                   .arg(m_listHidden ? "hidden" : "shown")
+                   .toUtf8());
+    file.commit();
 }
 
 bool Surface::attach(QWindow *window) {

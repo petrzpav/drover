@@ -15,13 +15,14 @@ Rectangle {
     // The agent list on the left (Ctrl+B); hidden, the terminal takes its
     // room. With no agent picked there is nothing else to look at, so the
     // list shows anyway.
-    property bool sidebarShown: true
+    // Remembered across starts, like the full screen.
+    readonly property bool sidebarShown: !surface.listHidden
     readonly property bool listShown: sidebarShown || backend.selected === ""
     // An agent gone from under a hidden list leaves the list shown, so a
     // pick from it doesn't make it vanish under the pointer.
     Connections {
         target: backend
-        function onSelectedChanged() { if (backend.selected === "") panel.sidebarShown = true }
+        function onSelectedChanged() { if (backend.selected === "") surface.listHidden = false }
     }
     // Over the whole screen (Super+Alt+H); the window decides.
     property bool fullscreen: false
@@ -556,7 +557,7 @@ Rectangle {
         hint: !panel.listShown && backend.error !== "" ? backend.error : qsTr("Show or hide the agent list")
         busy: !panel.listShown && backend.busy === "start"
         clickableWhileBusy: true
-        onClicked: panel.sidebarShown = !panel.sidebarShown
+        onClicked: surface.listHidden = !surface.listHidden
     }
 
     WorkspacePicker {

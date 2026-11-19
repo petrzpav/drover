@@ -129,7 +129,7 @@ size while it's open and gets herdr's size back when you close it.
 | Key | Does |
 | --- | ---- |
 | `Super+H` | Show or hide the panel; with a question on stage, give it the keyboard |
-| `Super+Alt+H` | Put the panel over the whole screen, and back; it opens at its own size next time |
+| `Super+Alt+H` | Put the panel over the whole screen, and back |
 | `Ctrl+B` | In the agent view: show or hide the agent list. Its button stays in the header, red when another agent asks |
 | `Alt+↑` `Alt+↓` | Pick an agent |
 | `Alt+E` | Switch between the agent and its editor |
@@ -142,7 +142,8 @@ size while it's open and gets herdr's size back when you close it.
 Any other key goes to the agent, as in herdr. In the agent view, `Ctrl+B` is
 drover's, not Claude's (run in the background); the editor and the shell keep
 theirs. Mouse wheel and clicks go to herdr too, which scrolls the agent's
-history.
+history. drover remembers the full screen and the hidden list, also after a
+restart.
 
 ## Configuration
 

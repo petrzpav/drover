@@ -13,11 +13,8 @@ ApplicationWindow {
 
     property bool expanded: false
     // The panel over the whole screen (Super+Alt+H), until it is toggled
-    // back or the panel closes.
-    property bool fullscreen: false
-    // The desktop's folder picker closes the panel for a moment; it comes
-    // back as it was.
-    property bool keepFullscreen: false
+    // back, remembered like a window's maximized state, across starts too.
+    readonly property bool fullscreen: surface.fullscreen
     readonly property int pillWidth: 176
     readonly property int pillHeight: 36
     readonly property int gap: 8
@@ -108,11 +105,11 @@ ApplicationWindow {
     // switches an open panel between its own size and the whole screen.
     function toggleFullscreen() {
         if (!expanded) {
-            fullscreen = true
+            surface.fullscreen = true
             expanded = true
             return
         }
-        fullscreen = !fullscreen
+        surface.fullscreen = !fullscreen
         // Grown over the window that had the keyboard, it takes it back.
         if (fullscreen)
             surface.takeKeyboard()
@@ -176,7 +173,7 @@ ApplicationWindow {
     // By the agent only: the editor and the shell keep their Ctrl+B.
     Shortcut { sequence: "Ctrl+B"; enabled: win.expanded && !backend.editing && !panel.picker.open
                && backend.selected !== ""; autoRepeat: false; context: Qt.ApplicationShortcut
-               onActivated: panel.sidebarShown = !panel.sidebarShown }
+               onActivated: surface.listHidden = !surface.listHidden }
     Shortcut { sequence: "F1"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: panel.helpVisible = !panel.helpVisible }
     Shortcut { sequence: "Alt+Up"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: { backend.selectNext(-1); win.focusForAgent() } }
     Shortcut { sequence: "Alt+Down"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: { backend.selectNext(1); win.focusForAgent() } }
@@ -194,11 +191,9 @@ ApplicationWindow {
         // The folder picker is a window, under this layer: the panel steps
         // aside, then comes back to the new agent or, on cancel, the picker.
         function onFolderPickerOpened() {
-            win.keepFullscreen = true
             win.expanded = false
         }
         function onFolderPickerClosed(chosen, text) {
-            win.keepFullscreen = false
             if (chosen) {
                 win.expanded = true
                 return
@@ -230,8 +225,6 @@ ApplicationWindow {
         attached: win.expanded
         fullscreen: win.fullscreen
         onFullscreenToggled: win.toggleFullscreen()
-        // Back to its own size once it has faded out.
-        onVisibleChanged: if (!visible && !win.keepFullscreen) win.fullscreen = false
         onQuitRequested: Qt.quit()
         onAgentPicked: win.focusForAgent()
 

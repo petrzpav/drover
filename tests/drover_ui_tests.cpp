@@ -682,13 +682,24 @@ private slots:
         QTest::qWait(100);
         QVERIFY(!rig.log().contains("key 1b"));
         // Closed, the herd comes back once the panel has faded, and the
-        // panel opens at its own size next time.
+        // panel opens over the whole screen again, as it was left.
         QMetaObject::invokeMethod(rig.window, "toggle");
         QTRY_VERIFY(!rig.window->property("expanded").toBool());
         QTRY_VERIFY(pill->isVisible());
         QMetaObject::invokeMethod(rig.window, "toggle");
         QTRY_VERIFY(rig.window->property("expanded").toBool());
-        QVERIFY(panelRect().width() < whole.width());
+        QCOMPARE(panelRect(), whole);
+        QVERIFY(!pill->isVisible());
+        // The next start too, with the list as it was left.
+        rig.surface->setListHidden(true);
+        Surface next(rig.dir.filePath("position"));
+        QVERIFY(next.fullscreen());
+        QVERIFY(next.listHidden());
+        rig.surface->setFullscreen(false);
+        rig.surface->setListHidden(false);
+        Surface after(rig.dir.filePath("position"));
+        QVERIFY(!after.fullscreen());
+        QVERIFY(!after.listHidden());
     }
 
     void ctrlSemicolonOpensATerminalBelowTheEditor()

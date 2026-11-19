@@ -21,6 +21,10 @@ class Surface : public QObject {
     // Where the indicator sits, as its distance from the right and bottom
     // edges, so it stays in its corner when the screen size changes.
     Q_PROPERTY(QPointF offset READ offset WRITE setOffset NOTIFY offsetChanged)
+    // How the panel was left: over the whole screen, and with the agent list
+    // hidden. Both are kept for the next start, beside the indicator's place.
+    Q_PROPERTY(bool fullscreen READ fullscreen WRITE setFullscreen NOTIFY panelStateChanged)
+    Q_PROPERTY(bool listHidden READ listHidden WRITE setListHidden NOTIFY panelStateChanged)
 
 public:
     explicit Surface(const QString &stateFile = {}, QObject *parent = nullptr);
@@ -32,6 +36,10 @@ public:
 
     QPointF offset() const { return m_offset; }
     void setOffset(const QPointF &offset);
+    bool fullscreen() const { return m_fullscreen; }
+    void setFullscreen(bool fullscreen);
+    bool listHidden() const { return m_listHidden; }
+    void setListHidden(bool hidden);
 
     Q_INVOKABLE void setExpanded(bool expanded);
     // The stage wants the keyboard (the user clicked it, or pressed the
@@ -46,15 +54,19 @@ public:
 
 signals:
     void offsetChanged();
+    void panelStateChanged();
 
 private slots:
     void updateFocusFlag();
 
 private:
     void updateKeyboard(bool grab);
+    void savePanelState();
 
 private:
-    QString m_stateFile, m_focusFlag;
+    QString m_stateFile, m_panelFile, m_focusFlag;
+    bool m_fullscreen = false;
+    bool m_listHidden = false;
     bool m_expanded = false;
     bool m_stageFocus = false;
     QWindow *m_window = nullptr;
