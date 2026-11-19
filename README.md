@@ -23,7 +23,8 @@ who needs you, and you answer them without leaving what you're doing.
   land on a small stage beside the herd. Press `1`–`9` and the agent carries on.
 - **A real terminal, one click away.** Click the herd and the agent's herdr pane
   opens in a panel: Shift+Tab, Esc, Ctrl+C, menus and colors work as they do in
-  herdr. `Alt+↑` `Alt+↓` switch agents instantly.
+  herdr. `Alt+↑` `Alt+↓` switch agents instantly, `Super+Alt+H` puts the panel
+  over the whole screen, and `Ctrl+B` hides the agent list.
 - **An editor beside every agent.** `Alt+E` opens [Fresh](https://github.com/sinelaw/fresh)
   in the agent's folder, and `Ctrl+;` opens a shell below it.
 - **New agents in a keystroke.** `Ctrl+P` picks or creates a workspace and
@@ -49,6 +50,7 @@ Then start it at login, give it a key, and let Claude ask on its stage:
 o.launch_on_start("drover")
 -- ~/.config/hypr/bindings.lua
 o.bind("SUPER + H", "Herdr agents", "drover toggle")
+o.bind("SUPER + ALT + H", "Herdr agents, full screen", "drover fullscreen")
 ```
 
 ```sh
@@ -127,6 +129,8 @@ size while it's open and gets herdr's size back when you close it.
 | Key | Does |
 | --- | ---- |
 | `Super+H` | Show or hide the panel; with a question on stage, give it the keyboard |
+| `Super+Alt+H` | Put the panel over the whole screen, and back; it opens at its own size next time |
+| `Ctrl+B` | In the agent view: show or hide the agent list. Its button stays in the header, red when another agent asks |
 | `Alt+↑` `Alt+↓` | Pick an agent |
 | `Alt+E` | Switch between the agent and its editor |
 | `Ctrl+;` (editor) | Show or hide a shell below the editor |
@@ -135,8 +139,10 @@ size while it's open and gets herdr's size back when you close it.
 | `Shift`+drag, `Ctrl+Shift+C` `V` | Select, copy, paste |
 | `F1` | All shortcuts |
 
-Any other key goes to the agent, as in herdr. Mouse wheel and clicks go to
-herdr too, which scrolls the agent's history.
+Any other key goes to the agent, as in herdr. In the agent view, `Ctrl+B` is
+drover's, not Claude's (run in the background); the editor and the shell keep
+theirs. Mouse wheel and clicks go to herdr too, which scrolls the agent's
+history.
 
 ## Configuration
 
@@ -162,6 +168,7 @@ ask_hold = 180
 ```sh
 drover               # start (autostart), or open/hide the running one
 drover toggle|open   # open or hide the panel, starting drover if needed
+drover fullscreen    # the panel over the whole screen, and back
 drover pick          # open the panel with the workspace picker
 drover quit
 ```
@@ -202,7 +209,8 @@ second otherwise. Only the local herdr session is shown, because saved SSH
 machines take seconds per call.
 
 The look comes from Omarchy: the theme's `colors.toml`, the Hyprland active
-border, Hyprland's rounding, and the font and size of your terminal (Ghostty,
+border, Hyprland's rounding and outer gaps (the full-screen panel stands
+where a window would), and the font and size of your terminal (Ghostty,
 Alacritty, kitty or foot). Theme switches and the language (English, Czech)
 apply live. drover also writes a Fresh theme from the Omarchy colors to
 `~/.config/fresh/themes/omarchy.json`; use it with `{ "theme": "omarchy.json" }`

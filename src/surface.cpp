@@ -110,6 +110,11 @@ void Surface::setStageFocus(bool focus) {
     updateKeyboard(grab);
 }
 
+void Surface::takeKeyboard() {
+    if (m_expanded)
+        updateKeyboard(true);
+}
+
 void Surface::updateKeyboard(bool grab) {
     if (!m_layer || !m_window)
         return;

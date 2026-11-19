@@ -14,6 +14,9 @@ Rectangle {
     property string hint: ""
     property string shortcut: ""
     property bool busy: false
+    // A button that stands for something else while busy (the agent list)
+    // still takes clicks.
+    property bool clickableWhileBusy: false
     signal clicked()
 
     implicitWidth: label === "" ? implicitHeight : Math.max(implicitHeight, content.implicitWidth + 20)
@@ -39,13 +42,13 @@ Rectangle {
     Keys.onPressed: (event) => {
         if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             event.accepted = true
-            if (!event.isAutoRepeat && !busy)
+            if (!event.isAutoRepeat && (!busy || clickableWhileBusy))
                 clicked()
         }
     }
 
     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }
-    TapHandler { id: tap; onTapped: if (!button.busy) button.clicked() }
+    TapHandler { id: tap; onTapped: if (!button.busy || button.clickableWhileBusy) button.clicked() }
 
     Hint {
         visible: hover.hovered && button.hint !== ""
@@ -70,7 +73,8 @@ Rectangle {
             x: content.both ? (content.box - width) / 2 : (content.width - width) / 2
             anchors.verticalCenter: parent.verticalCenter
             visible: button.icon !== "" || button.busy
-            text: button.busy ? "" : button.icon
+            // The spinner as an escape, so no editor can strip the glyph.
+            text: button.busy ? "\uf110" : button.icon
             color: button.tint
             RotationAnimator on rotation {
                 running: button.busy
@@ -80,6 +84,11 @@ Rectangle {
                 loops: Animation.Infinite
             }
             onVisibleChanged: rotation = 0
+            // The icon comes back upright once the work is done.
+            Connections {
+                target: button
+                function onBusyChanged() { if (!button.busy) glyph.rotation = 0 }
+            }
         }
         Text {
             id: labelText

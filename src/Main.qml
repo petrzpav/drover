@@ -12,6 +12,12 @@ ApplicationWindow {
     flags: Qt.FramelessWindowHint
 
     property bool expanded: false
+    // The panel over the whole screen (Super+Alt+H), until it is toggled
+    // back or the panel closes.
+    property bool fullscreen: false
+    // The desktop's folder picker closes the panel for a moment; it comes
+    // back as it was.
+    property bool keepFullscreen: false
     readonly property int pillWidth: 176
     readonly property int pillHeight: 36
     readonly property int gap: 8
@@ -22,7 +28,16 @@ ApplicationWindow {
     // all) comes out blurred.
     readonly property int pillX: Math.round(clamp(width - pillWidth - surface.offset.x, 0, width - pillWidth))
     readonly property int pillY: Math.round(clamp(height - pillHeight - surface.offset.y, 0, height - pillHeight))
-    readonly property rect panelRect: placePanel(width, height, pillX, pillY)
+    readonly property rect panelRect: fullscreen ? placeFullscreen(width, height, theme.gaps)
+                                                 : placePanel(width, height, pillX, pillY)
+    // Where a tiled window would stand: Hyprland's outer gaps from the edges
+    // (top, right, bottom, left), so its border lines up with theirs.
+    function placeFullscreen(w, h, gaps) {
+        return Qt.rect(gaps[3], gaps[0], w - gaps[1] - gaps[3], h - gaps[0] - gaps[2])
+    }
+    // The full-screen panel covers the herd's corner, so the herd steps aside
+    // until the panel has faded out.
+    readonly property bool pillShown: !(fullscreen && panel.visible)
 
     function clamp(value, low, high) {
         return Math.max(low, Math.min(high, value))
@@ -62,8 +77,8 @@ ApplicationWindow {
         return Qt.rect(Math.round(x), Math.round(clamp(y, edge, h - stageHeight - edge)), stage.width, stageHeight)
     }
 
-    readonly property var inputRegion: [pillX, pillY, panelRect, expanded, stageRect, stage.visible]
-    onInputRegionChanged: surface.setInputRegion(Qt.rect(pillX, pillY, pillWidth, pillHeight),
+    readonly property var inputRegion: [pillX, pillY, pillShown, panelRect, expanded, stageRect, stage.visible]
+    onInputRegionChanged: surface.setInputRegion(pillShown ? Qt.rect(pillX, pillY, pillWidth, pillHeight) : Qt.rect(0, 0, 0, 0),
                                                  expanded ? panelRect : Qt.rect(0, 0, 0, 0),
                                                  stage.visible ? stageRect : Qt.rect(0, 0, 0, 0))
 
@@ -89,6 +104,21 @@ ApplicationWindow {
         expanded = !expanded
     }
 
+    // drover's full-screen key: opens the panel over the whole screen, or
+    // switches an open panel between its own size and the whole screen.
+    function toggleFullscreen() {
+        if (!expanded) {
+            fullscreen = true
+            expanded = true
+            return
+        }
+        fullscreen = !fullscreen
+        // Grown over the window that had the keyboard, it takes it back.
+        if (fullscreen)
+            surface.takeKeyboard()
+        focusForAgent()
+    }
+
     function openPicker() {
         // The desktop sends Ctrl+P here; in front, the editor gets it.
         if (expanded && backend.editing && !panel.picker.open && !panel.helpVisible) {
@@ -102,9 +132,9 @@ ApplicationWindow {
 
     // The keyboard goes to the agent's terminal whenever the panel opens or
     // an agent is picked; the terminal is created a moment later.
-    // An open picker keeps it.
+    // An open picker or help keeps it.
     function focusForAgent() {
-        Qt.callLater(() => { if (!panel.picker.open) panel.focusTerminal() })
+        Qt.callLater(() => { if (!panel.picker.open && !panel.helpVisible) panel.focusTerminal() })
     }
 
     onExpandedChanged: {
@@ -143,6 +173,10 @@ ApplicationWindow {
     Shortcut { sequence: "Alt+E"; enabled: win.expanded && !panel.picker.open; autoRepeat: false; context: Qt.ApplicationShortcut
                onActivated: { panel.helpVisible = false; backend.toggleEditor(); win.focusForAgent() } }
     Shortcut { sequence: "Ctrl+Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
+    // By the agent only: the editor and the shell keep their Ctrl+B.
+    Shortcut { sequence: "Ctrl+B"; enabled: win.expanded && !backend.editing && !panel.picker.open
+               && backend.selected !== ""; autoRepeat: false; context: Qt.ApplicationShortcut
+               onActivated: panel.sidebarShown = !panel.sidebarShown }
     Shortcut { sequence: "F1"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: panel.helpVisible = !panel.helpVisible }
     Shortcut { sequence: "Alt+Up"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: { backend.selectNext(-1); win.focusForAgent() } }
     Shortcut { sequence: "Alt+Down"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: { backend.selectNext(1); win.focusForAgent() } }
@@ -159,8 +193,12 @@ ApplicationWindow {
         }
         // The folder picker is a window, under this layer: the panel steps
         // aside, then comes back to the new agent or, on cancel, the picker.
-        function onFolderPickerOpened() { win.expanded = false }
+        function onFolderPickerOpened() {
+            win.keepFullscreen = true
+            win.expanded = false
+        }
         function onFolderPickerClosed(chosen, text) {
+            win.keepFullscreen = false
             if (chosen) {
                 win.expanded = true
                 return
@@ -190,6 +228,10 @@ ApplicationWindow {
         width: win.panelRect.width
         height: win.panelRect.height
         attached: win.expanded
+        fullscreen: win.fullscreen
+        onFullscreenToggled: win.toggleFullscreen()
+        // Back to its own size once it has faded out.
+        onVisibleChanged: if (!visible && !win.keepFullscreen) win.fullscreen = false
         onQuitRequested: Qt.quit()
         onAgentPicked: win.focusForAgent()
 
@@ -223,6 +265,8 @@ ApplicationWindow {
     }
 
     HerdPill {
+        objectName: "pill"
+        visible: win.pillShown
         x: win.pillX
         y: win.pillY
         width: win.pillWidth

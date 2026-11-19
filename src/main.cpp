@@ -109,11 +109,13 @@ int main(int argc, char *argv[]) {
     // One indicator per session: starting drover again (from the launcher, a
     // key binding, or `drover toggle`) opens or closes the running one's
     // panel, and `drover quit` stops it. A bare `drover` (autostart) starts
-    // with the panel closed; `open` or `toggle` start with it open.
+    // with the panel closed; `open` or `toggle` start with it open, and
+    // `fullscreen` with it over the whole screen.
     const bool bare = argc < 2;
     const QString command = bare ? QStringLiteral("toggle") : QString::fromLocal8Bit(argv[1]);
-    if (command != "toggle" && command != "quit" && command != "open" && command != "pick") {
-        fprintf(stderr, "usage: drover [open|toggle|pick|quit|hooks]\n");
+    if (command != "toggle" && command != "quit" && command != "open" && command != "pick"
+        && command != "fullscreen") {
+        fprintf(stderr, "usage: drover [open|toggle|fullscreen|pick|quit|hooks]\n");
         return 1;
     }
     const QString runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
@@ -222,6 +224,8 @@ int main(int argc, char *argv[]) {
 
     if (command == "pick")
         QMetaObject::invokeMethod(window, "openPicker");
+    else if (command == "fullscreen")
+        QMetaObject::invokeMethod(window, "toggleFullscreen");
     else if (!bare)
         QMetaObject::invokeMethod(window, "setExpanded", Q_ARG(QVariant, true));
 
@@ -235,6 +239,8 @@ int main(int argc, char *argv[]) {
                     QMetaObject::invokeMethod(window, "setExpanded", Q_ARG(QVariant, true));
                 else if (message == "pick")
                     QMetaObject::invokeMethod(window, "openPicker");
+                else if (message == "fullscreen")
+                    QMetaObject::invokeMethod(window, "toggleFullscreen");
                 else
                     QMetaObject::invokeMethod(window, "toggle");
             });

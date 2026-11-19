@@ -12,6 +12,19 @@ Rectangle {
     id: panel
     property alias picker: workspacePicker
     property bool helpVisible: false
+    // The agent list on the left (Ctrl+B); hidden, the terminal takes its
+    // room. With no agent picked there is nothing else to look at, so the
+    // list shows anyway.
+    property bool sidebarShown: true
+    readonly property bool listShown: sidebarShown || backend.selected === ""
+    // An agent gone from under a hidden list leaves the list shown, so a
+    // pick from it doesn't make it vanish under the pointer.
+    Connections {
+        target: backend
+        function onSelectedChanged() { if (backend.selected === "") panel.sidebarShown = true }
+    }
+    // Over the whole screen (Super+Alt+H); the window decides.
+    property bool fullscreen: false
     // Whether the terminal attaches: only while the panel is open, so the
     // pane has herdr's own size the rest of the time.
     property bool attached: false
@@ -49,6 +62,7 @@ Rectangle {
             panel.forceActiveFocus()
     }
     signal quitRequested()
+    signal fullscreenToggled()
     // The user picked an agent; Main decides where the keyboard goes.
     signal agentPicked()
 
@@ -84,6 +98,7 @@ Rectangle {
 
         // Sidebar: the agents.
         ColumnLayout {
+            visible: panel.listShown
             Layout.preferredWidth: panel.sidebarWidth
             Layout.fillWidth: false
             Layout.fillHeight: true
@@ -92,7 +107,7 @@ Rectangle {
             Text {
                 Layout.fillWidth: true
                 Layout.preferredHeight: panel.headerHeight
-                Layout.leftMargin: 18
+                Layout.leftMargin: listButton.x + listButton.width + 6
                 Layout.rightMargin: 12
                 verticalAlignment: Text.AlignVCenter
                 text: qsTr("%n agents", "", backend.agents.count)
@@ -162,7 +177,7 @@ Rectangle {
             }
         }
 
-        Rectangle { Layout.fillHeight: true; Layout.preferredWidth: 1; color: panel.line }
+        Rectangle { visible: panel.listShown; Layout.fillHeight: true; Layout.preferredWidth: 1; color: panel.line }
 
         // The conversation with the selected agent.
         ColumnLayout {
@@ -174,7 +189,8 @@ Rectangle {
             RowLayout {
                 Layout.fillWidth: true
                 Layout.preferredHeight: panel.headerHeight
-                Layout.leftMargin: 16
+                // Clear of the list's button while the list is hidden.
+                Layout.leftMargin: panel.listShown ? 16 : listButton.x + listButton.width + 10
                 Layout.rightMargin: 8
                 spacing: 10
 
@@ -256,6 +272,13 @@ Rectangle {
                     enabled: backend.selected !== ""
                     busy: backend.busy === "open"
                     onClicked: backend.jump()
+                }
+                IconButton {
+                    objectName: "fullscreenButton"
+                    icon: panel.fullscreen ? "" : ""
+                    hint: qsTr("Put the panel over the whole screen, and back")
+                    shortcut: "Super+Alt+H"
+                    onClicked: panel.fullscreenToggled()
                 }
                 IconButton {
                     icon: ""
@@ -447,8 +470,9 @@ Rectangle {
     // Every shortcut, over the conversation side; its own button stays
     // visible, and nothing beneath it can be clicked.
     Rectangle {
+        id: help
         objectName: "help"
-        x: panel.sidebarWidth + 3
+        x: panel.listShown ? panel.sidebarWidth + 3 : 2
         y: panel.headerHeight + 3
         width: panel.width - x - 2
         height: panel.height - y - 2
@@ -486,7 +510,9 @@ Rectangle {
                         "Alt+E", qsTr("Switch between the agent and the editor beside it"),
                         "Ctrl+;", qsTr("In the editor: show or hide a terminal below it (Ctrl+W closes it)"),
                         "Ctrl+Shift+O", qsTr("Open the agent in herdr"),
+                        "Ctrl+B", qsTr("In the agent view: show or hide the agent list"),
                         "Super+H", qsTr("Show or hide the panel"),
+                        "Super+Alt+H", qsTr("Put the panel over the whole screen, and back"),
                         "Esc", qsTr("Close the picker or help; outside the terminal, hide the panel"),
                         "F1", qsTr("Show or hide this help"),
                         "Ctrl+Q", qsTr("Quit drover")
@@ -496,7 +522,7 @@ Rectangle {
                         required property int index
                         text: modelData
                         color: index % 2 === 0 ? theme.foreground : panel.dim
-                        width: index % 2 === 0 ? implicitWidth : Math.min(implicitWidth, panel.width - panel.sidebarWidth - 260)
+                        width: index % 2 === 0 ? implicitWidth : Math.min(implicitWidth, help.width - 260)
                         wrapMode: Text.Wrap
                     }
                 }
@@ -506,6 +532,31 @@ Rectangle {
                 color: panel.dim
             }
         }
+    }
+
+    // The list's own button, at the panel's top left whether the list shows
+    // or not, so it never moves under the pointer. While the list is hidden
+    // it stands in for it: red when someone asks or herdr fails, and busy
+    // while an agent starts.
+    IconButton {
+        id: listButton
+        objectName: "listButton"
+        x: 8
+        y: (panel.headerHeight - height) / 2 + 2
+        icon: ""
+        shortcut: "Ctrl+B"
+        // With nothing picked the list shows anyway, and the button has
+        // nothing to do.
+        visible: backend.selected !== ""
+        // Red for agents asking other than the one in front, which says so
+        // itself.
+        readonly property bool othersAsk: backend.blocked - (backend.selectedStatus === "blocked" ? 1 : 0) > 0
+        tint: !panel.listShown && (othersAsk || backend.error !== "") ? theme.urgent
+            : panel.listShown ? panel.dim : theme.foreground
+        hint: !panel.listShown && backend.error !== "" ? backend.error : qsTr("Show or hide the agent list")
+        busy: !panel.listShown && backend.busy === "start"
+        clickableWhileBusy: true
+        onClicked: panel.sidebarShown = !panel.sidebarShown
     }
 
     WorkspacePicker {
@@ -519,7 +570,7 @@ Rectangle {
         x: panel.sidebarWidth - width - 12
         y: (panel.headerHeight - height) / 2 + 2
         spacing: 6
-        visible: backend.busy === "start"
+        visible: backend.busy === "start" && panel.listShown
         IconButton { busy: true; enabled: false; opacity: 1; width: 24; height: 24 }
     }
 }

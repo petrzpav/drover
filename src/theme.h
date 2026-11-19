@@ -11,6 +11,9 @@ class Theme : public QObject {
     Q_PROPERTY(QString accent READ accent NOTIFY changed)
     Q_PROPERTY(QString accentForeground READ accentForeground NOTIFY changed)
     Q_PROPERTY(int radius READ radius NOTIFY changed)
+    // Hyprland's outer gaps, top, right, bottom and left: where a window
+    // stands back from the screen's edges.
+    Q_PROPERTY(QList<int> gaps READ gaps NOTIFY changed)
     // The rest of the palette, so the app looks like the Omarchy shell under
     // any theme. Each falls back to the shell's own default.
     Q_PROPERTY(QString background READ background NOTIFY changed)
@@ -31,6 +34,7 @@ public:
     QString accent() const { return m_accent; }
     QString accentForeground() const;
     int radius() const { return m_radius; }
+    QList<int> gaps() const { return m_gaps; }
     QString background() const { return color("background", "#101315"); }
     QString border() const { return color("hyprland_active_border", m_accent); }
     QString foreground() const { return color("foreground", "#cacccc"); }
@@ -63,6 +67,8 @@ private:
     QTimer m_debounce;
     QString m_hyprctl;
     int m_radius = 0;
+    // Without Hyprland, drover's own distance from the edges.
+    QList<int> m_gaps{12, 12, 12, 12};
     QProcess m_roundingProcess;
     QTimer m_roundingPoll, m_roundingTimeout;
 };

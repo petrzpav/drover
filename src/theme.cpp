@@ -20,9 +20,10 @@ Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl)
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, [this] { m_debounce.start(); });
     connect(&m_debounce, &QTimer::timeout, this, &Theme::reload);
 
-    // Corners follow Hyprland's effective rounding, which themes and personal
-    // overrides can both set, so ask hyprctl rather than reading its config.
-    // Without Hyprland the corners stay sharp, like Omarchy's default.
+    // Corners follow Hyprland's effective rounding, and a full-screen panel
+    // its outer gaps, which themes and personal overrides can both set, so
+    // ask hyprctl rather than reading its config. Without Hyprland the
+    // corners stay sharp, like Omarchy's default.
     m_hyprctl = !hyprctl.isEmpty() ? hyprctl
               : directory.isEmpty() && !qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE")
                   ? QStandardPaths::findExecutable("hyprctl") : QString();
@@ -32,11 +33,43 @@ Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl)
     connect(&m_roundingProcess, &QProcess::errorOccurred, this, [this] { m_roundingTimeout.stop(); });
     connect(&m_roundingProcess, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
         m_roundingTimeout.stop();
-        const auto value = QJsonDocument::fromJson(m_roundingProcess.readAllStandardOutput()).object().value("int");
-        if (code != 0 || status != QProcess::NormalExit || !value.isDouble() || value.toInt(-1) < 0)
+        if (code != 0 || status != QProcess::NormalExit)
             return;
-        if (value.toInt() != m_radius) {
-            m_radius = value.toInt();
+        // A batch answers with one JSON object per option, one after another.
+        const QByteArray output = m_roundingProcess.readAllStandardOutput();
+        int radius = m_radius;
+        QList<int> gaps = m_gaps;
+        for (qsizetype start = output.indexOf('{'); start >= 0;) {
+            int depth = 0;
+            qsizetype end = start;
+            for (; end < output.size(); ++end) {
+                depth += output[end] == '{' ? 1 : output[end] == '}' ? -1 : 0;
+                if (depth == 0)
+                    break;
+            }
+            const auto object = QJsonDocument::fromJson(output.mid(start, end - start + 1)).object();
+            const QString option = object.value("option").toString();
+            if (option == "decoration:rounding" && object.value("int").toInt(-1) >= 0) {
+                radius = object.value("int").toInt();
+            } else if (option == "general:gaps_out") {
+                // "css" is "top right bottom left" (or fewer, CSS style); an
+                // older Hyprland answers a plain "int".
+                QList<int> sides;
+                for (const QString &part : object.value("css").toString().split(' ', Qt::SkipEmptyParts))
+                    sides << part.toInt();
+                if (sides.isEmpty() && object.value("int").isDouble())
+                    sides << object.value("int").toInt();
+                if (!sides.isEmpty() && sides.size() <= 4) {
+                    while (sides.size() < 4)
+                        sides << sides.value(sides.size() == 3 ? 1 : 0);
+                    gaps = sides;
+                }
+            }
+            start = output.indexOf('{', end + 1);
+        }
+        if (radius != m_radius || gaps != m_gaps) {
+            m_radius = radius;
+            m_gaps = gaps;
             emit changed();
         }
     });
@@ -57,7 +90,7 @@ Theme::~Theme() {
 void Theme::refreshRounding() {
     if (m_hyprctl.isEmpty() || m_roundingProcess.state() != QProcess::NotRunning)
         return;
-    m_roundingProcess.start(m_hyprctl, {"-j", "getoption", "decoration:rounding"});
+    m_roundingProcess.start(m_hyprctl, {"-j", "--batch", "getoption decoration:rounding; getoption general:gaps_out"});
     m_roundingTimeout.start();
 }
 

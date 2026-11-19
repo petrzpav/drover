@@ -764,12 +764,22 @@ echo ok
         };
         QVERIFY(write(command, "#!/bin/sh\ncat '" + response.toUtf8() + "'\n"));
         QVERIFY(QFile::setPermissions(command, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
-        QVERIFY(write(response, "{\"int\":0}"));
+        QVERIFY(write(response, "{\"option\": \"decoration:rounding\", \"int\": 0}"));
 
         Theme theme(dir.path(), nullptr, command);
         QCOMPARE(theme.radius(), 0);
-        QVERIFY(write(response, "{\"int\":6}"));
+        QCOMPARE(theme.gaps(), QList<int>({12, 12, 12, 12}));
+        // The batch's answers, one object after another.
+        QVERIFY(write(response, "{\"option\": \"decoration:rounding\", \"int\": 6, \"set\": true }\n\n\n"
+                                "{\"option\": \"general:gaps_out\", \"css\": \"6 8 10 4\", \"set\": true }\n"));
         QTRY_COMPARE(theme.radius(), 6);
+        QTRY_COMPARE(theme.gaps(), QList<int>({6, 8, 10, 4}));
+        // CSS shorthand: one value for every side, two for vertical and horizontal.
+        QVERIFY(write(response, "{\"option\": \"general:gaps_out\", \"css\": \"5\"}"));
+        QTRY_COMPARE(theme.gaps(), QList<int>({5, 5, 5, 5}));
+        QVERIFY(write(response, "{\"option\": \"general:gaps_out\", \"css\": \"3 7\"}"));
+        QTRY_COMPARE(theme.gaps(), QList<int>({3, 7, 3, 7}));
+        QCOMPARE(theme.radius(), 6);
     }
 
     void translatorFallsBackToEnglish()

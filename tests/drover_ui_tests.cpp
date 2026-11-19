@@ -553,9 +553,6 @@ private slots:
         rig.backend->setEditor("fresh");
         rig.expand();
         QTRY_VERIFY(rig.log().contains("terminal attach term_1"));
-        // herdr's attach takes a lone Ctrl+B as its prefix: it goes doubled.
-        QTest::keyClick(rig.window, Qt::Key_B, Qt::ControlModifier);
-        QTRY_VERIFY(rig.log().contains("key 02\nkey 02\n"));
         QTest::keyClick(rig.window, Qt::Key_E, Qt::AltModifier);
         QTRY_VERIFY(rig.backend->editing());
         QCOMPARE(rig.backend->editorTerminal(), QString("term_9"));
@@ -563,6 +560,11 @@ private slots:
         QVERIFY(rig.log().contains("pane rename w1:p9 editor"));
         QVERIFY(rig.log().contains("pane run w1:p9 exec fresh"));
         QTRY_VERIFY(rig.log().contains("terminal attach term_9"));
+        // Ctrl+B is the editor's (its file explorer), not drover's list; herdr's
+        // attach takes a lone Ctrl+B as its prefix, so it goes doubled.
+        QTest::keyClick(rig.window, Qt::Key_B, Qt::ControlModifier);
+        QTRY_VERIFY(rig.log().contains("key 02\nkey 02\n"));
+        QVERIFY(rig.find("panel")->property("sidebarShown").toBool());
 
         // The desktop's Ctrl+P goes to the editor, not to the picker.
         QMetaObject::invokeMethod(rig.window, "openPicker");
@@ -582,6 +584,111 @@ private slots:
         QCOMPARE(rig.log().count("terminal attach term_1"), 1);
         QCOMPARE(rig.log().count("terminal attach term_9"), 1);
         QCOMPARE(rig.log().count("pane split"), 1);
+    }
+
+    void ctrlBHidesTheAgentList()
+    {
+        Rig rig(agents("working", "idle"));
+        rig.expand();
+        auto *panel = rig.find("panel");
+        QTRY_VERIFY(panel->property("agentTerminal").value<QQuickItem *>());
+        auto *terminal = panel->property("agentTerminal").value<QQuickItem *>();
+        QTRY_VERIFY(panel->property("terminalFocused").toBool());
+        const qreal narrow = terminal->width();
+        QTest::keyClick(rig.window, Qt::Key_B, Qt::ControlModifier);
+        QTRY_VERIFY(!panel->property("listShown").toBool());
+        // The terminal takes the list's room, keeps the keyboard, and the key
+        // stays drover's: the next key is the first the agent gets.
+        QTRY_VERIFY(terminal->width() > narrow + 200);
+        QVERIFY(panel->property("terminalFocused").toBool());
+        QTest::keyClick(rig.window, Qt::Key_X);
+        QTRY_VERIFY(rig.log().contains("key 78"));
+        QVERIFY(!rig.log().contains("key 02"));
+        // The help covers the whole conversation side now.
+        QTest::keyClick(rig.window, Qt::Key_F1);
+        auto *help = rig.find("help");
+        QTRY_VERIFY(help->isVisible());
+        QCOMPARE(help->x(), 2.0);
+        QTest::keyClick(rig.window, Qt::Key_F1);
+        QTRY_VERIFY(!help->isVisible());
+        // The list's button turns red while an agent asks.
+        auto *button = rig.find("listButton");
+        QVERIFY(button);
+        const QColor quiet = button->property("tint").value<QColor>();
+        rig.backend->setAsking({"w2:p1"});
+        QTRY_VERIFY(button->property("tint").value<QColor>() != quiet);
+        // Its button shows the list again, from the very same place.
+        const QPointF place = button->mapToScene(QPointF(0, 0));
+        QTest::mouseClick(rig.window, Qt::LeftButton, {},
+                          button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+        QTRY_VERIFY(panel->property("listShown").toBool());
+        QTRY_COMPARE(terminal->width(), narrow);
+        QCOMPARE(button->mapToScene(QPointF(0, 0)), place);
+        // Over the picker, Ctrl+B leaves the list alone.
+        QTest::keyClick(rig.window, Qt::Key_P, Qt::ControlModifier);
+        QTRY_VERIFY(panel->property("picker").value<QObject *>()->property("open").toBool());
+        QTest::keyClick(rig.window, Qt::Key_B, Qt::ControlModifier);
+        QTest::qWait(50);
+        QVERIFY(panel->property("listShown").toBool());
+        QTest::keyClick(rig.window, Qt::Key_Escape);
+        QTRY_VERIFY(!panel->property("picker").value<QObject *>()->property("open").toBool());
+
+        // The agent in front ends while the list is hidden: the list comes
+        // back and stays, and its button, with nothing to do, goes.
+        QTest::keyClick(rig.window, Qt::Key_B, Qt::ControlModifier);
+        QTRY_VERIFY(!panel->property("listShown").toBool());
+        write(rig.dir.filePath("agents.json"), R"({"result":{"agents":[]}})");
+        QTRY_VERIFY(rig.backend->selected().isEmpty());
+        QTRY_VERIFY(panel->property("listShown").toBool());
+        QVERIFY(panel->property("sidebarShown").toBool());
+        QVERIFY(!button->isVisible());
+    }
+
+    void superAltHPutsThePanelOverTheWholeScreen()
+    {
+        Rig rig(agents("working", "idle"));
+        const QRectF whole(12, 12, rig.window->width() - 24, rig.window->height() - 24);
+        auto panelRect = [&] { return rig.window->property("panelRect").toRectF(); };
+        auto *pill = rig.find("pill");
+        QVERIFY(pill);
+        // Closed, it opens the panel over the whole screen; the herd steps aside.
+        QMetaObject::invokeMethod(rig.window, "toggleFullscreen");
+        QTRY_VERIFY(rig.window->property("expanded").toBool());
+        QCOMPARE(panelRect(), whole);
+        QVERIFY(!pill->isVisible());
+        auto *panel = rig.find("panel");
+        QTRY_VERIFY(panel->property("terminalFocused").toBool());
+        // Open, it switches back to the panel's own size, and again; the
+        // header's button does the same.
+        QMetaObject::invokeMethod(rig.window, "toggleFullscreen");
+        QVERIFY(rig.window->property("expanded").toBool());
+        QVERIFY(panelRect().width() < whole.width());
+        QVERIFY(pill->isVisible());
+        auto *button = rig.find("fullscreenButton");
+        QTRY_COMPARE(panel->width(), panelRect().width());
+        QTest::qWait(50);
+        QTest::mouseClick(rig.window, Qt::LeftButton, {},
+                          button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+        QTRY_COMPARE(panelRect(), whole);
+        // With the help open the help keeps the keyboard: Esc closes it and
+        // never reaches the agent.
+        QTest::keyClick(rig.window, Qt::Key_F1);
+        QTRY_VERIFY(panel->property("helpVisible").toBool());
+        QMetaObject::invokeMethod(rig.window, "toggleFullscreen");
+        QMetaObject::invokeMethod(rig.window, "toggleFullscreen");
+        QTest::qWait(50);
+        QTest::keyClick(rig.window, Qt::Key_Escape);
+        QTRY_VERIFY(!panel->property("helpVisible").toBool());
+        QTest::qWait(100);
+        QVERIFY(!rig.log().contains("key 1b"));
+        // Closed, the herd comes back once the panel has faded, and the
+        // panel opens at its own size next time.
+        QMetaObject::invokeMethod(rig.window, "toggle");
+        QTRY_VERIFY(!rig.window->property("expanded").toBool());
+        QTRY_VERIFY(pill->isVisible());
+        QMetaObject::invokeMethod(rig.window, "toggle");
+        QTRY_VERIFY(rig.window->property("expanded").toBool());
+        QVERIFY(panelRect().width() < whole.width());
     }
 
     void ctrlSemicolonOpensATerminalBelowTheEditor()

@@ -37,6 +37,8 @@ public:
     // The stage wants the keyboard (the user clicked it, or pressed the
     // toggle key while an agent asks), or gives it back.
     Q_INVOKABLE void setStageFocus(bool focus);
+    // The open panel takes the keyboard again, as when it opened.
+    Q_INVOKABLE void takeKeyboard();
     // The parts of the window that take the pointer.
     Q_INVOKABLE void setInputRegion(const QRectF &indicator, const QRectF &panel, const QRectF &stage = QRectF());
     // Remembers the indicator's place for the next start.
