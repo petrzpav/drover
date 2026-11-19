@@ -136,12 +136,160 @@ Rectangle {
                     highlightMoveDuration: 0
                     ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
+                    // Dragging a row moves its agent: the row follows the
+                    // pointer within the list, the rows it passes make room,
+                    // the list scrolls at its edges, and on release the agent
+                    // takes that place (kept for the next start) as the row
+                    // glides into it. The drag follows the agent, not a row
+                    // number, so a poll changing the list mid-drag can't
+                    // hand it to another row.
+                    property string dragPane: ""
+                    readonly property int dragFrom: { backend.agents.rows; return dragPane === "" ? -1 : backend.agents.indexOf(dragPane) }
+                    property int dragTo: -1
+                    property real dragDy: 0
+                    property real dragStep: 1
+                    // Where the drag started: the handler's own translation
+                    // and the list's scroll, so the row moves from where it is.
+                    property real dragStartTranslation: 0
+                    property real dragStartContentY: 0
+                    property real dragTranslation: 0
+                    property real dragPointerY: -1
+                    // Set while the dropped list lands, so the rows that made
+                    // room don't glide back.
+                    property bool settling: false
+                    // The dropped row's way into its place.
+                    property string dropPane: ""
+                    property real dropOffset: 0
+                    NumberAnimation {
+                        id: dropGlide
+                        target: list; property: "dropOffset"; to: 0
+                        duration: 120; easing.type: Easing.OutCubic
+                        onFinished: list.dropPane = ""
+                    }
+
+                    function shiftFor(i) {
+                        if (dragFrom < 0 || i === dragFrom)
+                            return 0
+                        if (dragFrom < dragTo && i > dragFrom && i <= dragTo)
+                            return -dragStep
+                        if (dragFrom > dragTo && i >= dragTo && i < dragFrom)
+                            return dragStep
+                        return 0
+                    }
+                    function updateDrag() {
+                        if (dragFrom < 0)
+                            return
+                        const dy = dragTranslation - dragStartTranslation + contentY - dragStartContentY
+                        dragDy = Math.max(-dragFrom * dragStep, Math.min((count - 1 - dragFrom) * dragStep, dy))
+                        dragTo = dragFrom + Math.round(dragDy / dragStep)
+                    }
+                    function startDrag(paneId, translation, step) {
+                        dropGlide.stop()
+                        dropPane = ""
+                        dragStep = step
+                        dragStartTranslation = translation
+                        dragTranslation = translation
+                        dragStartContentY = contentY
+                        dragDy = 0
+                        dragPane = paneId
+                        dragTo = dragFrom
+                    }
+                    function cancelDrag() {
+                        settling = true
+                        dragPane = ""
+                        dragTo = -1
+                        dragDy = 0
+                        dragPointerY = -1
+                        Qt.callLater(() => list.settling = false)
+                    }
+                    function drop() {
+                        if (dragPane === "")
+                            return
+                        const pane = dragPane, from = dragFrom, to = dragTo
+                        const residual = dragDy - (to - from) * dragStep
+                        settling = true
+                        if (from >= 0 && to >= 0 && to !== from)
+                            backend.moveAgent(pane, to)
+                        dropPane = pane
+                        dropOffset = residual
+                        dragPane = ""
+                        dragTo = -1
+                        dragDy = 0
+                        dragPointerY = -1
+                        dropGlide.restart()
+                        Qt.callLater(() => list.settling = false)
+                    }
+                    // The dragged agent ended, or one above it came or went:
+                    // the drag carries on from the row's new place, or ends.
+                    property int lastDragFrom: -1
+                    onDragFromChanged: {
+                        if (dragPane !== "" && dragFrom < 0) {
+                            // After this change has settled, not inside it.
+                            Qt.callLater(() => { if (list.dragPane !== "" && list.dragFrom < 0) list.cancelDrag() })
+                        } else if (dragFrom >= 0 && lastDragFrom >= 0 && dragFrom !== lastDragFrom) {
+                            dragStartTranslation -= (dragFrom - lastDragFrom) * dragStep
+                            updateDrag()
+                        }
+                        lastDragFrom = dragFrom
+                    }
+                    onContentYChanged: updateDrag()
+                    // Hidden mid-drag (Ctrl+B, the panel closed): nothing moves.
+                    onVisibleChanged: if (!visible && dragPane !== "") cancelDrag()
+                    // Near an edge, the list scrolls on, and the row with it.
+                    Timer {
+                        interval: 16
+                        repeat: true
+                        running: list.dragPane !== "" && list.dragPointerY >= 0
+                                 && (list.dragPointerY < 28 || list.dragPointerY > list.height - 28)
+                        onTriggered: {
+                            const step = list.dragPointerY < 28 ? -8 : 8
+                            list.contentY = Math.max(list.originY, Math.min(list.originY + list.contentHeight - list.height,
+                                                                            list.contentY + step))
+                        }
+                    }
+
                     delegate: AgentRow {
+                        id: agentRow
+                        objectName: "agentRow_" + paneId
                         width: ListView.view.width
                         selected: paneId === backend.selected
                         statusText: panel.statusLabel(status)
                         onPicked: { backend.select(paneId); panel.agentPicked() }
                         onOpened: { backend.select(paneId); backend.jump() }
+
+                        readonly property bool dragged: paneId === list.dragPane
+                        readonly property bool dropping: paneId === list.dropPane
+                        lifted: dragged || dropping
+                        property real offset: dragged ? list.dragDy : dropping ? list.dropOffset : list.shiftFor(index)
+                        Behavior on offset {
+                            enabled: !list.settling && !agentRow.dragged && !agentRow.dropping && list.dragPane !== ""
+                            NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+                        }
+                        transform: Translate { y: agentRow.offset }
+                        z: lifted ? 2 : 0
+                        DragHandler {
+                            target: null
+                            xAxis.enabled: false
+                            // A single agent has nowhere to go.
+                            enabled: list.count > 1
+                            grabPermissions: PointerHandler.CanTakeOverFromAnything
+                            cursorShape: Qt.ClosedHandCursor
+                            onActiveChanged: {
+                                if (active)
+                                    list.startDrag(agentRow.paneId, activeTranslation.y, agentRow.height + list.spacing)
+                                else if (agentRow.dragged)
+                                    list.drop()
+                            }
+                            onActiveTranslationChanged: {
+                                if (!active || !agentRow.dragged)
+                                    return
+                                list.dragTranslation = activeTranslation.y
+                                list.dragPointerY = list.mapFromItem(null, centroid.scenePosition).y
+                                list.updateDrag()
+                            }
+                            // The grab taken away (not a release): nothing moves.
+                            onCanceled: if (agentRow.dragged) list.cancelDrag()
+                        }
                     }
                 }
 

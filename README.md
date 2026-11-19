@@ -122,7 +122,9 @@ can answer it in either place.
 
 ![The panel with four agents](docs/screenshot.png)
 
-Every agent of the local herdr session is on the left. On the right is a real
+Every agent of the local herdr session is on the left; drag one to another
+place and the list, `Alt+↑` `Alt+↓`, `Ctrl+P` and the herd keep that order,
+also after a restart. New agents come last. On the right is a real
 terminal attached to the selected agent (`herdr terminal attach`), drawn by
 drover itself on libvterm with no output buffering. The pane takes the panel's
 size while it's open and gets herdr's size back when you close it.

@@ -21,6 +21,7 @@
 #include <QPointer>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
 #include <QStandardPaths>
@@ -36,6 +37,7 @@ Backend::Backend(const QString &herdr, const QString &hyprctl, QObject *parent)
         m_editor = readEditor(config);
         m_closeAction = readCloseAction(config);
         m_socketPath = qEnvironmentVariable("HERDR_SOCKET_PATH", QDir::homePath() + "/.config/herdr/herdr.sock");
+        setOrderFile(QDir::homePath() + "/.local/state/drover/order");
     }
     // A listing takes a few milliseconds, so a one-second poll is cheap and far
     // simpler than herdr's per-pane event subscriptions.
@@ -300,6 +302,8 @@ void Backend::applyAgents(const QList<Agent> &listedAgents) {
             ++it;
         }
     }
+    m_shown = agents;
+    agents = ordered(agents, m_order);
     m_model.setAgents(agents);
     if (!gone.isEmpty())
         closeEditorsOf(gone);
@@ -346,6 +350,55 @@ void Backend::select(const QString &paneId) {
     m_selected = paneId;
     m_selectionLost = false;
     emit selectedChanged();
+    emit selectedInfoChanged();
+}
+
+QList<Agent> Backend::ordered(const QList<Agent> &agents, const QStringList &order) {
+    if (order.isEmpty())
+        return agents;
+    QList<Agent> result = agents;
+    // Stable: agents the order doesn't know keep herdr's order, after the rest.
+    std::stable_sort(result.begin(), result.end(), [&](const Agent &a, const Agent &b) {
+        const qsizetype ia = order.indexOf(a.paneId), ib = order.indexOf(b.paneId);
+        return (ia < 0 ? order.size() : ia) < (ib < 0 ? order.size() : ib);
+    });
+    return result;
+}
+
+void Backend::setOrderFile(const QString &path) {
+    m_orderFile = path;
+    m_order.clear();
+    QFile file(path);
+    if (file.open(QIODevice::ReadOnly))
+        m_order = QString::fromUtf8(file.readAll()).split('\n', Qt::SkipEmptyParts);
+}
+
+void Backend::moveAgent(const QString &paneId, int to) {
+    QStringList ids;
+    for (const auto &agent : m_model.agents())
+        ids << agent.paneId;
+    const qsizetype from = ids.indexOf(paneId);
+    if (from < 0 || ids.isEmpty())
+        return;
+    to = qBound(0, to, int(ids.size()) - 1);
+    if (to == from)
+        return;
+    ids.move(from, to);
+    // Agents missing for a moment keep their place after the shown ones; a
+    // long-gone pane id is dropped once the list grows long.
+    for (const QString &id : std::as_const(m_order))
+        if (!ids.contains(id))
+            ids << id;
+    m_order = ids.mid(0, 200);
+    if (!m_orderFile.isEmpty()) {
+        QDir().mkpath(QFileInfo(m_orderFile).absolutePath());
+        QSaveFile file(m_orderFile);
+        if (file.open(QIODevice::WriteOnly)) {
+            file.write(m_order.join('\n').toUtf8() + '\n');
+            file.commit();
+        }
+    }
+    m_model.setAgents(ordered(m_shown, m_order));
     emit selectedInfoChanged();
 }
 

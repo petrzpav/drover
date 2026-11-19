@@ -151,6 +151,53 @@ private slots:
         QTRY_VERIFY(backend.error().isEmpty());
     }
 
+    void keepsTheUsersOrderOfAgents()
+    {
+        QTemporaryDir dir;
+        Backend backend(fakeHerdr(dir), dir.filePath("no-hyprctl"));
+        backend.setOrderFile(dir.filePath("order"));
+        QTRY_COMPARE(backend.agents()->count(), 3);
+        auto ids = [&] {
+            QStringList list;
+            for (const auto &agent : backend.agents()->agents())
+                list << agent.paneId;
+            return list;
+        };
+        const QStringList herdrs = ids();
+        backend.select(herdrs[0]);
+        // The first agent moves to the end, and stays there across polls.
+        backend.moveAgent(herdrs[0], 2);
+        const QStringList moved{herdrs[1], herdrs[2], herdrs[0]};
+        QCOMPARE(ids(), moved);
+        QCOMPARE(backend.selectedIndex(), 2);
+        QTest::qWait(1200);
+        QCOMPARE(ids(), moved);
+        // Alt+Down walks the new order.
+        backend.select(herdrs[1]);
+        backend.selectNext(1);
+        QCOMPARE(backend.selected(), herdrs[2]);
+
+        // The next start reads it back; an agent it doesn't know comes last.
+        Backend next(fakeHerdr(dir), dir.filePath("no-hyprctl"));
+        next.setOrderFile(dir.filePath("order"));
+        QTRY_COMPARE(next.agents()->count(), 3);
+        QStringList nextIds;
+        for (const auto &agent : next.agents()->agents())
+            nextIds << agent.paneId;
+        QCOMPARE(nextIds, moved);
+
+        QList<Agent> listed;
+        for (const QString &id : {"new", "a", "b"}) {
+            Agent agent;
+            agent.paneId = id;
+            listed << agent;
+        }
+        const auto sorted = Backend::ordered(listed, {"b", "a"});
+        QCOMPARE(sorted[0].paneId, QString("b"));
+        QCOMPARE(sorted[1].paneId, QString("a"));
+        QCOMPARE(sorted[2].paneId, QString("new"));
+    }
+
     void selectsNothingWhenThePaneCloses()
     {
         QTemporaryDir dir;

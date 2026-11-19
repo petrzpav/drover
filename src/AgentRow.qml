@@ -12,6 +12,9 @@ Rectangle {
     required property string workspace
     required property string cwd
     property bool selected: false
+    // Picked up and carried over the others: solid, so they don't show
+    // through it.
+    property bool lifted: false
     property string statusText: ""
     signal picked()
     signal opened()
@@ -23,9 +26,10 @@ Rectangle {
 
     height: rowContent.implicitHeight + 18
     radius: theme.radius
-    color: selected || hover.hovered ? Qt.alpha(theme.foreground, 0.08) : Qt.alpha(theme.foreground, 0)
+    color: lifted ? Qt.tint(theme.background, Qt.alpha(theme.foreground, 0.12))
+         : selected || hover.hovered ? Qt.alpha(theme.foreground, 0.08) : Qt.alpha(theme.foreground, 0)
     Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
-    border.width: selected ? 1 : 0
+    border.width: selected || lifted ? 1 : 0
     border.color: Qt.alpha(theme.border, 0.25)
 
     HoverHandler { id: hover; cursorShape: Qt.PointingHandCursor }

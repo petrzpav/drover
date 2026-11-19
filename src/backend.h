@@ -135,6 +135,12 @@ public:
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void select(const QString &paneId);
     Q_INVOKABLE void selectNext(int step);
+    // The user's own order of the agents (dragged in the list), kept in a
+    // file for the next start. Agents it doesn't know yet come last, in
+    // herdr's order.
+    Q_INVOKABLE void moveAgent(const QString &paneId, int to);
+    void setOrderFile(const QString &path);
+    static QList<Agent> ordered(const QList<Agent> &agents, const QStringList &order);
     Q_INVOKABLE void jump();
     // Shows the editor beside the selected agent, splitting its tab and
     // starting the editor there the first time; again, back to the agent.
@@ -229,6 +235,10 @@ private:
     AgentModel m_model;
     QHash<QString, int> m_counts;
     QList<Agent> m_listed;
+    // The agents as last shown, before the user's order, and that order.
+    QList<Agent> m_shown;
+    QStringList m_order;
+    QString m_orderFile;
     QSet<QString> m_asking;
     QHash<QString, QString> m_workspaces;
     QString m_error, m_selected, m_notice, m_busy;

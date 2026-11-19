@@ -643,6 +643,82 @@ private slots:
         QCOMPARE(rig.log().count("pane split"), 1);
     }
 
+    void draggingARowMovesItsAgent()
+    {
+        Rig rig(garden({"working", "blocked", "done", "idle"}), 4);
+        rig.backend->setOrderFile(rig.dir.filePath("order"));
+        rig.expand();
+        QTRY_COMPARE(rig.backend->selected(), QString("w1:p1"));
+        auto order = [&] {
+            QStringList ids;
+            for (const auto &agent : rig.backend->agents()->agents())
+                ids << agent.paneId;
+            return ids;
+        };
+        auto *row = rig.find("agentRow_w2:p1");
+        QVERIFY(row);
+        const qreal step = row->height() + 2;
+        const QPoint at = row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint();
+        QTest::mousePress(rig.window, Qt::LeftButton, {}, at);
+        // Down past two rows, in small steps like a hand. The row starts from
+        // where it is, not with the drag threshold's jump.
+        QTest::mouseMove(rig.window, at + QPoint(0, 14));
+        QTRY_VERIFY(row->property("lifted").toBool());
+        QVERIFY(row->property("offset").toReal() < 6);
+        for (int i = 1; i <= 20; ++i)
+            QTest::mouseMove(rig.window, at + QPoint(0, 14 + int(i * step * 2 / 20)));
+        // The rows it passed made room: the third one is where it was.
+        QTRY_COMPARE(rig.find("agentRow_w3:p1")->property("offset").toReal(), -step);
+        // Past the end it stops at the last place, inside the list.
+        for (int i = 1; i <= 10; ++i)
+            QTest::mouseMove(rig.window, at + QPoint(0, 14 + int(step * 2) + i * 40));
+        QTRY_COMPARE(row->property("offset").toReal(), 2 * step);
+        QTest::mouseRelease(rig.window, Qt::LeftButton, {}, at + QPoint(0, 14 + int(step * 2) + 400));
+        QTRY_COMPARE(order(), QStringList({"w1:p1", "w3:p1", "w4:p1", "w2:p1"}));
+        // A drag is no click: the agent in front stays; the row glides home.
+        QCOMPARE(rig.backend->selected(), QString("w1:p1"));
+        QTRY_COMPARE(rig.find("agentRow_w2:p1")->property("offset").toReal(), 0.0);
+        QTRY_VERIFY(!rig.find("agentRow_w2:p1")->property("lifted").toBool());
+        for (const char *pane : {"agentRow_w1:p1", "agentRow_w3:p1", "agentRow_w4:p1"})
+            QCOMPARE(rig.find(pane)->property("offset").toReal(), 0.0);
+        QFile file(rig.dir.filePath("order"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QVERIFY(file.readAll().startsWith("w1:p1\nw3:p1\nw4:p1\nw2:p1"));
+    }
+
+    void anAgentEndingMidDragLeavesNothingAskew()
+    {
+        Rig rig(garden({"working", "blocked", "done", "idle"}), 4);
+        rig.expand();
+        QTRY_COMPARE(rig.backend->selected(), QString("w1:p1"));
+        auto *row = rig.find("agentRow_w2:p1");
+        const qreal step = row->height() + 2;
+        const QPoint at = row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint();
+        QTest::mousePress(rig.window, Qt::LeftButton, {}, at);
+        for (int i = 1; i <= 20; ++i)
+            QTest::mouseMove(rig.window, at + QPoint(0, int(i * step * 1.2 / 20)));
+        QTRY_VERIFY(row->property("lifted").toBool());
+        // The dragged agent's pane closes mid-drag.
+        auto list = QJsonDocument::fromJson(garden({"working", "blocked", "done", "idle"})).object();
+        auto result = list["result"].toObject();
+        auto agents = result["agents"].toArray();
+        agents.removeAt(1);
+        result["agents"] = agents;
+        list["result"] = result;
+        write(rig.dir.filePath("agents.json"), QJsonDocument(list).toJson());
+        QTRY_COMPARE(rig.backend->agents()->count(), 3);
+        QTest::mouseRelease(rig.window, Qt::LeftButton, {}, at + QPoint(0, int(step * 1.2)));
+        QTest::qWait(300);
+        for (const char *pane : {"agentRow_w1:p1", "agentRow_w3:p1", "agentRow_w4:p1"}) {
+            QCOMPARE(rig.find(pane)->property("offset").toReal(), 0.0);
+            QVERIFY(!rig.find(pane)->property("lifted").toBool());
+        }
+        QStringList ids;
+        for (const auto &agent : rig.backend->agents()->agents())
+            ids << agent.paneId;
+        QCOMPARE(ids, QStringList({"w1:p1", "w3:p1", "w4:p1"}));
+    }
+
     void ctrlBHidesTheAgentList()
     {
         Rig rig(agents("working", "idle"));

@@ -45,7 +45,7 @@ public:
 
     int count() const { return m_agents.size(); }
     const QList<Agent> &agents() const { return m_agents; }
-    int indexOf(const QString &paneId) const;
+    Q_INVOKABLE int indexOf(const QString &paneId) const;
     QVariantList rows() const;
 
     void setAgents(const QList<Agent> &agents);
