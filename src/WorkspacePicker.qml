@@ -347,7 +347,9 @@ Rectangle {
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 12
-                            anchors.rightMargin: 4
+                            // An agent's row has no button: its text ends where its
+                            // title begins, 12 from the edge.
+                            anchors.rightMargin: row.modelData.agent ? 12 : 4
                             spacing: 8
                             StatusDot {
                                 visible: row.modelData.agent === true
@@ -380,8 +382,10 @@ Rectangle {
                                 Layout.maximumWidth: row.width / 2
                                 FontMetrics { id: statusMetrics }
                             }
-                            // Always takes its place, so rows line up whether or not it shows.
+                            // Always takes its place on a workspace's row, so those
+                            // line up whether or not it shows.
                             Item {
+                                visible: !row.modelData.agent
                                 Layout.preferredWidth: 26
                                 Layout.preferredHeight: 26
                                 IconButton {
