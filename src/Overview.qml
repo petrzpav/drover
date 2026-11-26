@@ -46,12 +46,11 @@ Rectangle {
             backend.sendPrompt(backend.selected, sending)
         }
     }
-    // The agent's words as Markdown, safely: outside code, no raw HTML (a
-    // "<" shows as itself) and no pictures (their alt text as a link), so
-    // nothing is ever fetched.
+    // The agent's words as Markdown, safely: a zero-width space after every
+    // "<" and every "!" before "[" breaks raw HTML and pictures wherever they
+    // are (in code too, where it can't be seen), so nothing is ever fetched.
     function markdown(text) {
-        return text.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/).map((part, i) =>
-            i % 2 === 1 ? part : part.replace(/</g, "&lt;").replace(/!\[/g, "[")).join("")
+        return text.replace(/</g, "<\u200b").replace(/!(?=\[)/g, "!\u200b")
     }
     function openLink(link) {
         if (/^https?:\/\//i.test(link))
@@ -142,8 +141,11 @@ Rectangle {
         function onPromptSent(pane, sent) {
             if (!sent)
                 return
-            if (pane === overview.draftPane && input.text.trim() === overview.sending)
-                input.clear()
+            // What was sent goes; what you typed on since stays.
+            if (pane === overview.draftPane && input.text.trim().startsWith(overview.sending)) {
+                input.text = input.text.trim().slice(overview.sending.length).trim()
+                input.cursorPosition = input.length
+            }
             const next = Object.assign({}, overview.drafts)
             delete next[pane]
             overview.drafts = next

@@ -956,10 +956,11 @@ private slots:
         QVariant safe;
         QMetaObject::invokeMethod(overview, "markdown", Q_RETURN_ARG(QVariant, safe),
                                   Q_ARG(QVariant, "a ![map](http://x/m.png) <img src=\"http://x/i.png\"> b"));
-        QCOMPARE(safe.toString(), QString("a [map](http://x/m.png) &lt;img src=\"http://x/i.png\"> b"));
+        const QString zw = QString(QChar(0x200b));
+        QCOMPARE(safe.toString(), "a !" + zw + "[map](http://x/m.png) <" + zw + "img src=\"http://x/i.png\"> b");
         QMetaObject::invokeMethod(overview, "markdown", Q_RETURN_ARG(QVariant, safe),
-                                  Q_ARG(QVariant, "use `<div>` and ![a][ref]\n```\n<b>![x](y)\n```"));
-        QCOMPARE(safe.toString(), QString("use `<div>` and [a][ref]\n```\n<b>![x](y)\n```"));
+                                  Q_ARG(QVariant, "!![a](x) \\`![b](y)\\` ``` ![c][r]"));
+        QCOMPARE(safe.toString(), "!!" + zw + "[a](x) \\`!" + zw + "[b](y)\\` ``` !" + zw + "[c][r]");
 
         // The opened point stays in place, rather than the list following its end.
         QVERIFY(!rig.find("overviewList")->property("follow").toBool());
