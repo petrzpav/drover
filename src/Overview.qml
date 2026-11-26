@@ -293,15 +293,19 @@ Rectangle {
                 active: row.open && row.point.kind === "said"
                 visible: active
                 width: parent.width
-                sourceComponent: Text {
+                // Selectable, to copy from.
+                sourceComponent: TextEdit {
                     objectName: "pointWords" + row.point.id
                     width: body.width
-                    textFormat: Text.MarkdownText
+                    readOnly: true
+                    selectByMouse: true
+                    textFormat: TextEdit.MarkdownText
                     text: overview.markdown(row.point.text)
                     color: theme.foreground
-                    // Readable on any theme: the text's color, a touch of the accent.
-                    linkColor: Qt.tint(theme.foreground, Qt.alpha(theme.accent, 0.35))
-                    wrapMode: Text.Wrap
+                    selectionColor: Qt.alpha(theme.foreground, 0.35)
+                    selectedTextColor: theme.foreground
+                    // Links in the theme's colors: see Theme::applyLinkColor.
+                    wrapMode: TextEdit.Wrap
                     onLinkActivated: (link) => overview.openLink(link)
                 }
             }
@@ -550,13 +554,17 @@ Rectangle {
                                     flickableDirection: Flickable.HorizontalFlick
                                     boundsBehavior: Flickable.StopAtBounds
                                     interactive: contentWidth > width
-                                    Text {
+                                    TextEdit {
                                         id: visualText
                                         objectName: "visualText" + turn.serial + "_0_" + summaryRow.index
                                         text: summaryRow.visual !== "" ? overview.drawing(summaryRow.visual) : ""
-                                        textFormat: Text.StyledText
+                                        textFormat: TextEdit.RichText
+                                        readOnly: true
+                                        selectByMouse: true
                                         color: theme.foreground
-                                        wrapMode: Text.NoWrap
+                                        selectionColor: Qt.alpha(theme.foreground, 0.35)
+                                        selectedTextColor: theme.foreground
+                                        wrapMode: TextEdit.NoWrap
                                     }
                                 }
                             }
@@ -682,15 +690,19 @@ Rectangle {
                             text: "\uf120"
                             color: theme.accent
                         }
-                        Text {
+                        TextEdit {
                             id: commandText
                             x: 32
                             y: 6
                             width: parent.width - 32 - copyButton.width - 12
                             text: command.modelData
-                            textFormat: Text.PlainText
+                            textFormat: TextEdit.PlainText
+                            readOnly: true
+                            selectByMouse: true
                             color: theme.foreground
-                            wrapMode: Text.WrapAnywhere
+                            selectionColor: Qt.alpha(theme.foreground, 0.35)
+                            selectedTextColor: theme.foreground
+                            wrapMode: TextEdit.WrapAnywhere
                         }
                         IconButton {
                             id: copyButton

@@ -1,5 +1,7 @@
 // Theme watching follows Omacut (MIT, David Heinemeier Hansson).
 #include "theme.h"
+#include <QPalette>
+#include <QGuiApplication>
 
 #include <QColor>
 #include <QDir>
@@ -169,4 +171,20 @@ void Theme::reload() {
         m_colors = colors;
         emit changed();
     }
+    applyLinkColor();
+}
+
+// Links in Markdown take their color from the application's palette (the
+// dark blue by default, unreadable on a dark theme): the text's color with a
+// touch of the accent, readable on any theme.
+void Theme::applyLinkColor() {
+    const QColor text(foreground()), accent(m_accent);
+    const QColor link = QColor::fromRgbF(text.redF() * .65 + accent.redF() * .35, text.greenF() * .65 + accent.greenF() * .35,
+                                         text.blueF() * .65 + accent.blueF() * .35);
+    QPalette palette = QGuiApplication::palette();
+    if (palette.color(QPalette::Link) == link)
+        return;
+    palette.setColor(QPalette::Link, link);
+    palette.setColor(QPalette::LinkVisited, link);
+    QGuiApplication::setPalette(palette);
 }

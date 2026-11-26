@@ -939,7 +939,8 @@ private slots:
         file.write(entry({{"type", "user"}, {"message", QJsonObject{{"content", QJsonArray{
             QJsonObject{{"type", "tool_result"}, {"tool_use_id", "b1"}, {"content", "ok"}}}}}}}));
         file.write(entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
-            QJsonObject{{"type", "text"}, {"text", "Both beds are **watered**.\n\n- south\n- " + QString("and more ").repeated(60)}}}}}}}));
+            QJsonObject{{"type", "text"}, {"text", "Both beds are **watered**, see [the plan for the beds](https://example.org/plan).\n\n- south\n- "
+                                + QString("and more ").repeated(60)}}}}}}}));
         file.close();
         QTRY_VERIFY(rig.find("pointText3"));
         // At work with nothing running: it thinks.
@@ -958,6 +959,20 @@ private slots:
         QTRY_VERIFY(words->height() > closed * 2);
         QCOMPARE(words->property("textFormat").toInt(), int(Qt::MarkdownText));
         QTRY_VERIFY(input->hasActiveFocus());
+        // Its link in a color readable on the theme, not the palette's dark blue.
+        QTest::qWait(100);
+        {
+            const QImage shot = rig.window->grabWindow();
+            const QRect area = words->mapRectToScene(words->boundingRect()).toAlignedRect().intersected(shot.rect());
+            int blue = 0;
+            for (int y = area.top(); y <= area.bottom(); ++y)
+                for (int x = area.left(); x <= area.right(); ++x) {
+                    const QColor c = shot.pixelColor(x, y);
+                    if (c.blue() > c.red() + 60 && c.blue() > c.green() + 60)
+                        ++blue;
+                }
+            QCOMPARE(blue, 0);
+        }
 
         // The agent's words fetch nothing: pictures become links.
         QVariant safe;
@@ -1138,7 +1153,11 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(rig.timeline->index(21).data(Timeline::PointsRole).toList().size() == 1, 10000);
         QMetaObject::invokeMethod(list, "positionViewAtEnd");
         QTRY_VERIFY(rig.find("visualText22_0_0"));
-        const QString drawn = rig.find("visualText22_0_0")->property("text").toString();
+        QVERIFY(rig.find("visualText22_0_0")->property("selectByMouse").toBool());
+        QVariant drawnValue;
+        QMetaObject::invokeMethod(rig.find("overview"), "drawing", Q_RETURN_ARG(QVariant, drawnValue),
+                                  Q_ARG(QVariant, "a  [ok]b[/] <c>"));
+        const QString drawn = drawnValue.toString();
         QVERIFY(drawn.startsWith("a&nbsp;&nbsp;<font color=\""));
         QVERIFY(drawn.endsWith("b</font>&nbsp;&lt;c&gt;"));
         QFile::remove(rig.dir.filePath("reply.json"));
@@ -1240,6 +1259,8 @@ private slots:
         asks.close();
         QTRY_VERIFY(rig.find("pointWords202") && rig.find("pointWords202")->isVisible());
         QVERIFY(rig.find("pointWords202")->property("text").toString().contains("Tell me which."));
+        // Its words can be selected, to copy.
+        QVERIFY(rig.find("pointWords202")->property("selectByMouse").toBool());
 
         // A command it gives you to run: in sight, copied with a click.
         QFile gives(rig.dir.filePath("projects/-a/s-1.jsonl"));

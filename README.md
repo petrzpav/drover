@@ -202,7 +202,7 @@ while the model sums a turn up, it bobs on the first point being summed up.
 
 Click a summary point to open the points it sums up, and a point to open it
 where it is: the agent's words in full (as Markdown, its pictures as links,
-nothing fetched), the error, every command of a run. Never all at once: a long
+nothing fetched, selectable to copy), the error, every command of a run. Never all at once: a long
 turn shows its newest points, and "… N earlier points" twenty more a click.
 The list stays at the bottom as the agent goes on, unless you scrolled up;
 while the pointer is over it, it waits, so nothing moves under the pointer.

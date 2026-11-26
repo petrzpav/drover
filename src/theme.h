@@ -57,6 +57,7 @@ signals:
 
 private:
     void reload();
+    void applyLinkColor();
     void refreshRounding();
 
     QString m_directory;
