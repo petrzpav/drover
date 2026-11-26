@@ -1136,6 +1136,89 @@ private slots:
         QVERIFY(rig.find("point2")->mapToScene(QPointF(0, 0)).x() > point->mapToScene(QPointF(0, 0)).x());
     }
 
+    void aLongTurnShowsItsNewestPoints()
+    {
+        Rig rig(R"({"result":{"agents":[
+          {"agent":"claude","agent_session":{"kind":"id","value":"s-1"},"agent_status":"working","cwd":"/a","pane_id":"w1:p1","terminal_id":"term_1","terminal_title_stripped":"Plant the beds","workspace_id":"w1"},
+          {"agent":"claude","agent_status":"idle","cwd":"/b","pane_id":"w2:p1","terminal_id":"term_2","terminal_title_stripped":"Fix the gate","workspace_id":"w2"}]}})");
+        QDir(rig.dir.path()).mkpath("projects/-a");
+        const auto entry = [](const QJsonObject &object) { return QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n'; };
+        QByteArray transcript = entry({{"type", "user"}, {"origin", QJsonObject{{"kind", "human"}}},
+                                       {"message", QJsonObject{{"content", "Plant every bed"}}}});
+        for (int i = 1; i <= 200; ++i)
+            transcript += entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
+                QJsonObject{{"type", "text"}, {"text", QString("Bed %1 is planted.").arg(i)}}}}}}});
+        write(rig.dir.filePath("projects/-a/s-1.jsonl"), transcript);
+        rig.surface->setOverviewShown(true);
+        rig.expand();
+        // The newest few only, the rest behind a line.
+        QTRY_VERIFY(rig.find("point200"));
+        QVERIFY(rig.find("point195"));
+        QVERIFY(!rig.find("point194"));
+        auto *earlier = rig.find("earlier1");
+        QVERIFY(earlier && earlier->isVisible());
+        QVERIFY(earlier->childItems().at(0)->property("text").toString().contains("194"));
+        // More come: still the newest few.
+        QFile more(rig.dir.filePath("projects/-a/s-1.jsonl"));
+        QVERIFY(more.open(QIODevice::Append));
+        more.write(entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
+            QJsonObject{{"type", "text"}, {"text", "Bed 201 is planted."}}}}}}}));
+        more.close();
+        QTRY_VERIFY(rig.find("point201"));
+        QTRY_VERIFY(!rig.find("point195"));
+        // A click shows them all.
+        QTest::qWait(50);
+        QTest::mouseClick(rig.window, Qt::LeftButton, {}, earlier->mapToScene(QPointF(60, earlier->height() / 2)).toPoint());
+        QTRY_VERIFY(rig.find("point1"));
+    }
+
+    void perfRealTranscript()
+    {
+        const QString real = qEnvironmentVariable("DROVER_PERF_TRANSCRIPT");
+        if (real.isEmpty())
+            QSKIP("set DROVER_PERF_TRANSCRIPT to a transcript to time the overview on it");
+        Rig rig(R"({"result":{"agents":[
+          {"agent":"claude","agent_session":{"kind":"id","value":"s-1"},"agent_status":"working","cwd":"/a","pane_id":"w1:p1","terminal_id":"term_1","terminal_title_stripped":"Plant the beds","workspace_id":"w1"},
+          {"agent":"claude","agent_status":"idle","cwd":"/b","pane_id":"w2:p1","terminal_id":"term_2","terminal_title_stripped":"Fix the gate","workspace_id":"w2"}]}})");
+        QDir(rig.dir.path()).mkpath("projects/-a");
+        QFile source(real);
+        QVERIFY(source.open(QIODevice::ReadOnly));
+        const QByteArray all = source.readAll();
+        const int half = all.lastIndexOf('\n', all.size() * 9 / 10) + 1;
+        write(rig.dir.filePath("projects/-a/s-1.jsonl"), all.left(half));
+        if (qEnvironmentVariableIsSet("DROVER_PERF_SUMMARY")) {
+            qputenv("DROVER_TEST_DIR", rig.dir.path().toUtf8());
+            rig.timeline->setCacheDirectory(rig.dir.filePath("cache"));
+            rig.timeline->setSummaryProgram(TESTS_DIR "/fake_claude.sh");
+            rig.timeline->setSummaryModel("sonnet");
+        }
+        rig.expand();
+        QTest::qWait(500);
+        QElapsedTimer timer;
+        timer.start();
+        QTest::keyClick(rig.window, Qt::Key_B, Qt::ControlModifier | Qt::AltModifier);
+        QTRY_VERIFY_WITH_TIMEOUT(rig.timeline->state() == "ready", 30000);
+        qWarning() << "ready after" << timer.elapsed() << "ms, turns" << rig.timeline->count();
+        // How long a frame takes while the transcript grows.
+        QFile file(rig.dir.filePath("projects/-a/s-1.jsonl"));
+        QVERIFY(file.open(QIODevice::Append));
+        qint64 worst = 0;
+        int at = half;
+        for (int round = 0; round < 20; ++round) {
+            const int next = all.indexOf('\n', qMin(int(all.size()) - 1, at + (all.size() - half) / 20)) + 1;
+            file.write(all.mid(at, next - at));
+            file.flush();
+            at = next;
+            QElapsedTimer frame;
+            for (int i = 0; i < 10; ++i) {
+                frame.restart();
+                QTest::qWait(10);
+                worst = qMax(worst, frame.elapsed() - 10);
+            }
+        }
+        qWarning() << "worst stall while growing" << worst << "ms";
+    }
+
     void aNarrowPanelKeepsItsHeaderInside()
     {
         Rig rig(agents("working", "idle"));

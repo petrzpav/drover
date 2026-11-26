@@ -24,6 +24,9 @@ Rectangle {
     // The agent asks something: its terminal is where to answer.
     signal answerWanted()
     readonly property int readable: 900
+    // How many of a turn's newest points show before the rest is asked for:
+    // a long turn's hundreds would take a while to draw, at every change.
+    readonly property int newest: 6
 
     color: theme.background
 
@@ -485,9 +488,33 @@ Rectangle {
                     }
                 }
 
-                // The points no summary covers yet.
+                // The points no summary covers yet: the newest few, the
+                // earlier ones behind a line that shows them all.
+                readonly property bool allShown: overview.opened["all" + turn.serial] === true
+                readonly property int shownFrom: allShown ? turn.shownCovered
+                                                          : Math.max(turn.shownCovered, turn.items.length - overview.newest)
+                Rectangle {
+                    objectName: "earlier" + turn.serial
+                    visible: column.shownFrom > turn.shownCovered
+                    width: column.width
+                    height: earlierText.implicitHeight + 6
+                    radius: theme.radius
+                    color: earlierHover.hovered ? Qt.alpha(theme.foreground, 0.05) : "transparent"
+                    HoverHandler { id: earlierHover }
+                    Text {
+                        id: earlierText
+                        x: 32
+                        y: 3
+                        text: "… " + qsTr("%n earlier points", "", column.shownFrom - turn.shownCovered)
+                        color: overview.dim
+                    }
+                    TapHandler {
+                        cursorShape: Qt.PointingHandCursor
+                        onTapped: overview.toggle("all" + turn.serial)
+                    }
+                }
                 Repeater {
-                    model: turn.items.slice(turn.shownCovered)
+                    model: turn.items.slice(column.shownFrom)
                     delegate: PointRow {
                         required property var modelData
                         point: modelData

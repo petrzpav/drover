@@ -15,6 +15,11 @@
     "other": "%n se ptá"
   },
   "%n done": "%n hotovo",
+  "%n earlier points": {
+    "one": "%n dřívější bod",
+    "few": "%n dřívější body",
+    "other": "%n dřívějších bodů"
+  },
   "%n working": {
     "one": "%n pracuje",
     "few": "%n pracují",
