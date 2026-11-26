@@ -163,13 +163,11 @@ station per turn with its time and headline, a release an interchange
 still runs in the background a branch with the robot at work on it, a
 failed or interrupted turn a station out of service (`✗`), and at its end
 `▼ now`, with the robot bobbing on the station at work. A plain station
-shows a little 9×9 pixel picture the model draws with the turn's summary (a
-rocket, a magnifier, a bug, a sheep…) in a palette drover derives from the
-theme by lightness, with its own dark outline so it reads on dark and light
-themes alike, and the line on
-to the next station one or two more of what else the turn touched (a key, an
-envelope, a package). When the icons' style changes, turns already summed up
-get new icons drawn from their summaries, as they come into view. The station in view
+shows its turn's category as a line icon in its family's colour from the
+theme: the model sorts each turn into one of twelve (idea, build, ui,
+release, fix, failure, review, research, design, question, test, perf), so
+the same kind always has the same sign. Turns summed up before categories
+get theirs from their summaries, as they come into view. The station in view
 is marked; a click goes to it, and the button above hides the line. `PgUp` and `PgDn` page the conversation, also from the message
 field; `Ctrl+Home` and `Ctrl+End` go to its start and end. When Claude
 parks a conversation as a job in the background, the overview follows it to

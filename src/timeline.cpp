@@ -954,8 +954,8 @@ QVariantMap Timeline::rowOf(const TimelineParser::Turn &turn) const {
     // The latest summary sums up the turn up to where it reaches.
     if (const QList<Batch> kept = m_summaries.value(turn.uuid); !kept.isEmpty()) {
         points = kept.last().points;
-        batches << QVariantMap{{"from", 0}, {"to", kept.last().to}, {"points", points}, {"icon", kept.last().icon},
-                               {"motifs", kept.last().motifs}};
+        batches << QVariantMap{{"from", 0}, {"to", kept.last().to}, {"points", points},
+                               {"category", kept.last().category}};
         covered = kept.last().to;
     }
     return {{"serial", turn.serial}, {"prompt", turn.prompt}, {"time", turn.time}, {"items", items},
@@ -986,43 +986,26 @@ QString Timeline::readSummaryModel(const QString &configFile) {
     return QStringLiteral("sonnet");
 }
 
-// The icons, as the model is to draw them.
-QString Timeline::iconInstructions() {
-    return QStringLiteral(
-        "Icons, as \"icon\":[9 strings of 9 characters] and \"motifs\":[[9 such strings],[9 such strings]].\n"
-        "Icon: a tiny 9 by 9 pixel-art picture of what the turn was about, for its station on a timeline: a "
-        "rocket for a release, a magnifier for a review, a bug for a fix, a gear, a page, a chart, a sheep, "
-        "whatever fits. It is shown 18 pixels tall beside a line of text.\n"
-        "Motifs: one or two more such tiny pictures of other things the turn touched or met (a key, an "
-        "envelope, a window, ice for a freeze, a package, a test tube), shown beside the timeline after the "
-        "station; [] when nothing fits.\n"
-        "Each character is a pixel: . empty; neutrals from light to dark: w white, l light grey, m mid grey, "
-        "k dark grey, o ink (near black); colours, lowercase lit and UPPERCASE the same colour in shade: a/A "
-        "accent, g/G green, r/R red, y/Y yellow.\n"
-        "Style: Draw one recognisable object with one unmistakable feature (a rocket's fins, a magnifier's "
-        "open lens, a sheep's wool and feet). Build a bold silhouette first, centred and filling most of the "
-        "9x9 grid; drover adds the dark outline, so draw none and leave no margin. Main masses at least 2 "
-        "pixels thick; 1-pixel parts only for legs, teeth, antennae or a glint, touching the body; holes that "
-        "matter (a lens, a gear's bore) at least 2 pixels wide. Then shade: light comes from the top-left, so "
-        "upper and left edges take the lighter key (w, l or a lowercase colour), the lower-right face the "
-        "darker (m, k or the uppercase colour) in one connected patch. Themes recolour hues, so neighbouring "
-        "areas must differ in lightness, not only in hue. Use o only inside the shape: seams, eyes, spots. "
-        "Use 2 to 5 keys besides '.', at most one colour family, where it says what the thing is. No "
-        "dithering, no letters, no pixels floating free.\n"
-        "Examples:\n"
-        "rocket: [\"......rrR\",\"....wwlrR\",\"...wwawlR\",\"..wwaAwl.\",\"r.wwwwlm.\",\"rrlwwlm..\",\".RRllm...\",\"yw.RR....\",\"ry..R....\"]\n"
-        "magnifier: [\"..mmm....\",\".mwwwm...\",\"mw...mk..\",\"mw...mk..\",\"mw...mk..\",\".mwmmk...\",\"..kkkkm..\",\"......amA\",\".......AA\"]\n"
-        "bug: [\"..k...k..\",\"...kkk...\",\"..rrorr..\",\"krwrorrRk\",\".rrrorrR.\",\"krororoRk\",\".rrrorRR.\",\"k.rRoRR.k\",\"...RoR...\"]\n"
-        "gear: [\"....w....\",\".w.wwl.l.\",\"..wlllm..\",\".wl...mm.\",\"wll...mmk\",\".ll...mk.\",\"..lmmmk..\",\".l.mmk.k.\",\"....k....\"]\n"
-        "package: [\"....w....\",\"..wwyww..\",\"wwyyyyyww\",\"yywyyywYY\",\"yyyywYYYY\",\"yyyywYYYY\",\"yyyywYYYY\",\"..yywYY..\",\"....w....\"]\n"
-        "sheep: [\".........\",\".ww.ww...\",\"wwwwwww..\",\"wwwwwkkk.\",\"wwwwlkwkk\",\"lwwllkkk.\",\".lllllm..\",\".k..k....\",\".k..k....\"]\n");
+const QStringList &Timeline::categories() {
+    static const QStringList list{"idea", "build", "ui", "release", "fix", "failure",
+                                  "review", "research", "design", "question", "test", "perf"};
+    return list;
 }
 
-QString Timeline::iconsOnlyInstructions() {
-    return QStringLiteral("You draw the tiny pixel icons for one turn of a coding agent's conversation, shown on a "
-                          "timeline, from the user's prompt and the turn's summary.\n")
-        + iconInstructions()
-        + QStringLiteral("Reply with JSON only: {\"icon\":[...],\"motifs\":[...]}");
+QString Timeline::categoryInstructions() {
+    return QStringLiteral(
+        "Category: what the turn mostly was, one of: idea (a new idea or plan talked over), build (something new "
+        "built), ui (the look or layout changed), release (shipped, published, tagged, deployed), fix (a bug "
+        "fixed), failure (it broke, failed or got stuck), review (code or work reviewed), research (looked "
+        "into, read, investigated), design (proposals, mockups, choices drawn up), question (it waits for the "
+        "user's answer or decision), test (tests written or run), perf (made faster or lighter).\n");
+}
+
+QString Timeline::categoryOnlyInstructions() {
+    return QStringLiteral("You sort one turn of a coding agent's conversation into a category, from the user's "
+                          "prompt and the turn's summary.\n")
+        + categoryInstructions()
+        + QStringLiteral("Reply with JSON only: {\"category\":\"...\"}");
 }
 
 QString Timeline::summaryInstructions(bool more) {
@@ -1043,8 +1026,8 @@ QString Timeline::summaryInstructions(bool more) {
               "what is open or waits for the user. Leave out routine steps such as reading files or tests that passed.\n"
               "Reply with JSON only: {\"points\":[{\"text\":\"...\",\"kind\":\"done|change|ship|fail|ask|open|note\","
               "\"step\":N,\"visual\":\"...\"}]} where step is the number of the step the point is mostly about "
-              "and visual is optional (below); add \"icon\" and \"motifs\" as below.\n")
-        + iconInstructions()
+              "and visual is optional (below); add \"category\":\"...\" as below.\n")
+        + categoryInstructions()
         + QStringLiteral(
               "Pictures: the user takes in a picture faster than sentences. When the turn went through stages "
               "(where it stands now), tried several cases (a checklist of what works and what's left), touched "
@@ -1102,30 +1085,6 @@ int cellsOfLine(const QString &line) {
 // A drawing as the overview can show it: at most VisualLines lines of
 // VisualColumns cells (marks not counted, a character never cut in half), no
 // tabs or control characters, no empty lines around it.
-QStringList Timeline::fitIcon(const QJsonValue &icon) {
-    static const QRegularExpression row("^[.wlmkoaAgGrRyY]{1,9}$");
-    QStringList rows;
-    // Its rows, or one string of rows on lines of their own.
-    QJsonArray lines = icon.toArray();
-    if (icon.isString())
-        for (const QString &line : icon.toString().split('\n', Qt::SkipEmptyParts))
-            lines.append(line);
-    for (const QJsonValue &value : std::as_const(lines)) {
-        const QString line = value.toString().trimmed();
-        if (!row.match(line).hasMatch())
-            return {};
-        rows << line.leftJustified(9, '.');
-    }
-    // A row or three short (models count poorly): empty rows make it 9.
-    if (rows.size() < 6 || rows.size() > 9)
-        return {};
-    while (rows.size() < 9)
-        rows << QStringLiteral(".........");
-    if (rows.join(QString()).count('.') == 81)
-        return {};
-    return rows;
-}
-
 QString Timeline::fitVisual(const QString &visual) {
     const QRegularExpression &mark = visualMark();
     QStringList lines;
@@ -1224,16 +1183,10 @@ QHash<QString, QList<Timeline::Batch>> Timeline::readCache(const QString &cache,
         if (kept.size() != 1)
             continue;
         const QJsonObject object = kept.first().toObject();
-        QVariantList motifs;
-        for (const QJsonValue &motif : object.value("motifs").toArray())
-            if (const QStringList rows = fitIcon(motif); !rows.isEmpty() && motifs.size() < 2)
-                motifs << QVariant(rows);
-        // Icons of an older style mean other keys: none until drawn again.
-        const int style = object.value("iconStyle").toInt(1);
-        if (style < IconStyle)
-            motifs.clear();
+        const QString category = object.value("category").toString();
         summaries.insert(it.key(), {{object.value("to").toInt(), object.value("points").toArray().toVariantList(),
-                                     style < IconStyle ? QStringList() : fitIcon(object.value("icon")), motifs, style}});
+                                     categories().contains(category) ? category : QString(),
+                                     object.value("categoryStyle").toInt(0)}});
     }
     return summaries;
 }
@@ -1247,9 +1200,7 @@ void Timeline::saveSummaries(const QString &session, const QHash<QString, QList<
         QJsonArray batches;
         for (const Batch &batch : it.value())
             batches.append(QJsonObject{{"to", batch.to}, {"points", QJsonArray::fromVariantList(batch.points)},
-                                       {"icon", QJsonArray::fromStringList(batch.icon)},
-                                       {"motifs", QJsonArray::fromVariantList(batch.motifs)},
-                                       {"iconStyle", batch.iconStyle}});
+                                       {"category", batch.category}, {"categoryStyle", batch.categoryStyle}});
         turns.insert(it.key(), batches);
     }
     QDir().mkpath(m_cache);
@@ -1314,8 +1265,8 @@ void Timeline::summarizeNext() {
         return;
     }
 
-    // Nothing to sum up: summaries whose icons are of an older style get
-    // new ones, the newest first, from their own words.
+    // Nothing to sum up: summaries from before categories get one, the
+    // newest first, from their own words.
     considered = 0;
     for (int i = int(turns.size()) - 1; i >= 0; --i) {
         const auto &turn = turns[i];
@@ -1324,13 +1275,13 @@ void Timeline::summarizeNext() {
         if (++considered > 8 && !m_wanted.contains(turn.uuid))
             continue;
         const QList<Batch> batches = m_summaries.value(turn.uuid);
-        if (batches.isEmpty() || batches.last().iconStyle >= IconStyle || m_failures.value(turn.uuid) >= 2)
+        if (batches.isEmpty() || batches.last().categoryStyle >= CategoryStyle || m_failures.value(turn.uuid) >= 2)
             continue;
         m_job = {m_session, turn.uuid, turn.serial, 0, batches.last().to, m_generation, true};
         QString input = QStringLiteral("The user's prompt: ") + turn.prompt.left(1500) + QStringLiteral("\n\nIts summary:\n");
         for (const QVariant &point : batches.last().points)
             input += QStringLiteral("- ") + point.toMap().value("text").toString() + '\n';
-        runModel(iconsOnlyInstructions(), input);
+        runModel(categoryOnlyInstructions(), input);
         return;
     }
 }
@@ -1412,8 +1363,8 @@ void Timeline::summaryDone(int code) {
             publish();
         return;
     }
-    // New icons alone, for a summary drawn in an older style.
-    if (job.iconsOnly) {
+    // A category alone, for a summary from before categories.
+    if (job.categoryOnly) {
         if (open < 0) {
             if (job.session == m_session)
                 ++m_failures[job.uuid];
@@ -1423,14 +1374,9 @@ void Timeline::summaryDone(int code) {
         auto summaries = job.session == m_session ? m_summaries : readCache(m_cache, job.session);
         if (!summaries.value(job.uuid).isEmpty()) {
             Batch &kept = summaries[job.uuid].last();
-            if (const QStringList icon = fitIcon(answer.value("icon")); !icon.isEmpty())
-                kept.icon = icon;
-            QVariantList motifs;
-            for (const QJsonValue &motif : answer.value("motifs").toArray())
-                if (const QStringList rows = fitIcon(motif); !rows.isEmpty() && motifs.size() < 2)
-                    motifs << QVariant(rows);
-            kept.motifs = motifs;
-            kept.iconStyle = IconStyle;
+            const QString category = answer.value("category").toString();
+            kept.category = categories().contains(category) ? category : QString();
+            kept.categoryStyle = CategoryStyle;
             saveSummaries(job.session, summaries);
             if (job.session == m_session) {
                 m_summaries = summaries;
@@ -1453,14 +1399,11 @@ void Timeline::summaryDone(int code) {
     static const QStringList kinds{"done", "change", "ship", "fail", "ask", "open", "note"};
     Batch batch;
     batch.to = job.to;
-    batch.iconStyle = IconStyle;
-    // Its icon, or the one it had while the model drew none this time.
-    batch.icon = fitIcon(answer.value("icon"));
-    if (batch.icon.isEmpty() && job.session == m_session && !m_summaries.value(job.uuid).isEmpty())
-        batch.icon = m_summaries.value(job.uuid).last().icon;
-    for (const QJsonValue &motif : answer.value("motifs").toArray())
-        if (const QStringList rows = fitIcon(motif); !rows.isEmpty() && batch.motifs.size() < 2)
-            batch.motifs << QVariant(rows);
+    batch.categoryStyle = CategoryStyle;
+    if (const QString category = answer.value("category").toString(); categories().contains(category))
+        batch.category = category;
+    else if (job.session == m_session && !m_summaries.value(job.uuid).isEmpty())
+        batch.category = m_summaries.value(job.uuid).last().category;
     for (const QJsonValue &value : points) {
         const QJsonObject point = value.toObject();
         const QString text = point.value("text").toString().simplified();

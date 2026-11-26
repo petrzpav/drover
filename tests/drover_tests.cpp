@@ -500,39 +500,15 @@ private slots:
         QVERIFY(!items[0].branch);
     }
 
-    void aTurnsIconIsNineByNine()
+    void aTurnIsSortedIntoACategory()
     {
-        const QJsonArray rocket{"......rrR", "....wwlrR", "...wwawlR", "..wwaAwl.", "r.wwwwlm.", "rrlwwlm..", ".RRllm...", "yw.RR....", "ry..R...."};
-        QCOMPARE(Timeline::fitIcon(rocket).size(), 9);
-        // Short rows are filled out; anything else is no icon.
-        QJsonArray shortRows = rocket;
-        shortRows[0] = "....rr";
-        QCOMPARE(Timeline::fitIcon(shortRows).first(), QString("....rr..."));
-        QJsonArray wrongKey = rocket;
-        wrongKey[1] = "..<b>..";
-        QVERIFY(Timeline::fitIcon(wrongKey).isEmpty());
-        QJsonArray oldKeys = rocket;
-        oldKeys[1] = "..fd.....";
-        QVERIFY(Timeline::fitIcon(oldKeys).isEmpty());
-        QVERIFY(Timeline::fitIcon(QJsonArray{"wwww", "wwww"}).isEmpty());
-        QJsonArray seven = rocket;
-        seven.removeLast();
-        seven.removeLast();
-        QCOMPARE(Timeline::fitIcon(seven).last(), QString("........."));
-        QJsonArray empty;
-        for (int i = 0; i < 9; ++i)
-            empty.append(".........");
-        QVERIFY(Timeline::fitIcon(empty).isEmpty());
-        // One string of rows on lines of their own is the same icon.
-        QStringList lines;
-        for (const QJsonValue &value : rocket)
-            lines << value.toString();
-        QCOMPARE(Timeline::fitIcon(QJsonValue(lines.join('\n'))), Timeline::fitIcon(rocket));
-        QVERIFY(Timeline::summaryInstructions(false).contains("\"icon\""));
-        QVERIFY(Timeline::iconsOnlyInstructions().contains("sheep: ["));
+        QCOMPARE(Timeline::categories().size(), 12);
+        QVERIFY(Timeline::categories().contains("release"));
+        QVERIFY(Timeline::summaryInstructions(false).contains("\"category\""));
+        QVERIFY(Timeline::categoryOnlyInstructions().contains("question"));
     }
 
-    void iconsOfAnOlderStyleAreDrawnAgain()
+    void aSummaryFromBeforeCategoriesGetsOne()
     {
         QTemporaryDir dir;
         QDir(dir.path()).mkpath("projects/-a");
@@ -541,12 +517,11 @@ private slots:
         first.replace("\"type\":\"user\"", "\"type\":\"user\",\"uuid\":\"u1\"");
         write(dir.filePath("projects/-a/s-1.jsonl"), first + said("Digging.") + said("Planted.") + said("Done.")
               + line({{"type", "system"}, {"subtype", "turn_duration"}, {"durationMs", 9000}}));
-        // A summary from before: its icon in the old style.
+        // A summary from before categories (pixel icons then).
         write(dir.filePath("cache/s-1.json"), R"({"u1":[{"to":3,"points":[{"text":"Beds planted","kind":"done","index":0}],
-            "icon":["..ffff..",".f....f.","f......f","f......f","f......f","f......f",".f....f.","..ffff.."]}]})");
+            "icon":["..ffff..",".f....f.","f......f","f......f","f......f","f......f",".f....f.","..ffff.."],"iconStyle":3}]})");
         write(dir.filePath("reply.json"), QJsonDocument(QJsonObject{{"type", "result"}, {"is_error", false},
-            {"result", R"({"icon":["....g....","...ggg...","..ggggg..",".gggGggg.","....m....","....m....","...kkk...",".........","........."],"motifs":[]})"}})
-            .toJson(QJsonDocument::Compact));
+            {"result", R"({"category":"fix"})"}}).toJson(QJsonDocument::Compact));
         qputenv("DROVER_TEST_DIR", dir.path().toUtf8());
         Timeline timeline;
         timeline.setProjectsDirectory(dir.filePath("projects"));
@@ -556,13 +531,12 @@ private slots:
         timeline.setInterval(20);
         timeline.setSession("s-1");
         timeline.setActive(true);
-        // New icons from its own words; its summary stays.
-        const auto firstRow = [&] {
+        // A category from its own words; its summary stays.
+        const auto category = [&] {
             const QVariantList batches = timeline.index(0).data(Timeline::BatchesRole).toList();
-            const QStringList icon = batches.isEmpty() ? QStringList() : batches.first().toMap().value("icon").toStringList();
-            return icon.isEmpty() ? QString() : icon.first();
+            return batches.isEmpty() ? QString() : batches.first().toMap().value("category").toString();
         };
-        QTRY_COMPARE(firstRow(), QString("....g...."));
+        QTRY_COMPARE(category(), QString("fix"));
         QCOMPARE(timeline.index(0).data(Timeline::PointsRole).toList().first().toMap().value("text").toString(),
                  QString("Beds planted"));
         QFile input(dir.filePath("input"));
@@ -570,8 +544,9 @@ private slots:
         QVERIFY(QString::fromUtf8(input.readAll()).contains("Its summary:\n- Beds planted"));
         QFile cache(dir.filePath("cache/s-1.json"));
         QVERIFY(cache.open(QIODevice::ReadOnly));
-        QCOMPARE(QJsonDocument::fromJson(cache.readAll()).object().value("u1").toArray().first().toObject()
-                     .value("iconStyle").toInt(), Timeline::IconStyle);
+        const QJsonObject kept = QJsonDocument::fromJson(cache.readAll()).object().value("u1").toArray().first().toObject();
+        QCOMPARE(kept.value("categoryStyle").toInt(), Timeline::CategoryStyle);
+        QVERIFY(!kept.contains("icon"));
     }
 
     void theTimelineKnowsWhatChangesTheWorld()

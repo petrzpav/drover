@@ -616,15 +616,9 @@ private slots:
                                        "            ─────────────────────────      B basil\n"
                                        "calendar    [fail]January – March only[/] → plan from soil tests\n"
                                        "sowing      [ok]April 12[/]   soil tests [ok]✓[/]   beds.md [ok]✓[/]"}}};
-            // A seedling for the station.
-            const QJsonArray seedling{"...gg....", "..gGg.gg.", "..gGgggG.", "...gGgG..", "....m....", "....m....", "..yyyyy..", "..YyyyY..", "...YYY..."};
             write(rig.dir.filePath("reply.json"), QJsonDocument(QJsonObject{{"type", "result"}, {"is_error", false},
-                {"result", QString::fromUtf8(QJsonDocument(QJsonObject{{"points", points}, {"icon", seedling},
-                    // A calendar and a watering can beside the line.
-                    {"motifs", QJsonArray{QJsonArray{"wwwwwwwww", "wrrrrrrrw", "wlllllllw", "wl.l.l.lw", "wlllllllw", "wl.l.l.lw", "wlllllllw", "mmmmmmmmm", "........."},
-                                          QJsonArray{"....aa...", "...a..a..", "aaaaaa...", ".aAAAAa..", ".aAAAAa.a", ".aAAAAaa.", "..AAAA...", ".........", "........."}}}})
-                    .toJson(QJsonDocument::Compact))}})
-                .toJson(QJsonDocument::Compact));
+                {"result", QString::fromUtf8(QJsonDocument(QJsonObject{{"points", points}, {"category", "design"}})
+                    .toJson(QJsonDocument::Compact))}}).toJson(QJsonDocument::Compact));
             qputenv("DROVER_TEST_DIR", rig.dir.path().toUtf8());
             rig.timeline->setCacheDirectory(rig.dir.filePath("cache"));
             rig.timeline->setSummaryProgram(TESTS_DIR "/fake_claude.sh");
@@ -1189,11 +1183,9 @@ private slots:
         QVERIFY(outline->mapRectToScene(outline->boundingRect()).left()
                 > rig.find("prompt1")->mapRectToScene(rig.find("prompt1")->boundingRect()).right());
         QTRY_VERIFY(rig.find("outline0") && rig.find("outline0")->property("current").toBool());
-        // The turn summed up has its little picture on its station.
+        // The turn summed up has its category's icon on its station.
         QTRY_VERIFY(rig.find("stationIcon0") && rig.find("stationIcon0")->isVisible());
-        // And what else it touched, beside the line after it.
-        QTRY_VERIFY(rig.find("motif0_0") && rig.find("motif0_0")->isVisible());
-        QVERIFY(!rig.find("motif0_1"));
+        QCOMPARE(rig.find("stationIcon0")->property("category").toString(), QString("build"));
         QVERIFY(!rig.find("stationMark0")->isVisible());
         QMetaObject::invokeMethod(outline, "positionViewAtEnd");
         QTRY_VERIFY(rig.find("outline12"));

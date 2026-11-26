@@ -213,16 +213,15 @@ public:
     // A summary point may come with a drawing in plain text: its limits,
     // and the drawing cut to them.
     static constexpr int VisualLines = 10, VisualColumns = 64;
-    // The icons' style: a summary whose icons are of an older one gets new
-    // icons, drawn alone from its summary.
-    static constexpr int IconStyle = 3;
-    static QString iconInstructions();
-    static QString iconsOnlyInstructions();
+    // A turn's category, from a fixed list (idea, build, ui, release, fix,
+    // failure, review, research, design, question, test, perf): its station
+    // on the timeline shows that category's icon. A summary from before
+    // categories (CategoryStyle) gets one alone, from its own words.
+    static constexpr int CategoryStyle = 4;
+    static const QStringList &categories();
+    static QString categoryInstructions();
+    static QString categoryOnlyInstructions();
     static QString fitVisual(const QString &visual);
-    // A turn's icon as the model drew it: 9 rows of 9 keys (. empty; w l m
-    // k o light to dark; a g r y accent, green, red, yellow lit, A G R Y in
-    // shade), or none when it isn't one.
-    static QStringList fitIcon(const QJsonValue &icon);
 
 signals:
     void sessionChanged();
@@ -264,12 +263,9 @@ private:
     struct Batch {
         int to = 0;
         QVariantList points;
-        // A little picture of the turn: 8 rows of 8 colour keys; and one or
-        // two more of what else it touched, for the line after its station.
-        QStringList icon;
-        QVariantList motifs;
-        // The style its icons were drawn in (IconStyle when current).
-        int iconStyle = 0;
+        // The turn's category, and whether it was asked for (CategoryStyle).
+        QString category;
+        int categoryStyle = 0;
     };
     void loadSummaries();
     static QHash<QString, QList<Batch>> readCache(const QString &cache, const QString &session);
@@ -287,8 +283,8 @@ private:
         qint64 serial = 0;
         int from = 0, to = 0;
         int generation = 0;
-        // Only the icons again, for a summary drawn in an older style.
-        bool iconsOnly = false;
+        // Only the category, for a summary from before categories.
+        bool categoryOnly = false;
     } m_job;
     void runModel(const QString &instructions, const QString &input);
     QPointer<QProcess> m_child;

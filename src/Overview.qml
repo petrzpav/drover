@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Shapes
 
 // The selected agent's conversation in points, in place of its terminal:
 // for each of your prompts what the agent did, said and asked, each point in
@@ -281,79 +282,49 @@ Rectangle {
         onClicked: overview.focusInput()
     }
 
-    // The icons' colors from the theme, by lightness first (themes recolor
-    // hues, so the art reads in grey too): w l m k o light to dark, from the
-    // theme's text and background; a g r y lit and A G R Y in shade, each
-    // lifted until it stands out on any background.
-    function iconPalette(background, foreground, accent, green, red, yellow) {
-        const hex = s => [1, 3, 5].map(i => parseInt(String(s).slice(i, i + 2), 16))
-        const mix = (a, b, t) => a.map((v, i) => Math.floor(v + (b[i] - v) * t + .5))
-        const lum = c => {
-            const f = v => (v /= 255) <= .04045 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4)
-            return .2126 * f(c[0]) + .7152 * f(c[1]) + .0722 * f(c[2])
-        }
-        const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05) }
-        const str = c => "#" + c.map(v => v.toString(16).padStart(2, "0")).join("")
-        const bg = hex(background), fg = hex(foreground)
-        const dark = lum(bg) < lum(fg)
-        const paper = mix(dark ? fg : bg, [255, 255, 255], .6)
-        const ink = mix(dark ? bg : fg, [0, 0, 0], .5)
-        const floor = dark ? bg : ink
-        const lift = (c, need) => {
-            for (let n = 0; n <= 20; ++n) {
-                const out = mix(c, paper, n / 20)
-                if (contrast(out, floor) >= need)
-                    return out
-            }
-            return paper
-        }
-        const keys = { w: paper, l: mix(paper, ink, .2), m: mix(paper, ink, .42), k: lift(mix(paper, ink, .62), 3), o: ink }
-        for (const [key, color] of [["a", accent], ["g", green], ["r", red], ["y", yellow]]) {
-            keys[key] = lift(hex(color), 3.5)
-            keys[key.toUpperCase()] = lift(mix(keys[key], ink, .4), 2.2)
-        }
-        for (const key in keys)
-            keys[key] = str(keys[key])
-        return keys
-    }
-    readonly property var iconColors: {
+    // A turn's category (the model sorts each turn into one) as a line icon
+    // in its family's colour from the theme: blue building, green shipping,
+    // red fixing and failing, yellow ideas and design, magenta questions,
+    // cyan looking into things. Always the same sign for the same kind.
+    readonly property var categoryIcons: ({
+        idea: "M8 2.5a3.6 3.6 0 0 1 2.2 6.5c-.6.5-.9 1-.9 1.7v.6H6.7v-.6c0-.7-.3-1.2-.9-1.7A3.6 3.6 0 0 1 8 2.5zM6.6 13.5h2.8",
+        build: "M5 2.5h6a2.5 2.5 0 0 1 2.5 2.5v6a2.5 2.5 0 0 1-2.5 2.5H5a2.5 2.5 0 0 1-2.5-2.5V5A2.5 2.5 0 0 1 5 2.5zM8 5.2v5.6M5.2 8h5.6",
+        ui: "M3.5 3h9a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5v-7A1.5 1.5 0 0 1 3.5 3zM2 6h12M10 6v7",
+        release: "M8 2c2.4 1.6 3.4 4 3.2 7L8 11.5 4.8 9C4.6 6 5.6 3.6 8 2zM5 9.5 3.2 12l2.6-.2M11 9.5l1.8 2.5-2.6-.2M8 11.5V14M7 6.3a1 1 0 1 0 2 0a1 1 0 1 0-2 0",
+        fix: "M10.5 2.5a3 3 0 0 0-2.9 4L3 11.1a1.4 1.4 0 0 0 2 2l4.6-4.6a3 3 0 0 0 4-2.9l-1.8 1.8-1.8-.4-.4-1.8z",
+        failure: "M8 2.5 14 13H2zM8 6.5v3M8 11.3v.2",
+        review: "M3 7a4 4 0 1 0 8 0a4 4 0 1 0-8 0M10 10l3.5 3.5",
+        research: "M2.5 8a5.5 5.5 0 1 0 11 0a5.5 5.5 0 1 0-11 0M10.5 5.5 9 9 5.5 10.5 7 7z",
+        design: "M3 13l.6-2.8L10.4 3.4a1.4 1.4 0 0 1 2 2L5.6 12.2zM9.4 4.4l2 2",
+        question: "M2.5 8a5.5 5.5 0 1 0 11 0a5.5 5.5 0 1 0-11 0M6.3 6.3a1.8 1.8 0 1 1 2.5 1.6c-.5.2-.8.6-.8 1.1v.4M8 11.3v.2",
+        test: "M6 2.5h4M6.7 2.5v4L3.5 12.3A1 1 0 0 0 4.4 13.8h7.2a1 1 0 0 0 .9-1.5L9.3 6.5v-4",
+        perf: "M9 2 4 9h4l-1 5 5-7H8z"
+    })
+    function categoryColor(category) {
         const palette = theme.terminalPalette
-        return iconPalette(theme.background, theme.foreground, theme.accent, theme.success, theme.urgent,
-                           palette.length > 3 ? palette[3] : theme.accent)
-    }
-
-    // A model's little 9×9 picture: each key a pixel two pixels wide, in the
-    // colors above, with drover's own dark contour a pixel wide around it.
-    component PixelIcon: Canvas {
-        id: pixels
-        property var rows: []
-        width: 20
-        height: 20
-        smooth: false
-        antialiasing: false
-        onRowsChanged: requestPaint()
-        Connections {
-            target: overview
-            function onIconColorsChanged() { pixels.requestPaint() }
+        const named = index => palette.length > index ? palette[index] : theme.accent
+        switch (category) {
+        case "release": return theme.success
+        case "fix": case "failure": case "perf": return theme.urgent
+        case "idea": case "design": return named(3)
+        case "question": return named(5)
+        case "review": case "research": return named(6)
         }
-        onPaint: {
-            const context = getContext("2d")
-            context.clearRect(0, 0, width, height)
-            const colors = overview.iconColors
-            // The contour: every filled pixel, a pixel wider all round, in ink.
-            context.fillStyle = colors.o
-            for (let y = 0; y < rows.length; ++y)
-                for (let x = 0; x < rows[y].length; ++x)
-                    if (rows[y][x] !== "." && colors[rows[y][x]])
-                        context.fillRect(2 * x, 2 * y, 4, 4)
-            for (let y = 0; y < rows.length; ++y)
-                for (let x = 0; x < rows[y].length; ++x) {
-                    const key = rows[y][x]
-                    if (key === "." || !colors[key])
-                        continue
-                    context.fillStyle = colors[key]
-                    context.fillRect(1 + 2 * x, 1 + 2 * y, 2, 2)
-                }
+        return named(4)
+    }
+    component CategoryIcon: Shape {
+        id: icon
+        property string category: ""
+        width: 16
+        height: 16
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+            strokeColor: overview.categoryColor(icon.category)
+            strokeWidth: 1.6
+            fillColor: "transparent"
+            capStyle: ShapePath.RoundCap
+            joinStyle: ShapePath.RoundJoin
+            PathSvg { path: overview.categoryIcons[icon.category] || "" }
         }
     }
 
@@ -913,8 +884,7 @@ Rectangle {
                  || (summary.length > 0 && summary[0].kind === "fail")
         const last = batches.length > 0 ? batches[batches.length - 1] : null
         return { version: version, failed: failed, reviews: reviews, running: running,
-                 icon: last && last.icon && last.icon.length === 9 ? last.icon : [],
-                 motifs: last && last.motifs ? last.motifs.filter(rows => rows.length === 9) : [],
+                 category: last && last.category && overview.categoryIcons[last.category] ? last.category : "",
                  headline: summary.length > 0 ? summary[0].text : "" }
     }
 
@@ -968,7 +938,7 @@ Rectangle {
                     id: station
                     objectName: "station" + entry.index
                     width: parent.width
-                    height: Math.max(stationText.implicitHeight + 4, 22)
+                    height: Math.max(stationText.implicitHeight + 4, 20)
                     HoverHandler { id: stationHover }
                     // The station in view, marked.
                     Rectangle {
@@ -984,14 +954,13 @@ Rectangle {
                         text: entry.time ? Qt.formatTime(entry.time, "HH:mm") : "     "
                         color: overview.dim
                     }
-                    // The turn's little picture, drawn by the model with its
-                    // summary, in the theme's colors: on a plain station only,
-                    // so a release, a failure and the robot keep their marks.
-                    PixelIcon {
+                    // The turn's category, on a plain station: a release, a
+                    // failure and the robot keep their marks.
+                    CategoryIcon {
                         id: stationIcon
                         objectName: "stationIcon" + entry.index
-                        rows: entry.metro.icon
-                        visible: rows.length === 9 && !stationMark.busy && !entry.metro.failed && entry.metro.version === ""
+                        category: entry.metro.category
+                        visible: category !== "" && !stationMark.busy && !entry.metro.failed && entry.metro.version === ""
                         // Centred on the line, on whole pixels.
                         x: Math.round(overview.metroIndent + metroMetrics.advanceWidth("│") / 2 - width / 2)
                         y: Math.round((parent.height - height) / 2)
@@ -1085,32 +1054,11 @@ Rectangle {
                         maximumLineCount: 1
                     }
                 }
-                // The line on to the next station, or on to now, with what else
-                // the turn touched beside it.
-                Item {
-                    width: stops.width
-                    height: Math.max(lineText.implicitHeight, entry.metro.motifs.length > 0 ? 22 : 0)
-                    Text {
-                        id: lineText
-                        x: overview.metroIndent
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: entry.newest ? "┆" : "│"
-                        color: overview.dim
-                    }
-                    Row {
-                        x: Math.round(overview.metroIndent + Math.max(metroMetrics.advanceWidth("● "), 22))
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: 4
-                        Repeater {
-                            model: entry.metro.motifs
-                            delegate: PixelIcon {
-                                required property var modelData
-                                required property int index
-                                objectName: "motif" + entry.index + "_" + index
-                                rows: modelData
-                            }
-                        }
-                    }
+                // The line on to the next station, or on to now.
+                Text {
+                    x: overview.metroIndent
+                    text: entry.newest ? "┆" : "│"
+                    color: overview.dim
                 }
                 Text {
                     visible: entry.newest
