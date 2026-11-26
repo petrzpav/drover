@@ -827,11 +827,14 @@ Rectangle {
                 lastWork = point
         }
         // Out of service: its last step failed (not one retried after), it was
-        // interrupted, or its summary says something failed.
+        // interrupted, or its headline is a failure (a failure along the way,
+        // in a later point, doesn't stop the line).
         const summary = batches.length > 0 ? batches[batches.length - 1].points : []
         failed = failed || (lastWork !== null && (lastWork.state === "failed" || lastWork.state === "denied"))
-                 || summary.some(point => point.kind === "fail")
+                 || (summary.length > 0 && summary[0].kind === "fail")
+        const last = batches.length > 0 ? batches[batches.length - 1] : null
         return { version: version, failed: failed, reviews: reviews,
+                 icon: last && last.icon && last.icon.length === 8 ? last.icon : [],
                  headline: summary.length > 0 ? summary[0].text : "" }
     }
 
@@ -901,9 +904,43 @@ Rectangle {
                         text: entry.time ? Qt.formatTime(entry.time, "HH:mm") : "     "
                         color: overview.dim
                     }
+                    // The turn's little picture, drawn by the model with its
+                    // summary, in the theme's colors: on a plain station only,
+                    // so a release, a failure and the robot keep their marks.
+                    Canvas {
+                        id: stationIcon
+                        objectName: "stationIcon" + entry.index
+                        readonly property var rows: entry.metro.icon
+                        visible: rows.length === 8 && !stationMark.busy && !entry.metro.failed && entry.metro.version === ""
+                        // Centred on the line.
+                        x: overview.metroIndent + metroMetrics.advanceWidth("│") / 2 - width / 2
+                        y: (parent.height - height) / 2
+                        width: 16
+                        height: 16
+                        onRowsChanged: requestPaint()
+                        Connections {
+                            target: theme
+                            function onChanged() { stationIcon.requestPaint() }
+                        }
+                        onPaint: {
+                            const context = getContext("2d")
+                            context.clearRect(0, 0, width, height)
+                            const colors = { f: theme.foreground, a: theme.accent, g: theme.success, r: theme.urgent,
+                                             d: Qt.tint(theme.background, overview.dim) }
+                            for (let y = 0; y < rows.length; ++y)
+                                for (let x = 0; x < rows[y].length; ++x) {
+                                    const key = rows[y][x]
+                                    if (key === "." || !colors[key])
+                                        continue
+                                    context.fillStyle = colors[key]
+                                    context.fillRect(x * 2, y * 2, 2, 2)
+                                }
+                        }
+                    }
                     Text {
                         id: stationMark
                         objectName: "stationMark" + entry.index
+                        visible: !stationIcon.visible
                         x: overview.metroIndent
                         // The robot on the station it works at.
                         readonly property bool busy: entry.newest && overview.working
@@ -915,7 +952,7 @@ Rectangle {
                     Text {
                         id: stationText
                         objectName: "stationText" + entry.index
-                        x: overview.metroIndent + metroMetrics.advanceWidth("● ")
+                        x: overview.metroIndent + Math.max(metroMetrics.advanceWidth("● "), 20)
                         y: 2
                         width: parent.width - x
                         text: entry.metro.version !== "" ? "═══ " + entry.metro.version

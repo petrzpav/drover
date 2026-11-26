@@ -500,6 +500,28 @@ private slots:
         QVERIFY(!items[0].branch);
     }
 
+    void aTurnsIconIsEightByEight()
+    {
+        const QJsonArray rocket{"...aa...", "..afga..", "..affa..", "..affa..", ".affffa.", "afaffafa", "..r..r..", ".r....r."};
+        QCOMPARE(Timeline::fitIcon(rocket).size(), 8);
+        // Short rows are filled out; anything else is no icon.
+        QJsonArray shortRows = rocket;
+        shortRows[0] = "..aa";
+        QCOMPARE(Timeline::fitIcon(shortRows).first(), QString("..aa...."));
+        QJsonArray wrongKey = rocket;
+        wrongKey[1] = "..<b>..";
+        QVERIFY(Timeline::fitIcon(wrongKey).isEmpty());
+        QVERIFY(Timeline::fitIcon(QJsonArray{"ffff", "ffff"}).isEmpty());
+        QJsonArray seven = rocket;
+        seven.removeLast();
+        QCOMPARE(Timeline::fitIcon(seven).last(), QString("........"));
+        QJsonArray empty;
+        for (int i = 0; i < 8; ++i)
+            empty.append("........");
+        QVERIFY(Timeline::fitIcon(empty).isEmpty());
+        QVERIFY(Timeline::summaryInstructions(false).contains("\"icon\""));
+    }
+
     void theTimelineKnowsWhatChangesTheWorld()
     {
         QVERIFY(TimelineParser::isMilestone("git commit -m x"));

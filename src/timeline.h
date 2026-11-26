@@ -211,6 +211,9 @@ public:
     // and the drawing cut to them.
     static constexpr int VisualLines = 10, VisualColumns = 64;
     static QString fitVisual(const QString &visual);
+    // A turn's icon as the model drew it, 8 rows of 8 keys (. f a g r d),
+    // or none when it isn't one.
+    static QStringList fitIcon(const QJsonValue &icon);
 
 signals:
     void sessionChanged();
@@ -251,6 +254,8 @@ private:
     struct Batch {
         int to = 0;
         QVariantList points;
+        // A little picture of the turn: 8 rows of 8 colour keys.
+        QStringList icon;
     };
     void loadSummaries();
     static QHash<QString, QList<Batch>> readCache(const QString &cache, const QString &session);

@@ -161,7 +161,9 @@ On the right, where the panel has room, the turns run as a metro line: a
 station per turn with its time and headline, a release an interchange
 (`◉═══ v0.9.0`), a subagent or review a branch that comes back (`└◇`), a
 failed or interrupted turn a station out of service (`✗`), and at its end
-`▼ now`, with the robot bobbing on the station at work. The station in view
+`▼ now`, with the robot bobbing on the station at work. A plain station
+shows a little 8×8 pixel picture the model draws with the turn's summary (a
+rocket, a magnifier, a bug, a sheep…), in the theme's colors. The station in view
 is marked; a click goes to it, and the button above hides the line. `PgUp` and `PgDn` page the conversation, also from the message
 field; `Ctrl+Home` and `Ctrl+End` go to its start and end. When Claude
 parks a conversation as a job in the background, the overview follows it to

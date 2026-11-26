@@ -954,7 +954,7 @@ QVariantMap Timeline::rowOf(const TimelineParser::Turn &turn) const {
     // The latest summary sums up the turn up to where it reaches.
     if (const QList<Batch> kept = m_summaries.value(turn.uuid); !kept.isEmpty()) {
         points = kept.last().points;
-        batches << QVariantMap{{"from", 0}, {"to", kept.last().to}, {"points", points}};
+        batches << QVariantMap{{"from", 0}, {"to", kept.last().to}, {"points", points}, {"icon", kept.last().icon}};
         covered = kept.last().to;
     }
     return {{"serial", turn.serial}, {"prompt", turn.prompt}, {"time", turn.time}, {"items", items},
@@ -1003,7 +1003,11 @@ QString Timeline::summaryInstructions(bool more) {
               "what is open or waits for the user. Leave out routine steps such as reading files or tests that passed.\n"
               "Reply with JSON only: {\"points\":[{\"text\":\"...\",\"kind\":\"done|change|ship|fail|ask|open|note\","
               "\"step\":N,\"visual\":\"...\"}]} where step is the number of the step the point is mostly about "
-              "and visual is optional (below).\n"
+              "and visual is optional (below), and add \"icon\":[8 strings of 8 characters].\n"
+              "Icon: a tiny 8 by 8 pixel picture of what the turn was about, for its station on a timeline: a "
+              "rocket for a release, a magnifier for a review, a bug for a fix, a gear, a page, a chart, a sheep, "
+              "whatever fits; simple and readable at 16 pixels. Each character is a pixel: . empty, f the text "
+              "color, a the accent, g green, r red, d quiet grey.\n"
               "Pictures: the user takes in a picture faster than sentences. When the turn went through stages "
               "(where it stands now), tried several cases (a checklist of what works and what's left), touched "
               "several files or parts (a tree), changed numbers (before and after) or compared things (a chart), add \"visual\" to the point it belongs to: a small drawing in plain "
@@ -1060,6 +1064,25 @@ int cellsOfLine(const QString &line) {
 // A drawing as the overview can show it: at most VisualLines lines of
 // VisualColumns cells (marks not counted, a character never cut in half), no
 // tabs or control characters, no empty lines around it.
+QStringList Timeline::fitIcon(const QJsonValue &icon) {
+    static const QRegularExpression row("^[.fagrd]{1,8}$");
+    QStringList rows;
+    for (const QJsonValue &value : icon.toArray()) {
+        const QString line = value.toString().trimmed();
+        if (!row.match(line).hasMatch())
+            return {};
+        rows << line.leftJustified(8, '.');
+    }
+    // A row or three short (models count poorly): empty rows make it 8.
+    if (rows.size() < 5 || rows.size() > 8)
+        return {};
+    while (rows.size() < 8)
+        rows << QStringLiteral("........");
+    if (rows.join(QString()).count('.') == 64)
+        return {};
+    return rows;
+}
+
 QString Timeline::fitVisual(const QString &visual) {
     const QRegularExpression &mark = visualMark();
     QStringList lines;
@@ -1158,7 +1181,8 @@ QHash<QString, QList<Timeline::Batch>> Timeline::readCache(const QString &cache,
         if (kept.size() != 1)
             continue;
         const QJsonObject object = kept.first().toObject();
-        summaries.insert(it.key(), {{object.value("to").toInt(), object.value("points").toArray().toVariantList()}});
+        summaries.insert(it.key(), {{object.value("to").toInt(), object.value("points").toArray().toVariantList(),
+                                     fitIcon(object.value("icon"))}});
     }
     return summaries;
 }
@@ -1171,7 +1195,8 @@ void Timeline::saveSummaries(const QString &session, const QHash<QString, QList<
     for (auto it = summaries.begin(); it != summaries.end(); ++it) {
         QJsonArray batches;
         for (const Batch &batch : it.value())
-            batches.append(QJsonObject{{"to", batch.to}, {"points", QJsonArray::fromVariantList(batch.points)}});
+            batches.append(QJsonObject{{"to", batch.to}, {"points", QJsonArray::fromVariantList(batch.points)},
+                                       {"icon", QJsonArray::fromStringList(batch.icon)}});
         turns.insert(it.key(), batches);
     }
     QDir().mkpath(m_cache);
@@ -1302,8 +1327,8 @@ void Timeline::summaryDone(int code) {
     const QJsonObject reply = QJsonDocument::fromJson(out).object();
     const QString result = reply.value("result").toString();
     const int open = result.indexOf('{'), close = result.lastIndexOf('}');
-    const QJsonArray points = QJsonDocument::fromJson(result.mid(open, close - open + 1).toUtf8())
-                                  .object().value("points").toArray();
+    const QJsonObject answer = QJsonDocument::fromJson(result.mid(open, close - open + 1).toUtf8()).object();
+    const QJsonArray points = answer.value("points").toArray();
     if (code != 0 || reply.value("is_error").toBool()) {
         // A usage limit, or claude not working: summaries rest a while.
         const bool limit = QString::fromUtf8(out).contains(QLatin1String("limit"), Qt::CaseInsensitive);
@@ -1325,6 +1350,10 @@ void Timeline::summaryDone(int code) {
     static const QStringList kinds{"done", "change", "ship", "fail", "ask", "open", "note"};
     Batch batch;
     batch.to = job.to;
+    // Its icon, or the one it had while the model drew none this time.
+    batch.icon = fitIcon(answer.value("icon"));
+    if (batch.icon.isEmpty() && job.session == m_session && !m_summaries.value(job.uuid).isEmpty())
+        batch.icon = m_summaries.value(job.uuid).last().icon;
     for (const QJsonValue &value : points) {
         const QJsonObject point = value.toObject();
         const QString text = point.value("text").toString().simplified();

@@ -20,4 +20,4 @@ if [ -e "$DROVER_TEST_DIR/fail" ]; then
   echo '{"type":"result","is_error":true,"result":"Usage limit reached"}'
   exit 1
 fi
-echo '{"type":"result","is_error":false,"result":"Here: {\"points\":[{\"text\":\"Done it\",\"kind\":\"done\",\"step\":2}]}"}'
+echo '{"type":"result","is_error":false,"result":"Here: {\"points\":[{\"text\":\"Done it\",\"kind\":\"done\",\"step\":2}],\"icon\":[\"..ffff..\",\".f....f.\",\"f.a..a.f\",\"f......f\",\"f.g..g.f\",\"f..gg..f\",\".f....f.\",\"..ffff..\"]}"}'
