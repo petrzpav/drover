@@ -254,8 +254,10 @@ private:
     struct Batch {
         int to = 0;
         QVariantList points;
-        // A little picture of the turn: 8 rows of 8 colour keys.
+        // A little picture of the turn: 8 rows of 8 colour keys; and one or
+        // two more of what else it touched, for the line after its station.
         QStringList icon;
+        QVariantList motifs;
     };
     void loadSummaries();
     static QHash<QString, QList<Batch>> readCache(const QString &cache, const QString &session);

@@ -515,6 +515,11 @@ private slots:
         QJsonArray seven = rocket;
         seven.removeLast();
         QCOMPARE(Timeline::fitIcon(seven).last(), QString("........"));
+        // One string of rows on lines of their own is the same icon.
+        QStringList lines;
+        for (const QJsonValue &value : rocket)
+            lines << value.toString();
+        QCOMPARE(Timeline::fitIcon(QJsonValue(lines.join('\n'))), Timeline::fitIcon(rocket));
         QJsonArray empty;
         for (int i = 0; i < 8; ++i)
             empty.append("........");

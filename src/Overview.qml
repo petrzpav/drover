@@ -281,6 +281,34 @@ Rectangle {
         onClicked: overview.focusInput()
     }
 
+    // A model's little 8×8 picture: each key a pixel two pixels wide, in the
+    // theme's colors.
+    component PixelIcon: Canvas {
+        id: pixels
+        property var rows: []
+        width: 16
+        height: 16
+        onRowsChanged: requestPaint()
+        Connections {
+            target: theme
+            function onChanged() { pixels.requestPaint() }
+        }
+        onPaint: {
+            const context = getContext("2d")
+            context.clearRect(0, 0, width, height)
+            const colors = { f: theme.foreground, a: theme.accent, g: theme.success, r: theme.urgent,
+                             d: Qt.tint(theme.background, overview.dim) }
+            for (let y = 0; y < rows.length; ++y)
+                for (let x = 0; x < rows[y].length; ++x) {
+                    const key = rows[y][x]
+                    if (key === "." || !colors[key])
+                        continue
+                    context.fillStyle = colors[key]
+                    context.fillRect(x * 2, y * 2, 2, 2)
+                }
+        }
+    }
+
     // One point: its mark, its text in two lines at most, and opened, all of
     // it: the whole text (the agent's words as Markdown), its answer or
     // error, every command of a run.
@@ -835,6 +863,7 @@ Rectangle {
         const last = batches.length > 0 ? batches[batches.length - 1] : null
         return { version: version, failed: failed, reviews: reviews,
                  icon: last && last.icon && last.icon.length === 8 ? last.icon : [],
+                 motifs: last && last.motifs ? last.motifs.filter(rows => rows.length === 8) : [],
                  headline: summary.length > 0 ? summary[0].text : "" }
     }
 
@@ -907,35 +936,14 @@ Rectangle {
                     // The turn's little picture, drawn by the model with its
                     // summary, in the theme's colors: on a plain station only,
                     // so a release, a failure and the robot keep their marks.
-                    Canvas {
+                    PixelIcon {
                         id: stationIcon
                         objectName: "stationIcon" + entry.index
-                        readonly property var rows: entry.metro.icon
+                        rows: entry.metro.icon
                         visible: rows.length === 8 && !stationMark.busy && !entry.metro.failed && entry.metro.version === ""
                         // Centred on the line.
                         x: overview.metroIndent + metroMetrics.advanceWidth("│") / 2 - width / 2
                         y: (parent.height - height) / 2
-                        width: 16
-                        height: 16
-                        onRowsChanged: requestPaint()
-                        Connections {
-                            target: theme
-                            function onChanged() { stationIcon.requestPaint() }
-                        }
-                        onPaint: {
-                            const context = getContext("2d")
-                            context.clearRect(0, 0, width, height)
-                            const colors = { f: theme.foreground, a: theme.accent, g: theme.success, r: theme.urgent,
-                                             d: Qt.tint(theme.background, overview.dim) }
-                            for (let y = 0; y < rows.length; ++y)
-                                for (let x = 0; x < rows[y].length; ++x) {
-                                    const key = rows[y][x]
-                                    if (key === "." || !colors[key])
-                                        continue
-                                    context.fillStyle = colors[key]
-                                    context.fillRect(x * 2, y * 2, 2, 2)
-                                }
-                        }
                     }
                     Text {
                         id: stationMark
@@ -992,11 +1000,32 @@ Rectangle {
                         maximumLineCount: 1
                     }
                 }
-                // The line on to the next station, or on to now.
-                Text {
-                    x: overview.metroIndent
-                    text: entry.newest ? "┆" : "│"
-                    color: overview.dim
+                // The line on to the next station, or on to now, with what else
+                // the turn touched beside it.
+                Item {
+                    width: stops.width
+                    height: Math.max(lineText.implicitHeight, entry.metro.motifs.length > 0 ? 18 : 0)
+                    Text {
+                        id: lineText
+                        x: overview.metroIndent
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: entry.newest ? "┆" : "│"
+                        color: overview.dim
+                    }
+                    Row {
+                        x: overview.metroIndent + Math.max(metroMetrics.advanceWidth("● "), 20)
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 6
+                        Repeater {
+                            model: entry.metro.motifs
+                            delegate: PixelIcon {
+                                required property var modelData
+                                required property int index
+                                objectName: "motif" + entry.index + "_" + index
+                                rows: modelData
+                            }
+                        }
+                    }
                 }
                 Text {
                     visible: entry.newest

@@ -954,7 +954,8 @@ QVariantMap Timeline::rowOf(const TimelineParser::Turn &turn) const {
     // The latest summary sums up the turn up to where it reaches.
     if (const QList<Batch> kept = m_summaries.value(turn.uuid); !kept.isEmpty()) {
         points = kept.last().points;
-        batches << QVariantMap{{"from", 0}, {"to", kept.last().to}, {"points", points}, {"icon", kept.last().icon}};
+        batches << QVariantMap{{"from", 0}, {"to", kept.last().to}, {"points", points}, {"icon", kept.last().icon},
+                               {"motifs", kept.last().motifs}};
         covered = kept.last().to;
     }
     return {{"serial", turn.serial}, {"prompt", turn.prompt}, {"time", turn.time}, {"items", items},
@@ -1003,11 +1004,16 @@ QString Timeline::summaryInstructions(bool more) {
               "what is open or waits for the user. Leave out routine steps such as reading files or tests that passed.\n"
               "Reply with JSON only: {\"points\":[{\"text\":\"...\",\"kind\":\"done|change|ship|fail|ask|open|note\","
               "\"step\":N,\"visual\":\"...\"}]} where step is the number of the step the point is mostly about "
-              "and visual is optional (below), and add \"icon\":[8 strings of 8 characters].\n"
+              "and visual is optional (below), and add \"icon\" and \"motifs\" (below), like "
+              "\"icon\":[\"..ffff..\",\".f....f.\",\"f.a..a.f\",\"f......f\",\"f.g..g.f\",\"f..gg..f\",\".f....f.\",\"..ffff..\"],"
+              "\"motifs\":[[8 such strings],[8 such strings]].\n"
               "Icon: a tiny 8 by 8 pixel picture of what the turn was about, for its station on a timeline: a "
               "rocket for a release, a magnifier for a review, a bug for a fix, a gear, a page, a chart, a sheep, "
               "whatever fits; simple and readable at 16 pixels. Each character is a pixel: . empty, f the text "
               "color, a the accent, g green, r red, d quiet grey.\n"
+              "Motifs: one or two more such tiny pictures of other things the turn touched or met (a key, an "
+              "envelope, a window, ice for a freeze, a package, a test tube), shown beside the timeline after "
+              "the station; an array of icons, each an array of 8 strings; [] when nothing fits.\n"
               "Pictures: the user takes in a picture faster than sentences. When the turn went through stages "
               "(where it stands now), tried several cases (a checklist of what works and what's left), touched "
               "several files or parts (a tree), changed numbers (before and after) or compared things (a chart), add \"visual\" to the point it belongs to: a small drawing in plain "
@@ -1067,7 +1073,12 @@ int cellsOfLine(const QString &line) {
 QStringList Timeline::fitIcon(const QJsonValue &icon) {
     static const QRegularExpression row("^[.fagrd]{1,8}$");
     QStringList rows;
-    for (const QJsonValue &value : icon.toArray()) {
+    // Its rows, or one string of rows on lines of their own.
+    QJsonArray lines = icon.toArray();
+    if (icon.isString())
+        for (const QString &line : icon.toString().split('\n', Qt::SkipEmptyParts))
+            lines.append(line);
+    for (const QJsonValue &value : std::as_const(lines)) {
         const QString line = value.toString().trimmed();
         if (!row.match(line).hasMatch())
             return {};
@@ -1181,8 +1192,12 @@ QHash<QString, QList<Timeline::Batch>> Timeline::readCache(const QString &cache,
         if (kept.size() != 1)
             continue;
         const QJsonObject object = kept.first().toObject();
+        QVariantList motifs;
+        for (const QJsonValue &motif : object.value("motifs").toArray())
+            if (const QStringList rows = fitIcon(motif); !rows.isEmpty() && motifs.size() < 2)
+                motifs << QVariant(rows);
         summaries.insert(it.key(), {{object.value("to").toInt(), object.value("points").toArray().toVariantList(),
-                                     fitIcon(object.value("icon"))}});
+                                     fitIcon(object.value("icon")), motifs}});
     }
     return summaries;
 }
@@ -1196,7 +1211,8 @@ void Timeline::saveSummaries(const QString &session, const QHash<QString, QList<
         QJsonArray batches;
         for (const Batch &batch : it.value())
             batches.append(QJsonObject{{"to", batch.to}, {"points", QJsonArray::fromVariantList(batch.points)},
-                                       {"icon", QJsonArray::fromStringList(batch.icon)}});
+                                       {"icon", QJsonArray::fromStringList(batch.icon)},
+                                       {"motifs", QJsonArray::fromVariantList(batch.motifs)}});
         turns.insert(it.key(), batches);
     }
     QDir().mkpath(m_cache);
@@ -1354,6 +1370,9 @@ void Timeline::summaryDone(int code) {
     batch.icon = fitIcon(answer.value("icon"));
     if (batch.icon.isEmpty() && job.session == m_session && !m_summaries.value(job.uuid).isEmpty())
         batch.icon = m_summaries.value(job.uuid).last().icon;
+    for (const QJsonValue &motif : answer.value("motifs").toArray())
+        if (const QStringList rows = fitIcon(motif); !rows.isEmpty() && batch.motifs.size() < 2)
+            batch.motifs << QVariant(rows);
     for (const QJsonValue &value : points) {
         const QJsonObject point = value.toObject();
         const QString text = point.value("text").toString().simplified();

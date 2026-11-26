@@ -619,7 +619,11 @@ private slots:
             // A seedling for the station.
             const QJsonArray seedling{"...gg...", "..g..g..", "...gg.g.", ".gg.g...", "g...g...", "....g...", "..dddd..", ".dddddd."};
             write(rig.dir.filePath("reply.json"), QJsonDocument(QJsonObject{{"type", "result"}, {"is_error", false},
-                {"result", QString::fromUtf8(QJsonDocument(QJsonObject{{"points", points}, {"icon", seedling}}).toJson(QJsonDocument::Compact))}})
+                {"result", QString::fromUtf8(QJsonDocument(QJsonObject{{"points", points}, {"icon", seedling},
+                    // A calendar and a watering can beside the line.
+                    {"motifs", QJsonArray{QJsonArray{"ffffffff", "f.r..r.f", "ffffffff", "f......f", "f.d.d.df", "f......f", "f.d.d.af", "ffffffff"},
+                                          QJsonArray{"........", "....aa..", "...a..a.", "aaaaaa..", ".affff..", ".affff.a", ".afffffa", "..ffff.."}}}})
+                    .toJson(QJsonDocument::Compact))}})
                 .toJson(QJsonDocument::Compact));
             qputenv("DROVER_TEST_DIR", rig.dir.path().toUtf8());
             rig.timeline->setCacheDirectory(rig.dir.filePath("cache"));
@@ -1187,6 +1191,9 @@ private slots:
         QTRY_VERIFY(rig.find("outline0") && rig.find("outline0")->property("current").toBool());
         // The turn summed up has its little picture on its station.
         QTRY_VERIFY(rig.find("stationIcon0") && rig.find("stationIcon0")->isVisible());
+        // And what else it touched, beside the line after it.
+        QTRY_VERIFY(rig.find("motif0_0") && rig.find("motif0_0")->isVisible());
+        QVERIFY(!rig.find("motif0_1"));
         QVERIFY(!rig.find("stationMark0")->isVisible());
         QMetaObject::invokeMethod(outline, "positionViewAtEnd");
         QTRY_VERIFY(rig.find("outline12"));
