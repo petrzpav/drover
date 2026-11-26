@@ -69,7 +69,7 @@ Rectangle {
     Timer {
         interval: 330
         repeat: true
-        running: overview.visible && overview.working
+        running: overview.visible && (overview.working || timeline.summarizing)
         onTriggered: overview.beat = !overview.beat
         onRunningChanged: overview.beat = false
     }
@@ -215,6 +215,8 @@ Rectangle {
         required property var point
         // Open whatever was clicked (the newest turn's last reply is).
         property bool forceOpen: false
+        // The model sums this point up now (the first of those in view).
+        property bool summing: false
         readonly property string key: "point" + point.id
         readonly property bool open: forceOpen || overview.opened[key] === true
         readonly property bool failed: point.state === "failed" || point.state === "denied"
@@ -227,7 +229,7 @@ Rectangle {
         HoverHandler { id: hoverRow }
 
         Text {
-            readonly property bool busy: row.point.state === "running" && overview.working
+            readonly property bool busy: (row.point.state === "running" && overview.working) || row.summing
             x: 8
             y: 3 - (busy && overview.beat ? 2 : 0)
             width: 18
@@ -349,6 +351,8 @@ Rectangle {
             required property var batches
             required property int covered
             required property bool summarizing
+            required property int summarizingFrom
+            required property int summarizingTo
             width: ListView.view.width
             height: column.implicitHeight
             // The summary as shown: as it is when the turn comes into view,
@@ -543,6 +547,12 @@ Rectangle {
                                                     : turn.summary.length > 0 ? 1 : overview.newest)
                                                    + 20 * (overview.opened["more" + turn.serial] || 0)
                 readonly property int shownFrom: Math.max(pointsFrom, turn.items.length - pointsShown)
+                // The first point in view the model sums up now.
+                readonly property int summingId: {
+                    const at = Math.max(turn.summarizingFrom, shownFrom)
+                    return turn.summarizing && turn.summarizingFrom >= 0 && at < turn.summarizingTo && at < turn.items.length
+                           ? turn.items[at].id : -1
+                }
                 Rectangle {
                     objectName: "earlier" + turn.serial
                     visible: column.shownFrom > column.pointsFrom && (!turn.compact || turn.detailed)
@@ -590,6 +600,7 @@ Rectangle {
                         required property int index
                         point: modelData
                         forceOpen: turn.finalReply && modelData.id === turn.lastPoint.id
+                        summing: modelData.id === column.summingId
                         x: turn.detailed ? 24 : 0
                         width: column.width - x
                     }

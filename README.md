@@ -189,7 +189,8 @@ answers, what you typed while it worked, what it said and Claude's recaps are
 there as well. Reading and searching are left out.
 
 While the agent works, its robot bobs on the point it is at, or on
-"Thinking…" when no tool runs, so you see at a glance whether it is at work.
+"Thinking…" when no tool runs, so you see at a glance whether it is at work;
+while the model sums a turn up, it bobs on the first point being summed up.
 
 Click a summary point to open the points it sums up, and a point to open it
 where it is: the agent's words in full (as Markdown, its pictures as links,

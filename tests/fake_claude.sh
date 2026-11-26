@@ -6,6 +6,8 @@
 # $DROVER_TEST_DIR/reply.json while that exists.
 echo "$@" >> "$DROVER_TEST_DIR/calls"
 cat >> "$DROVER_TEST_DIR/input"
+# A slow model, while $DROVER_TEST_DIR/slow exists.
+[ -e "$DROVER_TEST_DIR/slow" ] && sleep 1
 if [ -e "$DROVER_TEST_DIR/reply.json" ]; then
   cat "$DROVER_TEST_DIR/reply.json"
   exit 0

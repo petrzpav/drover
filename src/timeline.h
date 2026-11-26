@@ -134,6 +134,8 @@ class Timeline : public QAbstractListModel {
     Q_PROPERTY(QString state READ state NOTIFY stateChanged)
     Q_PROPERTY(QString activity READ activity NOTIFY progressChanged)
     Q_PROPERTY(QString lastSaid READ lastSaid NOTIFY progressChanged)
+    // The model is summing up a turn right now.
+    Q_PROPERTY(bool summarizing READ summarizing NOTIFY summarizingChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
 
 public:
@@ -141,7 +143,7 @@ public:
     // points sum up the turn's points from..to), covered: the points the
     // batches sum up.
     enum Role { SerialRole = Qt::UserRole + 1, PromptRole, TimeRole, ItemsRole, DurationRole, PointsRole,
-                CoveredRole, SummarizingRole, BatchesRole, EndedRole };
+                CoveredRole, SummarizingRole, BatchesRole, EndedRole, SummarizingFromRole, SummarizingToRole };
 
     explicit Timeline(QObject *parent = nullptr);
     ~Timeline() override;
@@ -157,6 +159,7 @@ public:
     QString state() const { return m_state; }
     QString activity() const { return m_activity; }
     QString lastSaid() const { return m_lastSaid; }
+    bool summarizing() const { return !m_child.isNull(); }
     int count() const { return m_rows.size(); }
 
     // Where Claude keeps its transcripts, ~/.claude/projects; tests use their own.
@@ -198,6 +201,7 @@ signals:
     void activeChanged();
     void stateChanged();
     void progressChanged();
+    void summarizingChanged();
     void countChanged();
 
 private:

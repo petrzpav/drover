@@ -1099,7 +1099,13 @@ private slots:
         QTRY_VERIFY(rig.find("point2"));
         QTest::mouseMove(rig.window, rig.find("point2")->mapToScene(QPointF(40, 5)).toPoint());
         QTest::qWait(100);
+        // While the model sums the turn up, the robot is on its first point.
+        write(rig.dir.filePath("slow"), "");
         rig.timeline->setSummaryModel("sonnet");
+        QTRY_VERIFY(rig.timeline->summarizing());
+        QTRY_COMPARE(rig.find("point1")->childItems().at(0)->property("text").toString(), QString::fromUtf8("\xf3\xb0\x9a\xa9"));
+        QVERIFY(rig.find("point2")->childItems().at(0)->property("text").toString() != QString::fromUtf8("\xf3\xb0\x9a\xa9"));
+        QFile::remove(rig.dir.filePath("slow"));
         QTRY_COMPARE(rig.timeline->index(0).data(Timeline::PointsRole).toList().size(), 1);
         QTRY_VERIFY(rig.find("point2"));
         QTest::qWait(200);

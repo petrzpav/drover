@@ -728,7 +728,8 @@ int Timeline::rowCount(const QModelIndex &parent) const { return parent.isValid(
 QHash<int, QByteArray> Timeline::roleNames() const {
     return {{SerialRole, "serial"}, {PromptRole, "prompt"}, {TimeRole, "time"}, {ItemsRole, "items"},
             {DurationRole, "duration"}, {PointsRole, "points"}, {CoveredRole, "covered"},
-            {SummarizingRole, "summarizing"}, {BatchesRole, "batches"}, {EndedRole, "ended"}};
+            {SummarizingRole, "summarizing"}, {BatchesRole, "batches"}, {EndedRole, "ended"},
+            {SummarizingFromRole, "summarizingFrom"}, {SummarizingToRole, "summarizingTo"}};
 }
 
 QVariant Timeline::data(const QModelIndex &index, int role) const {
@@ -891,7 +892,10 @@ QVariantMap Timeline::rowOf(const TimelineParser::Turn &turn) const {
     return {{"serial", turn.serial}, {"prompt", turn.prompt}, {"time", turn.time}, {"items", items},
             {"duration", turn.durationMs}, {"points", points}, {"batches", batches},
             {"covered", qMin(covered, int(turn.items.size()))}, {"ended", turn.ended},
-            {"summarizing", m_child && m_job.uuid == turn.uuid && !turn.uuid.isEmpty()}};
+            {"summarizing", m_child && m_job.uuid == turn.uuid && !turn.uuid.isEmpty()},
+            // The points the model sums up now, from..to.
+            {"summarizingFrom", m_child && m_job.uuid == turn.uuid ? m_job.from : -1},
+            {"summarizingTo", m_child && m_job.uuid == turn.uuid ? m_job.to : -1}};
 }
 
 QString Timeline::readSummaryModel(const QString &configFile) {
@@ -1185,6 +1189,7 @@ void Timeline::summarizeNext() {
         m_child->write(input.toUtf8());
         m_child->closeWriteChannel();
         m_childTimeout.start();
+        emit summarizingChanged();
         publish();
         return;
     }
@@ -1208,6 +1213,7 @@ void Timeline::stopSummary() {
     child->kill();
     child->waitForFinished(500);
     child->deleteLater();
+    emit summarizingChanged();
 }
 
 void Timeline::summaryDone(int code) {
@@ -1219,6 +1225,7 @@ void Timeline::summaryDone(int code) {
     const QByteArray out = child->readAllStandardOutput();
     child->disconnect(this);
     child->deleteLater();
+    emit summarizingChanged();
     const Job job = m_job;
     m_job = Job();
 
