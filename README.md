@@ -25,11 +25,10 @@ who needs you, and you answer them without leaving what you're doing.
   opens in a panel: Shift+Tab, Esc, Ctrl+C, menus and colors work as they do in
   herdr. `Alt+↑` `Alt+↓` switch agents instantly, `Super+Alt+H` puts the panel
   over the whole screen, and `Ctrl+B` hides the agent list.
-- **What the agent did, at a glance.** Beside the terminal, an overview
-  lists each of your prompts with what came of it: commands, failures,
-  commits and pushes, edited files, its questions with your answers, and
-  what it said. Click a point and the terminal scrolls to it.
-  `Ctrl+Alt+B` hides it.
+- **What the agent did, at a glance.** `Ctrl+Alt+B` shows the agent's
+  conversation in points instead of its terminal: each of your prompts with
+  what came of it, summed up by a model as it goes on. Click a point to open
+  it, and send the agent a message from the field below.
 - **An editor beside every agent.** `Alt+E` opens [Fresh](https://github.com/sinelaw/fresh)
   in the agent's folder, and `Ctrl+;` opens a shell below it.
 - **New agents in a keystroke.** `Ctrl+P` lists your running agents to jump
@@ -139,7 +138,7 @@ size while it's open and gets herdr's size back when you close it.
 | `Super+H` | Show or hide the panel; with a question on stage, give it the keyboard |
 | `Super+Alt+H` | Put the panel over the whole screen, and back |
 | `Ctrl+B` | In the agent view: show or hide the agent list. Its button stays in the header, red when another agent asks |
-| `Ctrl+Alt+B` | Show or hide the overview of the conversation |
+| `Ctrl+Alt+B` | Switch between the agent's terminal and its conversation in points |
 | `Alt+↑` `Alt+↓` | Pick an agent |
 | `Alt+E` | Switch between the agent and its editor |
 | `Ctrl+;` (editor) | Show or hide a shell below the editor |
@@ -148,40 +147,50 @@ size while it's open and gets herdr's size back when you close it.
 | `Shift`+drag, `Ctrl+Shift+C` `V` | Select, copy, paste |
 | `F1` | All shortcuts |
 
-On the terminal's right is an overview of the selected Claude agent's
-conversation, read from its transcript in `~/.claude/projects`. Each of your
-prompts lists what came of it, a point in two lines at most. Commands in a
-row become one line, with the number of the others after it. A failed or
-refused command gets a red line of its own, and commits, pushes, releases and
-deploys a green one. Files edited with Claude's Edit and Write tools are
-listed too; changes made by shell commands show as those commands'
-descriptions. The agent's questions with your answers, what you typed while
-it worked, what it said and Claude's recaps are there as well. Reading and
-searching are left out.
+### The conversation in points
 
-A model sums up each turn in two to four points as it goes on: `claude -p`
-with Sonnet, one call at a time, on your Claude account. The summary takes
-the place of the points it covers once the pointer is off the overview, so
-nothing moves under it; the newest points show as they come until the next
-batch (four more points and a minute later, or the turn's end). Each
-batch is summed up once and kept in `~/.cache/drover/summaries`. A short turn
-needs no summary, and an older one gets it when you scroll to it. After a
-failed call or a usage limit, summaries rest for a while; `summary = off` in
-the config turns them off.
+![The conversation in points](docs/overview.png)
 
-Click a point and the agent's terminal scrolls to it, with the keyboard; when
-its words aren't there, the terminal goes back to the bottom.
-Claude folds commands and edits into lines like "Ran 3 shell commands", so
-for those it scrolls to the agent's words just before them. The list stays at
-the bottom as the agent goes on, unless you scrolled up. When the panel is
-too narrow for both, the overview lies over the terminal's right side. drover
-reads only the end of a long transcript, and only while the overview shows.
+`Ctrl+Alt+B`, or **overview** in the header's switch, shows the selected
+Claude agent's conversation in points in place of its terminal, which stays
+attached beneath. It is read from the transcript in `~/.claude/projects`, only
+its end at first, then what is appended, and only while it shows; drover
+remembers the view, and `Alt+E` comes back to it from the editor.
+
+Each of your prompts lists what came of it, a point in two lines at most. A
+model sums up each turn in two to four points as it goes on: `claude -p` with
+Sonnet, one call at a time, on your Claude account (about 5 seconds and 4,000
+tokens a call). The summary takes the place of the points it covers once the
+pointer is off the overview, so nothing moves under it; the newest points
+show as they come until the next batch (four more points and a minute later,
+or the turn's end). Each batch is made once and kept in
+`~/.cache/drover/summaries`. A short turn needs no summary, and an older one
+gets it when you scroll to it. After a failed call or a usage limit,
+summaries rest for a while; `summary = off` in the config turns them off.
+
+The points themselves: commands in a row become one line, with the number of
+the others after it. A failed or refused command gets a red line of its own,
+and commits, pushes, releases and deploys a green one. Files edited with
+Claude's Edit and Write tools are listed too; changes made by shell commands
+show as those commands' descriptions. The agent's questions with your
+answers, what you typed while it worked, what it said and Claude's recaps are
+there as well. Reading and searching are left out.
+
+Click a point to open it where it is: the agent's words in full (as
+Markdown), the error, every command of a run, or under a summary point the
+points it sums up. The list stays at the bottom as the agent goes on, unless
+you scrolled up.
+
+The field below sends the agent a message (`herdr agent prompt`): `Enter`
+sends it, `Shift+Enter` starts a new line. An agent at work takes it as it
+goes on, as when typed; not while it asks you something, and not over a draft
+in its own prompt.
 
 Any other key goes to the agent, as in herdr. In the agent view, `Ctrl+B` is
 drover's, not Claude's (run in the background); the editor and the shell keep
 theirs. Mouse wheel and clicks go to herdr too, which scrolls the agent's
-history. drover remembers the full screen, the hidden list and the hidden
-overview, also after a restart.
+history. drover remembers the full screen, the hidden list and the view
+(terminal or points), also after a restart.
 
 ## Configuration
 

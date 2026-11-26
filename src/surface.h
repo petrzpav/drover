@@ -25,7 +25,8 @@ class Surface : public QObject {
     // hidden. Both are kept for the next start, beside the indicator's place.
     Q_PROPERTY(bool fullscreen READ fullscreen WRITE setFullscreen NOTIFY panelStateChanged)
     Q_PROPERTY(bool listHidden READ listHidden WRITE setListHidden NOTIFY panelStateChanged)
-    // The overview of the conversation on the panel's right (Ctrl+Alt+B).
+    // The panel shows the agent's conversation in points rather than its
+    // terminal (Ctrl+Alt+B).
     Q_PROPERTY(bool overviewShown READ overviewShown WRITE setOverviewShown NOTIFY panelStateChanged)
 
 public:
@@ -71,7 +72,7 @@ private:
     QString m_stateFile, m_panelFile, m_focusFlag;
     bool m_fullscreen = false;
     bool m_listHidden = false;
-    bool m_overviewShown = true;
+    bool m_overviewShown = false;
     bool m_expanded = false;
     bool m_stageFocus = false;
     QWindow *m_window = nullptr;

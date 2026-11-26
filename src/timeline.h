@@ -62,18 +62,6 @@ public:
     QString activity() const;
     // The last thing the agent said in the last turn.
     QString lastSaid() const;
-    // Words the agent's terminal shows for a point (index -1: the turn's
-    // prompt), to find it there. The terminal folds commands and edits into
-    // lines like "Ran 3 shell commands", so for those it is the nearest of
-    // the agent's words before them. Short words ("ok", "Done.") would turn
-    // up anywhere, so they give way to longer ones near them.
-    QString needle(qint64 serial, int index) const;
-    // The start of the agent's Markdown as the terminal shows it: its first
-    // line, up to 40 characters at a word, without emphasis, code or list
-    // marks, a link as its text and target in brackets.
-    static QString shownStart(const QString &markdown);
-    // The start of what the user typed, shown as typed.
-    static QString typedStart(const QString &text);
     // A turn's points from `from` up to `to`, numbered from 1, as plain text
     // for a model to summarize.
     QString digest(qint64 serial, int from, int to) const;
@@ -128,8 +116,11 @@ class Timeline : public QAbstractListModel {
     Q_PROPERTY(int count READ count NOTIFY countChanged)
 
 public:
+    // points: every summary point, batches: [{from, to, points}] (a batch's
+    // points sum up the turn's points from..to), covered: the points the
+    // batches sum up.
     enum Role { SerialRole = Qt::UserRole + 1, PromptRole, TimeRole, ItemsRole, DurationRole, PointsRole,
-                CoveredRole, SummarizingRole };
+                CoveredRole, SummarizingRole, BatchesRole };
 
     explicit Timeline(QObject *parent = nullptr);
     ~Timeline() override;
@@ -156,8 +147,6 @@ public:
 
     // Reads the transcript again from its end (its texts in a new language).
     Q_INVOKABLE void reload() { restart(); }
-    // See TimelineParser::needle.
-    Q_INVOKABLE QString needle(qint64 serial, int index) const { return m_parser.needle(serial, index); }
 
     // The transcript of a session: <projects>/<any project>/<session>.jsonl.
     static QString findTranscript(const QString &projects, const QString &session);

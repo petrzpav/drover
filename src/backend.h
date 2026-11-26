@@ -133,8 +133,15 @@ public:
     // still that session, done or idle, and its prompt is empty; otherwise
     // says why not (and asks for the agent in the panel, answerInPanel).
     Q_INVOKABLE void typeInto(const QString &pane, const QString &session, const QString &text);
+    // Sends a prompt to an agent (herdr agent prompt): one at work takes it
+    // as it goes on, as when typed. Not over a draft in its prompt, and not
+    // while it asks something; promptSent tells whether it went.
+    Q_INVOKABLE void sendPrompt(const QString &pane, const QString &text);
     // Whether the input line on a Claude screen is empty.
     static bool promptIsEmpty(const QByteArray &screen);
+    // Whether a Claude screen has a draft in its input line (no input line,
+    // as with other agents, is no draft).
+    static bool promptHasDraft(const QByteArray &screen);
     // The last listing as herdr reported it.
     const QList<Agent> &listedAgents() const { return m_listed; }
 
@@ -216,6 +223,7 @@ signals:
     void listed(const QList<Agent> &agents);
     // An answer couldn't be typed for the user; they answer in the panel.
     void answerInPanel(const QString &pane);
+    void promptSent(bool sent);
     // The folder picker opens over the desktop, so the panel steps aside.
     void folderPickerOpened();
     void folderPickerClosed(bool chosen, const QString &text);

@@ -59,7 +59,9 @@ Rectangle {
             terminal.sendControl(letter)
     }
     function focusTerminal() {
-        if (terminal)
+        if (view === "overview")
+            overview.focusInput()
+        else if (terminal)
             terminal.focusTerminal()
         else
             panel.forceActiveFocus()
@@ -72,7 +74,6 @@ Rectangle {
     readonly property color line: Qt.alpha(theme.foreground, 0.12)
     readonly property color dim: Qt.alpha(theme.foreground, 0.55)
     readonly property int sidebarWidth: 280
-    readonly property int overviewWidth: 460
     // A narrow panel's header keeps to the dot and icons, so it never runs
     // past the panel's edge.
     readonly property bool compactHeader: width - (listShown ? sidebarWidth : 0) < 640
@@ -83,9 +84,26 @@ Rectangle {
     border.width: 2
     border.color: theme.border
 
+    // What the conversation side shows: "agent" (its terminal), "overview"
+    // (its conversation in points) or "editor". The overview is kept for the
+    // next start, and Alt+E comes back to it from the editor.
+    readonly property string view: backend.editing ? "editor" : surface.overviewShown ? "overview" : "agent"
+    function showView(name) {
+        if (name === "editor") {
+            if (!backend.editing)
+                backend.toggleEditor()
+            return
+        }
+        surface.overviewShown = name === "overview"
+        if (backend.editing)
+            backend.toggleEditor()
+        else if (attached && !helpVisible && !picker.open)
+            Qt.callLater(focusTerminal)
+    }
+
     // The overview follows the selected Claude agent while it shows.
     Binding { target: timeline; property: "session"; value: backend.selectedKind === "claude" ? backend.selectedSession : "" }
-    Binding { target: timeline; property: "active"; value: panel.attached && surface.overviewShown && backend.selected !== "" }
+    Binding { target: timeline; property: "active"; value: panel.attached && panel.view === "overview" }
 
     function statusLabel(status) {
         switch (status) {
@@ -377,8 +395,9 @@ Rectangle {
                     FontMetrics { id: statusMetrics }
                 }
                 Item { Layout.fillWidth: true }
-                // The agent or the editor beside it, in its herdr tab: two
-                // segments in a frame, the current one filled with the accent.
+                // The agent's terminal, its conversation in points, or the
+                // editor beside it in its herdr tab: three segments in a
+                // frame, the current one filled.
                 Rectangle {
                     objectName: "viewSwitch"
                     implicitWidth: segments.implicitWidth + 4
@@ -391,11 +410,12 @@ Rectangle {
 
                     // Both segments are as wide as the wider one, so the
                     // highlight only glides, in step with the labels' colors.
-                    readonly property real segmentWidth: segmentButtons.count === 2
-                        ? Math.max(segmentButtons.itemAt(0).implicitWidth, segmentButtons.itemAt(1).implicitWidth) : 0
+                    readonly property real segmentWidth: segmentButtons.count === 3
+                        ? Math.max(segmentButtons.itemAt(0).implicitWidth, segmentButtons.itemAt(1).implicitWidth,
+                                   segmentButtons.itemAt(2).implicitWidth) : 0
                     // A quiet fill: the accent stays the agents' "working".
                     Rectangle {
-                        x: segments.x + (backend.editing ? parent.segmentWidth : 0)
+                        x: segments.x + ["agent", "overview", "editor"].indexOf(panel.view) * parent.segmentWidth
                         y: 2
                         width: parent.segmentWidth
                         height: parent.height - 4
@@ -409,21 +429,22 @@ Rectangle {
                         y: 2
                         Repeater {
                             id: segmentButtons
-                            model: [{ view: "agent", icon: "󰚩", label: qsTr("agent") },
-                                    { view: "editor", icon: "", label: qsTr("editor") }]
+                            model: [{ view: "agent", icon: "󰚩", label: qsTr("agent"), hint: qsTr("The agent's terminal"), keys: "Ctrl+Alt+B" },
+                                    { view: "overview", icon: "\uf0ca", label: qsTr("overview"), hint: qsTr("The conversation in points"), keys: "Ctrl+Alt+B" },
+                                    { view: "editor", icon: "", label: qsTr("editor"), hint: qsTr("Edit files beside the agent"), keys: "Alt+E" }]
                             delegate: IconButton {
                                 required property var modelData
-                                readonly property bool current: (modelData.view === "editor") === backend.editing
+                                readonly property bool current: modelData.view === panel.view
                                 width: segments.parent.segmentWidth
                                 implicitHeight: 26
                                 icon: modelData.icon
                                 label: panel.compactHeader ? "" : modelData.label
                                 tint: current ? theme.foreground : panel.dim
-                                hint: modelData.view === "editor" ? qsTr("Edit files beside the agent") : qsTr("Back to the agent")
-                                shortcut: "Alt+E"
+                                hint: modelData.hint
+                                shortcut: modelData.keys
                                 enabled: backend.selected !== ""
                                 busy: modelData.view === "editor" && backend.busy === "editor"
-                                onClicked: if (!current) backend.toggleEditor()
+                                onClicked: if (!current) panel.showView(modelData.view)
                             }
                         }
                     }
@@ -444,15 +465,6 @@ Rectangle {
                     onClicked: panel.fullscreenToggled()
                 }
                 IconButton {
-                    objectName: "overviewButton"
-                    icon: "\uf0ca"
-                    hint: qsTr("Show or hide the overview of the conversation")
-                    shortcut: "Ctrl+Alt+B"
-                    tint: surface.overviewShown ? theme.foreground : panel.dim
-                    enabled: backend.selected !== ""
-                    onClicked: surface.overviewShown = !surface.overviewShown
-                }
-                IconButton {
                     icon: ""
                     hint: qsTr("Keyboard shortcuts")
                     shortcut: "F1"
@@ -469,22 +481,17 @@ Rectangle {
 
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: panel.line }
 
-            // The terminal, and the overview of the conversation beside it.
+            // The terminal, and the overview over it in its view.
             Item {
                 id: conversationBody
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                readonly property bool overviewShown: surface.overviewShown && backend.selected !== ""
-                // Too narrow for both, the overview lies over the terminal's
-                // right side, and the terminal keeps its width.
-                readonly property bool overviewBeside: width >= panel.overviewWidth + 480
 
                 // The terminal, attached to the selected agent.
                 Item {
                     id: terminalArea
                     objectName: "terminalArea"
                     width: conversationBody.width
-                           - (conversationBody.overviewShown && conversationBody.overviewBeside ? panel.overviewWidth : 0)
                     height: conversationBody.height
 
                     property bool detached: false
@@ -562,7 +569,7 @@ Rectangle {
                             height: terminalArea.areaHeight
                             onReadyChanged: if (ready && newest) terminalArea.dropOlderAgentTerminals()
                             onDetached: if (newest) terminalArea.detached = true
-                            Component.onCompleted: if (panel.attached && !backend.editing && !panel.picker.open && !panel.helpVisible) focusTerminal()
+                            Component.onCompleted: if (panel.attached && panel.view === "agent" && !panel.picker.open && !panel.helpVisible) focusTerminal()
                         }
                     }
                     Repeater {
@@ -612,29 +619,13 @@ Rectangle {
 
                 }
 
+                // In its view, over the terminal, which stays attached
+                // beneath at its size.
                 Overview {
                     id: overview
                     objectName: "overview"
-                    x: conversationBody.width - width
-                    width: panel.overviewWidth
-                    height: conversationBody.height
-                    visible: conversationBody.overviewShown
-                    // The agent's terminal scrolls to the point and takes the keyboard.
-                    onPointPicked: (needle, direction) => {
-                        if (backend.editing)
-                            backend.toggleEditor()
-                        const terminal = panel.agentTerminal
-                        if (!terminal) {
-                            overview.revealEnded("missing")
-                            return
-                        }
-                        terminal.reveal(needle, direction)
-                        terminal.focusTerminal()
-                    }
-                }
-                Connections {
-                    target: panel.agentTerminal
-                    function onRevealEnded(result) { overview.revealEnded(result) }
+                    anchors.fill: parent
+                    visible: panel.view === "overview" && backend.selected !== ""
                 }
 
                 // Why there is no terminal, in the terminal's middle: on a card
@@ -643,11 +634,9 @@ Rectangle {
                     anchors.centerIn: terminalArea
                     width: Math.min(terminalArea.width - 32, 440)
                     height: message.implicitHeight + 24
-                    visible: panel.terminal === null
+                    visible: panel.terminal === null && !overview.visible
                     radius: theme.radius
                     color: theme.background
-                    border.width: conversationBody.overviewShown && !conversationBody.overviewBeside ? 1 : 0
-                    border.color: panel.line
                     Column {
                         id: message
                         anchors.centerIn: parent
@@ -749,7 +738,7 @@ Rectangle {
                         "Ctrl+;", qsTr("In the editor: show or hide a terminal below it (Ctrl+W closes it)"),
                         "Ctrl+Shift+O", qsTr("Open the agent in herdr"),
                         "Ctrl+B", qsTr("In the agent view: show or hide the agent list"),
-                        "Ctrl+Alt+B", qsTr("Show or hide the overview of the conversation"),
+                        "Ctrl+Alt+B", qsTr("Switch between the agent and its conversation in points"),
                         "Super+H", qsTr("Show or hide the panel"),
                         "Super+Alt+H", qsTr("Put the panel over the whole screen, and back"),
                         "Esc", qsTr("Close the picker or help; outside the terminal, hide the panel"),

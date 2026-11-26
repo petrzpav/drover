@@ -227,6 +227,45 @@ bool Backend::promptIsEmpty(const QByteArray &screen) {
     return false;
 }
 
+bool Backend::promptHasDraft(const QByteArray &screen) {
+    static const QRegularExpression escape(R"(\x1b\[[0-9;?]*[A-Za-z])");
+    bool input = false;
+    for (QString line : QString::fromUtf8(screen).split('\n'))
+        input = input || line.remove(escape).trimmed().startsWith(QChar(0x276F));
+    return input && !promptIsEmpty(screen);
+}
+
+void Backend::sendPrompt(const QString &pane, const QString &text) {
+    const QString program = herdr();
+    const int row = m_model.indexOf(pane);
+    if (program.isEmpty() || text.trimmed().isEmpty() || row < 0 || !m_busy.isEmpty())
+        return;
+    const QString title = m_model.agents().at(row).title;
+    setBusy(QStringLiteral("prompt"));
+    run(program, {"pane", "read", pane, "--source", "visible", "--format", "ansi"},
+        [this, program, pane, text, title](int code, const QByteArray &out, const QByteArray &) {
+            // Sending after a draft would send the two together.
+            if (code != 0 || promptHasDraft(out)) {
+                setBusy(QString());
+                setNotice(tr("%1 has unsent text in its prompt, so send it there.").arg(title), true);
+                emit promptSent(false);
+                return;
+            }
+            run(program, {"agent", "prompt", pane, text},
+                [this, title](int code, const QByteArray &out, const QByteArray &err) {
+                    setBusy(QString());
+                    if (code != 0) {
+                        const bool asking = errorCode(out, err) == QLatin1String("agent_blocked");
+                        setNotice(asking ? tr("%1 is asking you something, so answer it first.").arg(title)
+                                         : tr("Couldn't send it to %1: %2").arg(title, commandError(out, err, code)), true);
+                        emit promptSent(false);
+                        return;
+                    }
+                    emit promptSent(true);
+                });
+        });
+}
+
 void Backend::typeInto(const QString &pane, const QString &session, const QString &text) {
     const QString program = herdr();
     if (program.isEmpty() || text.isEmpty())

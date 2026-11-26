@@ -181,36 +181,6 @@ private slots:
         QCOMPARE(other.activity(), QString("Count the seeds"));
     }
 
-    void aPointIsFoundByTheWordsTheTerminalShows()
-    {
-        // The first line as Claude shows it: no marks, a link with its target.
-        QCOMPARE(TimelineParser::shownStart("## The **south** bed\n\n- gets `sun`"), QString("The south bed"));
-        QCOMPARE(TimelineParser::shownStart("See [IG-1](https://x.org/1) for `beds`"),
-                 QString("See IG-1 (https://x.org/1) for beds"));
-        QCOMPARE(TimelineParser::shownStart("```\ncode\n```"), QString());
-        // Up to 40 characters, at a word; what the user typed stays as typed.
-        QCOMPARE(TimelineParser::shownStart("Plant the tomatoes in the south bed please"),
-                 QString("Plant the tomatoes in the south bed"));
-        QCOMPARE(TimelineParser::typedStart("why  is **this**\nbold"), QString("why is **this** bold"));
-        // A long first word (a path, a link) whole, never cut inside.
-        QCOMPARE(TimelineParser::typedStart("https://github.com/petrzpav/drover/releases/tag/v0.7.0 is out"),
-                 QString("https://github.com/petrzpav/drover/releases/tag/v0.7.0"));
-        const auto parser = parsed(prompt("ok") + said("Planting the **south** bed now.")
-                                   + bash("b1", "make", "Water the beds") + result("b1", "ok")
-                                   + prompt("Plant the tomatoes in the south bed please")
-                                   + bash("b2", "make", "Dig") + prompt("ok"));
-        const auto &turns = parser.turns();
-        // A command: the agent's words before it.
-        QCOMPARE(parser.needle(turns[0].serial, 1), QString("Planting the south bed now."));
-        // A prompt: its own words, unless they are short (they would turn up
-        // anywhere): then the agent's words after them, or none.
-        QCOMPARE(parser.needle(turns[1].serial, -1), QString("Plant the tomatoes in the south bed"));
-        QCOMPARE(parser.needle(turns[1].serial, 0), QString("Plant the tomatoes in the south bed"));
-        QCOMPARE(parser.needle(turns[0].serial, -1), QString("Planting the south bed now."));
-        QCOMPARE(parser.needle(turns[2].serial, -1), QString());
-        QCOMPARE(parser.needle(999, 0), QString());
-    }
-
     void aModelSumsUpEachTurnOnce()
     {
         QTemporaryDir dir;
@@ -247,10 +217,8 @@ private slots:
             const QVariantMap point = timeline.index(0).data(Timeline::PointsRole).toList().first().toMap();
             QCOMPARE(point.value("text").toString(), QString("Done it"));
             QCOMPARE(point.value("kind").toString(), QString("done"));
-            // Step 2 is a command: found by the agent's words before it.
+            // The point it is mostly about: step 2.
             QCOMPARE(point.value("index").toInt(), 1);
-            QCOMPARE(timeline.needle(timeline.index(0).data(Timeline::SerialRole).toLongLong(), 1),
-                     QString("Digging the south bed first."));
             QCOMPARE(timeline.index(0).data(Timeline::CoveredRole).toInt(), 3);
             QFile input(dir.filePath("input"));
             QVERIFY(input.open(QIODevice::ReadOnly));

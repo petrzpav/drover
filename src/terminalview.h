@@ -3,7 +3,6 @@
 #include <QColor>
 #include <QFont>
 #include <QPoint>
-#include <QRegularExpression>
 #include <QQuickPaintedItem>
 #include <QTimer>
 #include <QStringList>
@@ -87,14 +86,6 @@ public:
     Q_INVOKABLE QString screenText() const;
     // The color a cell's text is drawn in.
     Q_INVOKABLE QColor textColorAt(int row, int column) const;
-    // Scrolls the program's history the way the wheel does, until the screen
-    // shows `needle` as words (spaces and line breaks aside): up first (or
-    // down, direction -1), then the other way. Not found, it goes back to the
-    // bottom. Ends on the user's own key, click or wheel too.
-    Q_INVOKABLE void reveal(const QString &needle, int direction = 1);
-    Q_INVOKABLE void stopRevealing();
-    // Text with every run of whitespace one space, as reveal() compares it.
-    static QString squeezed(const QString &text);
 
     void paint(QPainter *painter) override;
 
@@ -107,8 +98,6 @@ signals:
     void gridChanged();
     // The program ended (for `herdr terminal attach`: the terminal detached).
     void finished();
-    // reveal() ended: "found", "missing", or "stopped" (the user took over).
-    void revealEnded(const QString &result);
 
 protected:
     // A terminal that was hidden while its program drew catches up as it shows.
@@ -192,19 +181,6 @@ private:
     std::deque<QVector<VTermScreenCell>> m_scrollback;
     int m_scrollOffset = 0;
     int m_wheel = 0;  // wheel movement not yet a whole notch
-
-    // reveal(): what it looks for, which way (1 up, -1 down, 0 not at all),
-    // the screen before the last scroll, and how long it waited for it to move.
-    void revealStep();
-    void endReveal(const QString &result);
-    // The rows in view (the first `rows` of them), scrolled back or not, as
-    // one squeezed line.
-    QString visibleText(int rows = 1 << 20) const;
-    QRegularExpression m_needle;
-    QString m_revealScreen;
-    int m_revealDirection = 0, m_revealFirst = 1, m_revealSteps = 0, m_revealWaits = 0;
-    bool m_revealReturning = false;
-    QTimer m_revealTimer;
 
     // Selection, in lines counted from the oldest line of scrollback.
     bool m_selecting = false, m_hasSelection = false;

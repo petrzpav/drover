@@ -1,66 +1,39 @@
 import QtQuick
 import QtQuick.Controls
 
-// The selected agent's conversation in points, beside its terminal: for each
-// of your prompts what the agent did, said and asked, each point in two lines
-// at most. A model sums up the points as the turn goes on; the summary stands
-// in for the points it covers, and the newest ones show as they come. A click
-// on a point scrolls the terminal to it and gives the terminal the keyboard.
+// The selected agent's conversation in points, in place of its terminal:
+// for each of your prompts what the agent did, said and asked, each point in
+// two lines at most. A model sums up the points as the turn goes on; the
+// summary stands in for the points it covers, and the newest ones show as
+// they come. A click opens a point where it is: the whole text, the error,
+// every command of a run, or under a summary the points it sums up. Below,
+// a field sends the agent a message.
 Rectangle {
     id: overview
     readonly property color line: Qt.alpha(theme.foreground, 0.12)
     readonly property color dim: Qt.alpha(theme.foreground, 0.55)
     readonly property bool claude: backend.selectedKind === "claude"
-    // The point last clicked ("prompt3", "point12"), and how finding it in
-    // the terminal went: "seeking", "found", "missing" or "stopped".
-    property string picked: ""
-    property string pickState: ""
-    // Words to find in the agent's terminal, and which way first: down (-1)
-    // for a point newer than the last one found, else up.
-    signal pointPicked(string needle, int direction)
-    // Where the last point found is, as turn and place in it.
-    property real foundAt: -1
-    property real seekingAt: -1
+    // Opened points: "prompt3", "point12" (by id), "batch3_0" (a summary's points).
+    property var opened: ({})
+    readonly property int readable: 900
 
     color: theme.background
 
-    function pick(key, serial, index) {
-        picked = key
-        pickState = "seeking"
-        seekingAt = serial * 100000 + index
-        pointPicked(timeline.needle(serial, index), foundAt >= 0 && seekingAt > foundAt ? -1 : 1)
+    function focusInput() {
+        input.forceActiveFocus()
     }
-    // A summary point's mark and color.
-    function summaryGlyph(kind) {
-        switch (kind) {
-        case "done": return "\uf00c"
-        case "ship": return "\uf417"
-        case "change": return "\uf040"
-        case "fail": return "\uf00d"
-        case "ask": return "\uf059"
-        case "open": return "\uf10c"
-        }
-        return "\uf075"
+    function toggle(key) {
+        const next = Object.assign({}, opened)
+        if (next[key])
+            delete next[key]
+        else
+            next[key] = true
+        opened = next
     }
-    function summaryTint(kind) {
-        return kind === "fail" ? theme.urgent : kind === "done" || kind === "ship" ? theme.success
-             : kind === "ask" || kind === "open" ? theme.accent : dim
+    function send() {
+        if (input.text.trim() !== "" && backend.busy === "")
+            backend.sendPrompt(backend.selected, input.text.trim())
     }
-    // The terminal's answer.
-    function revealEnded(result) {
-        pickState = result
-        // Where the terminal is now, as far as anyone knows.
-        foundAt = result === "found" ? seekingAt : -1
-        if (result === "missing")
-            missingFade.restart()
-    }
-    Timer { id: missingFade; interval: 1500; onTriggered: if (overview.pickState === "missing") overview.pickState = "" }
-    function pickColor(key) {
-        if (key !== picked)
-            return "transparent"
-        return pickState === "missing" ? Qt.alpha(theme.urgent, 0.18) : Qt.alpha(theme.foreground, 0.08)
-    }
-
     function escaped(text) {
         return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     }
@@ -91,19 +64,40 @@ Rectangle {
             return theme.foreground
         return dim
     }
+    // A summary point's mark and color.
+    function summaryGlyph(kind) {
+        switch (kind) {
+        case "done": return ""
+        case "ship": return ""
+        case "change": return ""
+        case "fail": return ""
+        case "ask": return ""
+        case "open": return ""
+        }
+        return ""
+    }
+    function summaryTint(kind) {
+        return kind === "fail" ? theme.urgent : kind === "done" || kind === "ship" ? theme.success
+             : kind === "ask" || kind === "open" ? theme.accent : dim
+    }
 
     Connections {
         target: timeline
         function onSessionChanged() {
-            overview.picked = ""
-            overview.pickState = ""
-            overview.foundAt = -1
+            overview.opened = ({})
             list.follow = true
         }
         // Read again from the start: the points are new ones.
         function onStateChanged() {
             if (timeline.state === "loading")
-                overview.picked = ""
+                overview.opened = ({})
+        }
+    }
+    Connections {
+        target: backend
+        function onPromptSent(sent) {
+            if (sent)
+                input.clear()
         }
     }
 
@@ -111,30 +105,98 @@ Rectangle {
     // points once the pointer has left the overview.
     HoverHandler { id: hover }
 
-    // Clicks and the wheel stay here, never reaching the terminal beneath.
-    MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.AllButtons
-        onWheel: (wheel) => wheel.accepted = true
-    }
+    // One point: its mark, its text in two lines at most, and opened, all of
+    // it: the whole text (the agent's words as Markdown), its answer or
+    // error, every command of a run.
+    component PointRow: Rectangle {
+        id: row
+        required property var point
+        readonly property string key: "point" + point.id
+        readonly property bool open: overview.opened[key] === true
+        readonly property bool failed: point.state === "failed" || point.state === "denied"
+        readonly property int more: point.steps.length - 1
+        readonly property bool opens: open || more > 0 || pointText.truncated || detailText.truncated
+        objectName: key
+        height: body.implicitHeight + 6
+        radius: theme.radius
+        color: hoverRow.hovered && opens ? Qt.alpha(theme.foreground, 0.05) : "transparent"
+        HoverHandler { id: hoverRow }
 
-    // The line between the terminal and the overview.
-    Rectangle { width: 1; height: parent.height; color: overview.line }
+        Text {
+            x: 8
+            y: 3
+            width: 18
+            text: overview.glyph(row.point.kind)
+            color: overview.tint(row.point)
+        }
+        Column {
+            id: body
+            x: 32
+            y: 3
+            width: parent.width - 32 - 8
+            spacing: 2
+            Text {
+                id: pointText
+                objectName: "pointText" + row.point.id
+                width: parent.width
+                textFormat: row.open && row.point.kind === "said" ? Text.MarkdownText : Text.StyledText
+                text: row.open && row.point.kind === "said" ? row.point.text
+                    : overview.escaped(row.point.text)
+                      + (row.more > 0 && row.point.kind !== "edit" && !row.open
+                         ? "  <font color=\"" + Qt.tint(theme.background, overview.dim) + "\">+" + row.more + "</font>" : "")
+                color: row.failed ? theme.urgent
+                     : row.point.kind === "said" && !row.open ? Qt.alpha(theme.foreground, 0.8)
+                     : theme.foreground
+                linkColor: theme.accent
+                wrapMode: Text.Wrap
+                maximumLineCount: row.open ? 100000 : row.point.detail !== "" ? 1 : 2
+                elide: Text.ElideRight
+                onLinkActivated: (link) => Qt.openUrlExternally(link)
+            }
+            Text {
+                id: detailText
+                visible: row.point.detail !== ""
+                width: parent.width
+                text: "→ " + row.point.detail
+                textFormat: Text.PlainText
+                color: row.failed ? theme.urgent : overview.dim
+                wrapMode: Text.Wrap
+                maximumLineCount: row.open ? 100000 : 1
+                elide: Text.ElideRight
+            }
+            Repeater {
+                model: row.open && row.more > 0 ? row.point.steps : []
+                delegate: Text {
+                    required property string modelData
+                    width: body.width
+                    text: "· " + modelData
+                    textFormat: Text.PlainText
+                    color: overview.dim
+                    wrapMode: Text.Wrap
+                }
+            }
+        }
+        TapHandler {
+            enabled: row.opens
+            cursorShape: Qt.PointingHandCursor
+            onTapped: overview.toggle(row.key)
+        }
+    }
 
     ListView {
         id: list
         objectName: "overviewList"
-        x: 1
-        width: parent.width - 1
-        height: parent.height
+        width: parent.width
+        anchors.top: parent.top
+        anchors.bottom: composer.top
         clip: true
         visible: overview.claude
         model: overview.claude ? timeline : null
-        spacing: 16
+        spacing: 18
         // Room above the first turn and below the last; as header and footer,
         // so positionViewAtEnd() reaches the very end.
-        header: Item { width: 1; height: 12 }
-        footer: Item { width: 1; height: 12 }
+        header: Item { width: 1; height: 16 }
+        footer: Item { width: 1; height: 16 }
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar {
             policy: ScrollBar.AsNeeded
@@ -153,188 +215,163 @@ Rectangle {
         onCountChanged: Qt.callLater(settle)
         onHeightChanged: Qt.callLater(settle)
 
-        delegate: Column {
+        delegate: Item {
             id: turn
             required property var serial
             required property string prompt
             required property var time
             required property var items
-            required property var points
+            required property var batches
             required property int covered
             required property bool summarizing
             width: ListView.view.width
+            height: column.implicitHeight
             // The summary as shown: as it is when the turn comes into view,
             // then held while the pointer is over the overview.
-            property var shownPoints: []
+            property var shownBatches: []
             property int shownCovered: 0
+            Binding on shownBatches { value: turn.batches; when: !hover.hovered; restoreMode: Binding.RestoreNone }
+            Binding on shownCovered { value: turn.covered; when: !hover.hovered; restoreMode: Binding.RestoreNone }
             Component.onCompleted: {
-                shownPoints = points
+                shownBatches = batches
                 shownCovered = covered
                 timeline.want(turn.serial)
             }
-            Binding on shownPoints { value: turn.points; when: !hover.hovered; restoreMode: Binding.RestoreNone }
-            Binding on shownCovered { value: turn.covered; when: !hover.hovered; restoreMode: Binding.RestoreNone }
-            spacing: 2
 
-            Rectangle {
-                id: promptBox
-                objectName: "prompt" + turn.serial
-                visible: turn.prompt !== ""
-                readonly property string key: "prompt" + turn.serial
-                x: 10
-                width: parent.width - 20
-                height: promptText.implicitHeight + 14
-                radius: theme.radius
-                color: Qt.alpha(theme.foreground, key === overview.picked ? 0.13 : 0.07)
-                border.width: key === overview.picked && overview.pickState === "missing" ? 1 : 0
-                border.color: theme.urgent
+            Column {
+                id: column
+                // A readable measure, in the middle of a wide panel.
+                width: Math.min(parent.width - 32, overview.readable)
+                x: (parent.width - width) / 2
+                spacing: 2
 
-                Text {
-                    id: promptText
-                    x: 10
-                    y: 7
-                    width: parent.width - 20 - promptTime.width - 10
-                    text: turn.prompt
-                    textFormat: Text.PlainText
-                    color: theme.foreground
-                    wrapMode: Text.Wrap
-                    maximumLineCount: 2
-                    elide: Text.ElideRight
-                }
-                Text {
-                    id: promptTime
-                    anchors.right: parent.right
-                    anchors.rightMargin: 10
-                    y: 7
-                    text: turn.time ? Qt.formatTime(turn.time, "HH:mm") : ""
-                    color: overview.dim
-                    // While the model sums the turn up, a spinner in its place.
-                    opacity: turn.summarizing ? 0 : 1
-                }
-                IconButton {
-                    objectName: "summarizing" + turn.serial
-                    visible: turn.summarizing
-                    anchors.horizontalCenter: promptTime.horizontalCenter
-                    anchors.verticalCenter: promptTime.verticalCenter
-                    width: 22
-                    height: 22
-                    busy: true
-                    enabled: false
-                    opacity: 1
-                }
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: overview.pick(promptBox.key, turn.serial, -1)
-                }
-            }
-
-            Item { width: 1; height: 4; visible: turn.prompt !== "" }
-
-            // The summary, for the points it covers.
-            Repeater {
-                model: turn.shownPoints
-                delegate: Rectangle {
-                    id: summary
-                    required property var modelData
-                    required property int index
-                    objectName: "summary" + turn.serial + "_" + index
-                    readonly property string key: "summary" + turn.serial + "_" + index
-                    x: 6
-                    width: turn.width - 12
-                    height: summaryText.implicitHeight + 6
+                Rectangle {
+                    id: promptBox
+                    objectName: "prompt" + turn.serial
+                    visible: turn.prompt !== ""
+                    readonly property string key: "prompt" + turn.serial
+                    readonly property bool open: overview.opened[key] === true
+                    width: parent.width
+                    height: promptText.implicitHeight + 14
                     radius: theme.radius
-                    color: overview.pickColor(key)
+                    color: Qt.alpha(theme.foreground, 0.07)
+
                     Text {
-                        x: 8
-                        y: 3
-                        width: 18
-                        text: overview.summaryGlyph(summary.modelData.kind)
-                        color: overview.summaryTint(summary.modelData.kind)
-                    }
-                    Text {
-                        id: summaryText
-                        x: 32
-                        y: 3
-                        width: parent.width - 32 - 8
-                        text: summary.modelData.text
+                        id: promptText
+                        x: 10
+                        y: 7
+                        width: parent.width - 20 - promptTime.width - 10
+                        text: turn.prompt
                         textFormat: Text.PlainText
-                        color: summary.modelData.kind === "fail" ? theme.urgent : theme.foreground
+                        color: theme.foreground
                         wrapMode: Text.Wrap
-                        maximumLineCount: 2
+                        maximumLineCount: promptBox.open ? 100000 : 2
                         elide: Text.ElideRight
                     }
-                    MouseArea {
-                        anchors.fill: parent
+                    Text {
+                        id: promptTime
+                        anchors.right: parent.right
+                        anchors.rightMargin: 10
+                        y: 7
+                        text: turn.time ? Qt.formatTime(turn.time, "HH:mm") : ""
+                        color: overview.dim
+                        // While the model sums the turn up, a spinner in its place.
+                        opacity: turn.summarizing ? 0 : 1
+                    }
+                    IconButton {
+                        objectName: "summarizing" + turn.serial
+                        visible: turn.summarizing
+                        anchors.horizontalCenter: promptTime.horizontalCenter
+                        anchors.verticalCenter: promptTime.verticalCenter
+                        width: 22
+                        height: 22
+                        busy: true
+                        enabled: false
+                        opacity: 1
+                    }
+                    TapHandler {
+                        enabled: promptText.truncated || promptBox.open
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: overview.pick(summary.key, turn.serial, summary.modelData.index)
+                        onTapped: overview.toggle(promptBox.key)
                     }
                 }
-            }
 
-            // The points no summary covers yet.
-            Repeater {
-                model: turn.items
-                delegate: Rectangle {
-                    id: point
-                    required property var modelData
-                    required property int index
-                    objectName: "point" + modelData.id
-                    readonly property string key: "point" + modelData.id
-                    readonly property bool failed: modelData.state === "failed" || modelData.state === "denied"
-                    readonly property int more: modelData.steps.length - 1
-                    visible: index >= turn.shownCovered
-                    x: 6
-                    width: turn.width - 12
-                    height: body.implicitHeight + 6
-                    radius: theme.radius
-                    color: overview.pickColor(key)
+                Item { width: 1; height: 4; visible: turn.prompt !== "" }
 
-                    Text {
-                        x: 8
-                        y: 3
-                        width: 18
-                        text: overview.glyph(point.modelData.kind)
-                        color: overview.tint(point.modelData)
-                    }
-                    // Two lines at most: the point, or the point and its
-                    // answer or error.
-                    Column {
-                        id: body
-                        x: 32
-                        y: 3
-                        width: parent.width - 32 - 8
-                        Text {
-                            id: pointText
-                            objectName: "pointText" + point.modelData.id
-                            width: parent.width
-                            // Styled for the run's count; the text itself
-                            // flows on as one paragraph.
-                            textFormat: Text.StyledText
-                            text: overview.escaped(point.modelData.text)
-                                  + (point.more > 0 && point.modelData.kind !== "edit"
-                                     ? "  <font color=\"" + Qt.tint(theme.background, overview.dim) + "\">+" + point.more + "</font>" : "")
-                            color: point.failed ? theme.urgent
-                                 : point.modelData.kind === "said" ? Qt.alpha(theme.foreground, 0.8)
-                                 : theme.foreground
-                            wrapMode: Text.Wrap
-                            maximumLineCount: point.modelData.detail !== "" ? 1 : 2
-                            elide: Text.ElideRight
+                // The summary, batch by batch; a click on a point opens the
+                // points it sums up.
+                Repeater {
+                    model: turn.shownBatches
+                    delegate: Column {
+                        id: batch
+                        required property var modelData
+                        required property int index
+                        readonly property string key: "batch" + turn.serial + "_" + index
+                        readonly property bool open: overview.opened[key] === true
+                        width: column.width
+                        spacing: 2
+                        Repeater {
+                            model: batch.modelData.points
+                            delegate: Rectangle {
+                                id: summary
+                                required property var modelData
+                                required property int index
+                                objectName: "summary" + turn.serial + "_" + batch.index + "_" + index
+                                width: batch.width
+                                height: summaryText.implicitHeight + 6
+                                radius: theme.radius
+                                color: batch.open || summaryHover.hovered ? Qt.alpha(theme.foreground, 0.05) : "transparent"
+                                HoverHandler { id: summaryHover }
+                                Text {
+                                    x: 8
+                                    y: 3
+                                    width: 18
+                                    text: overview.summaryGlyph(summary.modelData.kind)
+                                    color: overview.summaryTint(summary.modelData.kind)
+                                }
+                                Text {
+                                    id: summaryText
+                                    x: 32
+                                    y: 3
+                                    width: parent.width - 32 - 8
+                                    text: summary.modelData.text
+                                    textFormat: Text.PlainText
+                                    color: summary.modelData.kind === "fail" ? theme.urgent : theme.foreground
+                                    wrapMode: Text.Wrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
+                                }
+                                TapHandler {
+                                    cursorShape: Qt.PointingHandCursor
+                                    onTapped: overview.toggle(batch.key)
+                                }
+                            }
                         }
-                        Text {
-                            visible: point.modelData.detail !== ""
-                            width: parent.width
-                            text: "→ " + point.modelData.detail
-                            textFormat: Text.PlainText
-                            color: point.failed ? theme.urgent : overview.dim
-                            maximumLineCount: 1
-                            elide: Text.ElideRight
+                        // Its points, set in under it.
+                        Column {
+                            visible: batch.open
+                            x: 24
+                            width: batch.width - 24
+                            spacing: 2
+                            Repeater {
+                                model: batch.open ? turn.items.slice(batch.modelData.from, batch.modelData.to) : []
+                                delegate: PointRow {
+                                    required property var modelData
+                                    point: modelData
+                                    width: batch.width - 24
+                                }
+                            }
                         }
                     }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: overview.pick(point.key, turn.serial, point.index)
+                }
+
+                // The points no summary covers yet.
+                Repeater {
+                    model: turn.items.slice(turn.shownCovered)
+                    delegate: PointRow {
+                        required property var modelData
+                        point: modelData
+                        width: column.width
                     }
                 }
             }
@@ -344,7 +381,7 @@ Rectangle {
     Text {
         x: 24
         width: parent.width - 48
-        anchors.verticalCenter: parent.verticalCenter
+        y: (composer.y - height) / 2
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.Wrap
         visible: text !== ""
@@ -353,5 +390,72 @@ Rectangle {
             : timeline.state === "loading" ? ""
             : timeline.count === 0 ? qsTr("Nothing in this conversation yet.") : ""
         color: overview.dim
+    }
+
+    // A message to the agent: Enter sends it, Shift+Enter starts a new line.
+    // Always the same height, so nothing above it moves as you type.
+    Item {
+        id: composer
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: inputMetrics.lineSpacing * 3 + 34
+
+        FontMetrics { id: inputMetrics }
+        Rectangle { width: parent.width; height: 1; color: overview.line }
+        Rectangle {
+            id: field
+            width: Math.min(parent.width - 32, overview.readable)
+            x: (parent.width - width) / 2
+            y: 12
+            height: parent.height - 24
+            radius: theme.radius
+            color: "transparent"
+            border.width: 1
+            border.color: input.activeFocus ? Qt.alpha(theme.foreground, 0.35) : overview.line
+
+            ScrollView {
+                id: inputScroll
+                x: 10
+                y: 4
+                width: parent.width - 20 - sendButton.width - 8
+                height: parent.height - 8
+                TextArea {
+                    id: input
+                    objectName: "overviewInput"
+                    wrapMode: TextEdit.Wrap
+                    color: theme.foreground
+                    placeholderText: qsTr("Message to the agent · Enter sends, Shift+Enter starts a new line")
+                    placeholderTextColor: overview.dim
+                    selectionColor: Qt.alpha(theme.foreground, 0.35)
+                    selectedTextColor: theme.foreground
+                    background: null
+                    padding: 0
+                    topPadding: 4
+                    bottomPadding: 4
+                    enabled: backend.selected !== ""
+                    Keys.onReturnPressed: (event) => {
+                        if (event.modifiers & Qt.ShiftModifier)
+                            event.accepted = false
+                        else
+                            overview.send()
+                    }
+                    Keys.onEnterPressed: (event) => overview.send()
+                }
+            }
+            IconButton {
+                id: sendButton
+                objectName: "sendButton"
+                anchors.right: parent.right
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                icon: ""
+                hint: qsTr("Send it to the agent")
+                shortcut: "Enter"
+                enabled: input.text.trim() !== "" && backend.selected !== ""
+                busy: backend.busy === "prompt"
+                onClicked: overview.send()
+            }
+        }
     }
 }

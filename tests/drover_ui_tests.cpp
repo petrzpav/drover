@@ -550,7 +550,8 @@ private slots:
                 transcript += QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n';
             };
             const auto prompt = [&](const QString &text) {
-                add({{"type", "user"}, {"origin", QJsonObject{{"kind", "human"}}}, {"message", QJsonObject{{"content", text}}}});
+                add({{"type", "user"}, {"uuid", "u" + QString::number(transcript.count('\n'))}, {"origin", QJsonObject{{"kind", "human"}}},
+                     {"message", QJsonObject{{"content", text}}}});
             };
             const auto says = [&](const QString &text) {
                 add({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{QJsonObject{{"type", "text"}, {"text", text}}}}}}});
@@ -600,6 +601,31 @@ private slots:
         const QRect panel = rig.window->property("panelRect").toRectF().toAlignedRect();
         grab(panel.united(pillRect()).adjusted(-24, -24, 24, 24)).save(out + "/screenshot.png");
         QMetaObject::invokeMethod(rig.window, "setExpanded", Q_ARG(QVariant, false));
+
+        // The same agent's conversation in points, its first turn summed up.
+        {
+            const QJsonArray points{
+                QJsonObject{{"text", "The plan is in beds.md: tomatoes on the south bed, basil between the rows"},
+                            {"kind", "done"}, {"step", 9}},
+                QJsonObject{{"text", "Last year's planting calendar ends in March, so the plan rests on the soil tests"},
+                            {"kind", "fail"}, {"step", 3}},
+                QJsonObject{{"text", "Committed and pushed as \"Plan the tomato beds\""}, {"kind", "ship"}, {"step", 8}}};
+            write(rig.dir.filePath("reply.json"), QJsonDocument(QJsonObject{{"type", "result"}, {"is_error", false},
+                {"result", QString::fromUtf8(QJsonDocument(QJsonObject{{"points", points}}).toJson(QJsonDocument::Compact))}})
+                .toJson(QJsonDocument::Compact));
+            qputenv("DROVER_TEST_DIR", rig.dir.path().toUtf8());
+            rig.timeline->setCacheDirectory(rig.dir.filePath("cache"));
+            rig.timeline->setSummaryProgram(TESTS_DIR "/fake_claude.sh");
+            rig.timeline->setSummaryModel("sonnet");
+            rig.surface->setOverviewShown(true);
+            rig.expand();
+            QTRY_VERIFY_WITH_TIMEOUT(rig.timeline->index(0).data(Timeline::PointsRole).toList().size() == 3, 10000);
+            QTest::qWait(800);
+            grab(panel.united(pillRect()).adjusted(-24, -24, 24, 24)).save(out + "/overview.png");
+            QMetaObject::invokeMethod(rig.window, "setExpanded", Q_ARG(QVariant, false));
+            rig.surface->setOverviewShown(false);
+            rig.timeline->setSummaryModel("");
+        }
 
         // An agent's question on the stage, with the sheep in the pill.
         {
@@ -861,49 +887,41 @@ private slots:
         QVERIFY(!button->isVisible());
     }
 
-    void ctrlAltBShowsTheOverview()
+    void ctrlAltBShowsTheConversationInPoints()
     {
-        // The first agent is Claude with a transcript, the second isn't Claude.
         Rig rig(R"({"result":{"agents":[
           {"agent":"claude","agent_session":{"kind":"id","value":"s-1"},"agent_status":"working","cwd":"/a","pane_id":"w1:p1","terminal_id":"term_1","terminal_title_stripped":"Plant the beds","workspace_id":"w1"},
           {"agent":"codex","agent_status":"idle","cwd":"/b","pane_id":"w2:p1","terminal_id":"term_2","terminal_title_stripped":"Fix the gate","workspace_id":"w2"}]}})");
         QDir(rig.dir.path()).mkpath("projects/-a");
         const auto entry = [](const QJsonObject &object) { return QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n'; };
-        QByteArray transcript = entry({{"type", "user"}, {"timestamp", "2026-11-26T09:00:00.000Z"}, {"origin", QJsonObject{{"kind", "human"}}},
-                                       {"message", QJsonObject{{"role", "user"}, {"content", "Plant the tomato beds"}}}});
-        transcript += entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
-            QJsonObject{{"type", "text"}, {"text", "The south bed gets the most sun."}},
-            QJsonObject{{"type", "tool_use"}, {"id", "b1"}, {"name", "Bash"},
-                        {"input", QJsonObject{{"command", "make"}, {"description", "Water the beds"}}}}}}}}});
-        write(rig.dir.filePath("projects/-a/s-1.jsonl"), transcript);
-        rig.surface->setOverviewShown(false);
+        write(rig.dir.filePath("projects/-a/s-1.jsonl"),
+              entry({{"type", "user"}, {"timestamp", "2026-11-26T09:00:00.000Z"}, {"origin", QJsonObject{{"kind", "human"}}},
+                     {"message", QJsonObject{{"content", "Plant the tomato beds"}}}})
+              + entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
+                  QJsonObject{{"type", "text"}, {"text", "The south bed gets the most sun."}},
+                  QJsonObject{{"type", "tool_use"}, {"id", "b1"}, {"name", "Bash"},
+                              {"input", QJsonObject{{"command", "make"}, {"description", "Water the beds"}}}}}}}}}));
 
         rig.expand();
         auto *panel = rig.find("panel");
         QTRY_VERIFY(panel->property("agentTerminal").value<QQuickItem *>());
-        auto *terminal = panel->property("agentTerminal").value<QQuickItem *>();
         QTRY_VERIFY(panel->property("terminalFocused").toBool());
         auto *overview = rig.find("overview");
         QVERIFY(overview && !overview->isVisible());
-        auto *button = rig.find("overviewButton");
-        const QPointF place = button->mapToScene(QPointF(0, 0));
-        const qreal wide = terminal->width();
+        QCOMPARE(panel->property("view").toString(), QString("agent"));
+        QVERIFY(!rig.timeline->active());
 
-        // Ctrl+Alt+B: the overview takes the terminal's right side, and the
-        // terminal keeps the keyboard; the key never reaches the agent.
+        // Ctrl+Alt+B: the conversation in points over the whole side, and
+        // the keyboard in its message field; the key never reaches the agent.
         QTest::keyClick(rig.window, Qt::Key_B, Qt::ControlModifier | Qt::AltModifier);
         QTRY_VERIFY(overview->isVisible());
-        QTRY_VERIFY(terminal->width() < wide - 300);
-        QVERIFY(panel->property("terminalFocused").toBool());
-        QCOMPARE(button->mapToScene(QPointF(0, 0)), place);
+        QCOMPARE(panel->property("view").toString(), QString("overview"));
+        QCOMPARE(overview->width(), rig.find("terminalArea")->width());
+        auto *input = rig.find("overviewInput");
+        QTRY_VERIFY(input->hasActiveFocus());
         QTRY_COMPARE(rig.timeline->state(), QString("ready"));
-        // The command it runs, marked as running.
         QTRY_VERIFY(rig.find("pointText2"));
         QVERIFY(rig.find("pointText2")->property("text").toString().startsWith("Water the beds"));
-        auto *list = rig.find("overviewList");
-        QTRY_COMPARE(list->property("count").toInt(), 1);
-        QTest::keyClick(rig.window, Qt::Key_X);
-        QTRY_VERIFY(rig.log().contains("key 78"));
         QVERIFY(!rig.log().contains("key 02"));
 
         // What the agent does next comes in while you look.
@@ -912,136 +930,54 @@ private slots:
         file.write(entry({{"type", "user"}, {"message", QJsonObject{{"content", QJsonArray{
             QJsonObject{{"type", "tool_result"}, {"tool_use_id", "b1"}, {"content", "ok"}}}}}}}));
         file.write(entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
-            QJsonObject{{"type", "text"}, {"text", "Both beds are watered."}}}}}}}));
+            QJsonObject{{"type", "text"}, {"text", "Both beds are **watered**.\n\n- south\n- " + QString("and more ").repeated(60)}}}}}}}));
         file.close();
         QTRY_VERIFY(rig.find("pointText3"));
-        QCOMPARE(rig.find("pointText3")->property("text").toString(), QString("Both beds are watered."));
+        // Two lines at most, plain; a click opens it where it is, as Markdown.
+        auto *said = rig.find("pointText3");
+        QTRY_COMPARE(said->property("lineCount").toInt(), 2);
+        QVERIFY(said->property("truncated").toBool());
+        auto *row = rig.find("point3");
+        const qreal closed = said->height();
+        QTest::qWait(50);
+        QTest::mouseClick(rig.window, Qt::LeftButton, {}, row->mapToScene(QPointF(row->width() / 2, 10)).toPoint());
+        QTRY_VERIFY(said->height() > closed * 2);
+        QCOMPARE(said->property("textFormat").toInt(), int(Qt::MarkdownText));
+        QTRY_VERIFY(input->hasActiveFocus());
 
-        // Text is text, even when it looks like markup.
-        {
-            QFile more(rig.dir.filePath("projects/-a/s-1.jsonl"));
-            QVERIFY(more.open(QIODevice::Append));
-            for (int i = 0; i < 30; ++i)
-                more.write(entry({{"type", "user"}, {"timestamp", "2026-11-26T09:10:00.000Z"}, {"origin", QJsonObject{{"kind", "human"}}},
-                                  {"message", QJsonObject{{"content", QString("Why does the <b>bed</b> %1 wrap?").arg(i)}}}}));
-            more.close();
-        }
-        QTRY_COMPARE(list->property("count").toInt(), 31);
-        QTRY_VERIFY(list->property("atYEnd").toBool());
-        // Scrolled up, the list stays where you are as more comes.
-        QTest::qWait(100);
-        const QPoint middle = list->mapToScene(QPointF(list->width() / 2, list->height() / 2)).toPoint();
-        for (int i = 0; i < 6; ++i) {
-            QWheelEvent wheel(middle, rig.window->mapToGlobal(middle), QPoint(), QPoint(0, 120), Qt::NoButton, Qt::NoModifier,
-                              Qt::NoScrollPhase, false);
-            QCoreApplication::sendEvent(rig.window, &wheel);
-        }
-        QTRY_VERIFY(!list->property("atYEnd").toBool());
-        QTRY_VERIFY(!list->property("moving").toBool());
-        QTest::qWait(100);
-        const qreal scrolled = list->property("contentY").toReal();
-        {
-            QFile more(rig.dir.filePath("projects/-a/s-1.jsonl"));
-            QVERIFY(more.open(QIODevice::Append));
-            more.write(entry({{"type", "user"}, {"origin", QJsonObject{{"kind", "human"}}},
-                              {"message", QJsonObject{{"content", "One more"}}}}));
-        }
-        QTRY_COMPARE(list->property("count").toInt(), 32);
-        QTest::qWait(100);
-        QCOMPARE(list->property("contentY").toReal(), scrolled);
-        // The agent's words in two lines at most, markup and all.
-        {
-            QFile more(rig.dir.filePath("projects/-a/s-1.jsonl"));
-            QVERIFY(more.open(QIODevice::Append));
-            more.write(entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
-                QJsonObject{{"type", "text"}, {"text", "Line <one>\nLine two " + QString("and more ").repeated(60)}}}}}}}));
-        }
-        QTRY_VERIFY(rig.find("pointText4"));
-        QVERIFY(rig.find("pointText4")->property("text").toString().startsWith("Line &lt;one&gt;"));
-        QTRY_COMPARE(rig.find("pointText4")->property("lineCount").toInt(), 2);
-        QVERIFY(rig.find("pointText4")->property("truncated").toBool());
+        // A message to the agent: Enter sends it, and the field empties.
+        rig.type("hello");
+        QTest::keyClick(rig.window, Qt::Key_Return, Qt::ShiftModifier);
+        rig.type("there");
+        QTest::keyClick(rig.window, Qt::Key_Return);
+        QTRY_VERIFY(rig.log().contains("agent prompt w1:p1 hello\nthere"));
+        QTRY_COMPARE(input->property("text").toString(), QString());
+        QVERIFY(!rig.log().contains("key 68"));
+
+        // Alt+E goes to the editor and back to the points.
+        QTest::keyClick(rig.window, Qt::Key_E, Qt::AltModifier);
+        QTRY_COMPARE(panel->property("view").toString(), QString("editor"));
+        QTRY_VERIFY(!overview->isVisible());
+        QTest::keyClick(rig.window, Qt::Key_E, Qt::AltModifier);
+        QTRY_COMPARE(panel->property("view").toString(), QString("overview"));
+        QTRY_VERIFY(overview->isVisible());
 
         // Kept for the next start.
-        QVERIFY(rig.surface->overviewShown());
         Surface again(rig.dir.filePath("position"));
         QVERIFY(again.overviewShown());
 
-        // Another kind of agent: the overview stays, so nothing moves, and says why it's empty.
+        // Another kind of agent: no points, but a message still goes.
         QTest::keyClick(rig.window, Qt::Key_Down, Qt::AltModifier);
         QTRY_COMPARE(rig.backend->selected(), QString("w2:p1"));
         QTRY_COMPARE(rig.timeline->session(), QString());
         QVERIFY(overview->isVisible());
 
-        // The button hides it again, from the same place.
-        QTest::mouseClick(rig.window, Qt::LeftButton, {},
-                          button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+        // Ctrl+Alt+B: back to the terminal, with the keyboard.
+        QTest::keyClick(rig.window, Qt::Key_B, Qt::ControlModifier | Qt::AltModifier);
         QTRY_VERIFY(!overview->isVisible());
-        QVERIFY(!rig.surface->overviewShown());
+        QTRY_VERIFY(panel->property("terminalFocused").toBool());
         QVERIFY(!rig.timeline->active());
-    }
-
-    void aClickOnAPointScrollsTheTerminalToIt()
-    {
-        Rig rig(R"({"result":{"agents":[
-          {"agent":"claude","agent_session":{"kind":"id","value":"s-1"},"agent_status":"working","cwd":"/a","pane_id":"w1:p1","terminal_id":"term_1","terminal_title_stripped":"Plant the beds","workspace_id":"w1"},
-          {"agent":"claude","agent_status":"idle","cwd":"/b","pane_id":"w2:p1","terminal_id":"term_2","terminal_title_stripped":"Fix the gate","workspace_id":"w2"}]}})");
-        // An agent screen like Claude's (tests/fake_agent.py).
-        QFile script(rig.dir.filePath("herdr"));
-        QVERIFY(script.open(QIODevice::ReadOnly));
-        QString text = QString::fromUtf8(script.readAll());
-        script.close();
-        text.replace("  \"terminal attach\")\n", QString("  \"terminal attach\")\n    stty raw -echo; exec python3 -I '%1' ;;\n  \"terminal attach-old\")\n").arg(TESTS_DIR "/fake_agent.py"));
-        write(rig.dir.filePath("herdr"), text.toUtf8());
-
-        // In the transcript, the agent's words are what the terminal shows.
-        QDir(rig.dir.path()).mkpath("projects/-a");
-        const auto entry = [](const QJsonObject &object) { return QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n'; };
-        write(rig.dir.filePath("projects/-a/s-1.jsonl"),
-              entry({{"type", "user"}, {"origin", QJsonObject{{"kind", "human"}}}, {"message", QJsonObject{{"content", "Plant the beds"}}}})
-              + entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
-                  QJsonObject{{"type", "text"}, {"text", "**history** line 40"}}}}}}})
-              + entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
-                  QJsonObject{{"type", "tool_use"}, {"id", "b1"}, {"name", "Bash"},
-                              {"input", QJsonObject{{"command", "make"}, {"description", "Water the beds"}}}}}}}}}));
-
-        rig.expand();
-        auto *panel = rig.find("panel");
-        QTRY_VERIFY(panel->property("agentTerminal").value<QQuickItem *>());
-        auto *view = rig.find("agentTerminal");
-        QTRY_VERIFY(view->property("ready").toBool());
-        const auto screen = [&] {
-            QString shown;
-            QMetaObject::invokeMethod(view, "screenText", Q_RETURN_ARG(QString, shown));
-            return shown;
-        };
-        QTRY_VERIFY(screen().contains("history line 299"));
-        QVERIFY(!screen().contains("history line 40\n"));
-
-        // The command's point: the terminal folds commands away, so it goes
-        // to the agent's words before it, and takes the keyboard.
-        QTRY_VERIFY(rig.find("point2"));
-        auto *point = rig.find("point2");
-        QTest::mouseClick(rig.window, Qt::LeftButton, {},
-                          point->mapToScene(QPointF(point->width() / 2, point->height() / 2)).toPoint());
-        QTRY_VERIFY_WITH_TIMEOUT(screen().contains("history line 40\n"), 10000);
-        QTRY_COMPARE(rig.find("overview")->property("pickState").toString(), QString("found"));
-        QVERIFY(panel->property("terminalFocused").toBool());
-
-        // Words nowhere in the terminal: up to the top, down to the end, and it says so.
-        QSignalSpy ended(view, SIGNAL(revealEnded(QString)));
-        QMetaObject::invokeMethod(view, "reveal", Q_ARG(QString, "the pond"));
-        QTRY_VERIFY_WITH_TIMEOUT(screen().contains("history line 0\n"), 10000);
-        QTRY_COMPARE_WITH_TIMEOUT(ended.count(), 1, 20000);
-        QVERIFY(screen().contains("history line 299"));
-
-        // Words, not parts of words: "story line 299" is nowhere.
-        QMetaObject::invokeMethod(view, "reveal", Q_ARG(QString, "story line 299"), Q_ARG(int, -1));
-        // Down first (already at the end), then up to the top, then back down.
-        QTRY_VERIFY_WITH_TIMEOUT(screen().contains("history line 0\n"), 20000);
-        QTRY_COMPARE_WITH_TIMEOUT(ended.count(), 2, 20000);
-        QCOMPARE(ended.last().first().toString(), QString("missing"));
-        QVERIFY(screen().contains("history line 299"));
-        QCOMPARE(ended.first().first().toString(), QString("missing"));
+        QVERIFY(!rig.surface->overviewShown());
     }
 
     void aSummaryStandsInForItsPoints()
@@ -1049,13 +985,6 @@ private slots:
         Rig rig(R"({"result":{"agents":[
           {"agent":"claude","agent_session":{"kind":"id","value":"s-1"},"agent_status":"idle","cwd":"/a","pane_id":"w1:p1","terminal_id":"term_1","terminal_title_stripped":"Plant the beds","workspace_id":"w1"},
           {"agent":"claude","agent_status":"idle","cwd":"/b","pane_id":"w2:p1","terminal_id":"term_2","terminal_title_stripped":"Fix the gate","workspace_id":"w2"}]}})");
-        QFile script(rig.dir.filePath("herdr"));
-        QVERIFY(script.open(QIODevice::ReadOnly));
-        QString text = QString::fromUtf8(script.readAll());
-        script.close();
-        text.replace("  \"terminal attach\")\n", QString("  \"terminal attach\")\n    stty raw -echo; exec python3 -I '%1' ;;\n  \"terminal attach-old\")\n").arg(TESTS_DIR "/fake_agent.py"));
-        write(rig.dir.filePath("herdr"), text.toUtf8());
-
         // A turn worth a summary, then many short ones after it.
         QDir(rig.dir.path()).mkpath("projects/-a");
         const auto entry = [](const QJsonObject &object) { return QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n'; };
@@ -1064,7 +993,7 @@ private slots:
         };
         QByteArray transcript = entry({{"type", "user"}, {"uuid", "u1"}, {"origin", QJsonObject{{"kind", "human"}}},
                                        {"message", QJsonObject{{"content", "Plant the beds"}}}})
-            + said("history line 40")
+            + said("Digging first.")
             + entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{QJsonObject{{"type", "tool_use"},
                 {"id", "b1"}, {"name", "Bash"}, {"input", QJsonObject{{"command", "dig"}, {"description", "Dig the bed"}}}}}}}}})
             + entry({{"type", "user"}, {"message", QJsonObject{{"content", QJsonArray{QJsonObject{{"type", "tool_result"},
@@ -1077,13 +1006,13 @@ private slots:
         rig.timeline->setCacheDirectory(rig.dir.filePath("cache"));
         rig.timeline->setSummaryProgram(TESTS_DIR "/fake_claude.sh");
         qputenv("DROVER_TEST_DIR", rig.dir.path().toUtf8());
+        rig.surface->setOverviewShown(true);
 
         rig.expand();
         auto *list = rig.find("overviewList");
         QTRY_COMPARE(list->property("count").toInt(), 21);
         QTRY_VERIFY(list->property("atYEnd").toBool());
-        auto *view = rig.find("agentTerminal");
-        QTRY_VERIFY(view->property("ready").toBool());
+        const auto away = [&] { QTest::mouseMove(rig.window, rig.find("viewSwitch")->mapToScene(QPointF(4, 4)).toPoint()); };
 
         // Scrolled up, past the first turn (as the user would: the list stops
         // following the end): a summary coming in above moves nothing in view.
@@ -1095,73 +1024,67 @@ private slots:
         QTRY_VERIFY(rig.find("prompt8"));
         auto *anchor = rig.find("prompt8");
         const qreal before = anchor->mapToScene(QPointF(0, 0)).y();
-        QTest::mouseMove(rig.window, rig.find("terminalArea")->mapToScene(QPointF(20, 20)).toPoint());
+        away();
         rig.timeline->setSummaryModel("sonnet");
         QTRY_COMPARE(rig.timeline->index(0).data(Timeline::PointsRole).toList().size(), 1);
         QTest::qWait(100);
         QCOMPARE(anchor->mapToScene(QPointF(0, 0)).y(), before);
 
         // In view, under the pointer: the points stay until the pointer leaves.
-        QMetaObject::invokeMethod(list, "positionViewAtBeginning");
-        QTRY_VERIFY(rig.find("point2"));
+        // (the turn summed up afresh while the pointer is here: the cached
+        // summary is dropped and comes again)
         QTest::mouseMove(rig.window, list->mapToScene(QPointF(list->width() / 2, list->height() - 20)).toPoint());
-        QTest::qWait(100);
         rig.timeline->setSummaryModel("");
-        // (a fresh turn summed up while the pointer is here: the cached one
-        // is dropped and comes again)
         QFile::remove(rig.dir.filePath("cache/s-1.json"));
         rig.timeline->reload();
+        QTRY_COMPARE(list->property("count").toInt(), 21);
+        QMetaObject::invokeMethod(list, "positionViewAtBeginning");
+        list->setProperty("follow", false);
+        QTRY_VERIFY(rig.find("point2"));
+        QTest::qWait(100);
         rig.timeline->setSummaryModel("sonnet");
         QTRY_COMPARE(rig.timeline->index(0).data(Timeline::PointsRole).toList().size(), 1);
         QTRY_VERIFY(rig.find("point2"));
         QTest::qWait(200);
         QVERIFY(rig.find("point2")->isVisible());
-        QTest::mouseMove(rig.window, rig.find("terminalArea")->mapToScene(QPointF(20, 20)).toPoint());
-        QTRY_VERIFY(rig.find("summary1_0") && rig.find("summary1_0")->isVisible());
-        QVERIFY(!rig.find("point2")->isVisible());
+        away();
+        QTRY_VERIFY(rig.find("summary1_0_0") && rig.find("summary1_0_0")->isVisible());
+        QVERIFY(!rig.find("point2") || !rig.find("point2")->isVisible());
 
         // A turn coming into view under the pointer shows its summary as it is.
         QTest::mouseMove(rig.window, list->mapToScene(QPointF(list->width() / 2, list->height() - 20)).toPoint());
         QMetaObject::invokeMethod(list, "positionViewAtEnd");
-        QTRY_VERIFY(!rig.find("summary1_0"));
+        QTRY_VERIFY(!rig.find("summary1_0_0"));
         QMetaObject::invokeMethod(list, "positionViewAtBeginning");
-        QTRY_VERIFY(rig.find("summary1_0") && rig.find("summary1_0")->isVisible());
-        QVERIFY(!rig.find("point2")->isVisible());
-        QTest::mouseMove(rig.window, rig.find("terminalArea")->mapToScene(QPointF(20, 20)).toPoint());
+        QTRY_VERIFY(rig.find("summary1_0_0") && rig.find("summary1_0_0")->isVisible());
+        QVERIFY(!rig.find("point2") || !rig.find("point2")->isVisible());
 
-        // A click on the summary scrolls the terminal to the agent's words.
-        auto *point = rig.find("summary1_0");
+        // A click on the summary opens the points it sums up, under it.
+        auto *point = rig.find("summary1_0_0");
         QTest::qWait(50);
         QTest::mouseClick(rig.window, Qt::LeftButton, {},
                           point->mapToScene(QPointF(point->width() / 2, point->height() / 2)).toPoint());
-        const auto screen = [&] {
-            QString shown;
-            QMetaObject::invokeMethod(view, "screenText", Q_RETURN_ARG(QString, shown));
-            return shown;
-        };
-        QTRY_VERIFY_WITH_TIMEOUT(screen().contains("history line 40\n"), 10000);
+        QTRY_VERIFY(rig.find("point2") && rig.find("point2")->isVisible());
+        QVERIFY(rig.find("point2")->mapToScene(QPointF(0, 0)).x() > point->mapToScene(QPointF(0, 0)).x());
     }
 
-    void aNarrowPanelHasTheOverviewOverTheTerminal()
+    void aNarrowPanelKeepsItsHeaderInside()
     {
         Rig rig(agents("working", "idle"));
         rig.window->resize(820, 900);
         rig.expand();
         auto *panel = rig.find("panel");
         QTRY_VERIFY(panel->property("agentTerminal").value<QQuickItem *>());
-        auto *overview = rig.find("overview");
         auto *area = rig.find("terminalArea");
-        QTRY_VERIFY(overview->isVisible());
-        // Too narrow for both: the terminal keeps its width, the overview lies over it.
         const QRectF panelRect = rig.window->property("panelRect").toRectF();
-        QTRY_VERIFY(panelRect.contains(overview->mapRectToScene(overview->boundingRect())));
-        QCOMPARE(area->width(), overview->parentItem()->width());
-        // The terminal detached: its message and button are above the overview.
+        // The header keeps to icons: the terminal ends inside the panel.
+        QTRY_VERIFY(panelRect.contains(area->mapRectToScene(area->boundingRect())));
+        QVERIFY(panelRect.contains(rig.find("viewSwitch")->mapRectToScene(rig.find("viewSwitch")->boundingRect())));
+        // The terminal detached: its message and button.
         area->setProperty("detached", true);
         auto *again = rig.find("attachAgain");
         QTRY_VERIFY(again->isVisible());
         const QPointF center = again->mapToScene(QPointF(again->width() / 2, again->height() / 2));
-        QVERIFY(overview->contains(overview->mapFromScene(center)));
         // A frame for the button to take the pointer.
         QTest::qWait(50);
         QTest::mouseClick(rig.window, Qt::LeftButton, {}, center.toPoint());

@@ -492,69 +492,6 @@ QString TimelineParser::activity() const {
     return {};
 }
 
-namespace {
-// Up to 40 characters, ending at a whole word (a long first word, like a
-// path or a link, whole).
-QString wordsUpTo40(const QString &text) {
-    if (text.size() <= 40)
-        return text;
-    const int space = text.lastIndexOf(' ', 40);
-    if (space > 12)
-        return text.left(space).trimmed();
-    const int end = text.indexOf(' ', 40);
-    return (end < 0 ? text : text.left(end)).trimmed();
-}
-} // namespace
-
-QString TimelineParser::shownStart(const QString &markdown) {
-    static const QRegularExpression link("\\[([^\\]]*)\\]\\(([^)]*)\\)");
-    static const QRegularExpression marks("[*`]|(?<!\\w)_|_(?!\\w)");
-    static const QRegularExpression lead("^\\s*(#+|>|[-*+]|\\d+\\.)\\s+");
-    QString line = firstLine(markdown);
-    if (line.startsWith(QLatin1String("```")) || line.startsWith('|'))
-        return {};
-    // A link shows as its text and its target in brackets.
-    line.replace(link, QStringLiteral("\\1 (\\2)"));
-    line.remove(lead);
-    line.remove(marks);
-    return wordsUpTo40(line.simplified());
-}
-
-QString TimelineParser::typedStart(const QString &text) {
-    return wordsUpTo40(text.simplified());
-}
-
-// Words long enough not to turn up anywhere: the agent's words at or before
-// the point, else the prompt (when it isn't said again later), else the
-// agent's words after it.
-QString TimelineParser::needle(qint64 serial, int index) const {
-    int at = -1;
-    for (int i = 0; i < m_turns.size(); ++i)
-        if (m_turns[i].serial == serial)
-            at = i;
-    if (at < 0)
-        return {};
-    const Turn &turn = m_turns[at];
-    const auto wordsOf = [](const Item &item) {
-        return item.kind == QLatin1String("said") ? shownStart(item.text)
-             : item.kind == QLatin1String("nudge") ? typedStart(item.text) : QString();
-    };
-    const auto good = [](const QString &words) { return words.size() >= 12; };
-    for (int i = qMin(index, int(turn.items.size()) - 1); i >= 0; --i)
-        if (const QString words = wordsOf(turn.items[i]); good(words))
-            return words;
-    const QString prompt = typedStart(turn.prompt);
-    bool again = false;
-    for (int i = at + 1; i < m_turns.size(); ++i)
-        again = again || typedStart(m_turns[i].prompt) == prompt;
-    if (good(prompt) && !again)
-        return prompt;
-    for (int i = qMax(0, index + 1); i < turn.items.size(); ++i)
-        if (const QString words = wordsOf(turn.items[i]); good(words))
-            return words;
-    return {};
-}
-
 const TimelineParser::Turn *TimelineParser::find(qint64 serial) const {
     for (const Turn &turn : m_turns)
         if (turn.serial == serial)
@@ -658,7 +595,7 @@ int Timeline::rowCount(const QModelIndex &parent) const { return parent.isValid(
 QHash<int, QByteArray> Timeline::roleNames() const {
     return {{SerialRole, "serial"}, {PromptRole, "prompt"}, {TimeRole, "time"}, {ItemsRole, "items"},
             {DurationRole, "duration"}, {PointsRole, "points"}, {CoveredRole, "covered"},
-            {SummarizingRole, "summarizing"}};
+            {SummarizingRole, "summarizing"}, {BatchesRole, "batches"}};
 }
 
 QVariant Timeline::data(const QModelIndex &index, int role) const {
@@ -810,14 +747,16 @@ QVariantMap Timeline::rowOf(const TimelineParser::Turn &turn) const {
         items << QVariantMap{{"id", item.id}, {"kind", item.kind}, {"text", item.text}, {"detail", item.detail},
                              {"state", item.state}, {"steps", item.steps}};
     // The summary's points stand in for the points they cover.
-    QVariantList points;
+    QVariantList points, batches;
     int covered = 0;
     for (const Batch &batch : m_summaries.value(turn.uuid)) {
         points += batch.points;
+        batches << QVariantMap{{"from", covered}, {"to", batch.to}, {"points", batch.points}};
         covered = batch.to;
     }
     return {{"serial", turn.serial}, {"prompt", turn.prompt}, {"time", turn.time}, {"items", items},
-            {"duration", turn.durationMs}, {"points", points}, {"covered", qMin(covered, int(turn.items.size()))},
+            {"duration", turn.durationMs}, {"points", points}, {"batches", batches},
+            {"covered", qMin(covered, int(turn.items.size()))},
             {"summarizing", m_child && m_job.uuid == turn.uuid && !turn.uuid.isEmpty()}};
 }
 
@@ -1042,7 +981,7 @@ void Timeline::summaryDone(int code) {
             continue;
         const QString kind = point.value("kind").toString();
         const int step = point.value("step").toInt(1);
-        // The point it is about, to find in the terminal on a click.
+        // The point it is mostly about.
         batch.points << QVariantMap{{"text", text}, {"kind", kinds.contains(kind) ? kind : QStringLiteral("note")},
                                     {"index", qBound(job.from, job.from + step - 1, job.to - 1)}};
     }
