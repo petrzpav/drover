@@ -192,6 +192,9 @@ private slots:
         QCOMPARE(TimelineParser::shownStart("Plant the tomatoes in the south bed please"),
                  QString("Plant the tomatoes in the south bed"));
         QCOMPARE(TimelineParser::typedStart("why  is **this**\nbold"), QString("why is **this** bold"));
+        // A long first word (a path, a link) whole, never cut inside.
+        QCOMPARE(TimelineParser::typedStart("https://github.com/petrzpav/drover/releases/tag/v0.7.0 is out"),
+                 QString("https://github.com/petrzpav/drover/releases/tag/v0.7.0"));
         const auto parser = parsed(prompt("ok") + said("Planting the **south** bed now.")
                                    + bash("b1", "make", "Water the beds") + result("b1", "ok")
                                    + prompt("Plant the tomatoes in the south bed please")
@@ -287,6 +290,24 @@ private slots:
             QCOMPARE(calls(), 2);
         }
 
+        // Points without words: as good as no reply; the turn keeps its points.
+        write(dir.filePath("empty"), "");
+        {
+            Timeline empty;
+            empty.setProjectsDirectory(dir.filePath("projects"));
+            empty.setCacheDirectory(dir.filePath("cache-empty"));
+            empty.setSummaryProgram(claude);
+            empty.setSummaryModel("sonnet");
+            empty.setInterval(20);
+            empty.setSession("s-1");
+            empty.setActive(true);
+            QTRY_COMPARE(calls(), 3);
+            QTest::qWait(200);
+            QCOMPARE(calls(), 3);
+            QCOMPARE(empty.index(0).data(Timeline::CoveredRole).toInt(), 0);
+        }
+        QFile::remove(dir.filePath("empty"));
+
         // A failure (a usage limit): summaries rest, no call after call.
         write(dir.filePath("fail"), "");
         {
@@ -298,9 +319,9 @@ private slots:
             resting.setInterval(20);
             resting.setSession("s-1");
             resting.setActive(true);
-            QTRY_COMPARE(calls(), 3);
+            QTRY_COMPARE(calls(), 4);
             QTest::qWait(300);
-            QCOMPARE(calls(), 3);
+            QCOMPARE(calls(), 4);
             QCOMPARE(resting.index(0).data(Timeline::PointsRole).toList().size(), 0);
         }
 

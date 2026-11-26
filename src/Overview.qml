@@ -49,10 +49,8 @@ Rectangle {
     // The terminal's answer.
     function revealEnded(result) {
         pickState = result
-        if (result === "found")
-            foundAt = seekingAt
-        else if (result === "missing")
-            foundAt = -1
+        // Where the terminal is now, as far as anyone knows.
+        foundAt = result === "found" ? seekingAt : -1
         if (result === "missing")
             missingFade.restart()
     }
@@ -165,10 +163,15 @@ Rectangle {
             required property int covered
             required property bool summarizing
             width: ListView.view.width
-            Component.onCompleted: timeline.want(turn.serial)
-            // The summary as shown: held while the pointer is over the overview.
+            // The summary as shown: as it is when the turn comes into view,
+            // then held while the pointer is over the overview.
             property var shownPoints: []
             property int shownCovered: 0
+            Component.onCompleted: {
+                shownPoints = points
+                shownCovered = covered
+                timeline.want(turn.serial)
+            }
             Binding on shownPoints { value: turn.points; when: !hover.hovered; restoreMode: Binding.RestoreNone }
             Binding on shownCovered { value: turn.covered; when: !hover.hovered; restoreMode: Binding.RestoreNone }
             spacing: 2

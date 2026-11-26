@@ -1120,6 +1120,15 @@ private slots:
         QTRY_VERIFY(rig.find("summary1_0") && rig.find("summary1_0")->isVisible());
         QVERIFY(!rig.find("point2")->isVisible());
 
+        // A turn coming into view under the pointer shows its summary as it is.
+        QTest::mouseMove(rig.window, list->mapToScene(QPointF(list->width() / 2, list->height() - 20)).toPoint());
+        QMetaObject::invokeMethod(list, "positionViewAtEnd");
+        QTRY_VERIFY(!rig.find("summary1_0"));
+        QMetaObject::invokeMethod(list, "positionViewAtBeginning");
+        QTRY_VERIFY(rig.find("summary1_0") && rig.find("summary1_0")->isVisible());
+        QVERIFY(!rig.find("point2")->isVisible());
+        QTest::mouseMove(rig.window, rig.find("terminalArea")->mapToScene(QPointF(20, 20)).toPoint());
+
         // A click on the summary scrolls the terminal to the agent's words.
         auto *point = rig.find("summary1_0");
         QTest::qWait(50);

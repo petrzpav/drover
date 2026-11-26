@@ -493,12 +493,16 @@ QString TimelineParser::activity() const {
 }
 
 namespace {
-// Up to 40 characters, ending at a whole word.
+// Up to 40 characters, ending at a whole word (a long first word, like a
+// path or a link, whole).
 QString wordsUpTo40(const QString &text) {
     if (text.size() <= 40)
         return text;
     const int space = text.lastIndexOf(' ', 40);
-    return (space > 12 ? text.left(space) : text.left(40)).trimmed();
+    if (space > 12)
+        return text.left(space).trimmed();
+    const int end = text.indexOf(' ', 40);
+    return (end < 0 ? text : text.left(end)).trimmed();
 }
 } // namespace
 
@@ -1041,6 +1045,13 @@ void Timeline::summaryDone(int code) {
         // The point it is about, to find in the terminal on a click.
         batch.points << QVariantMap{{"text", text}, {"kind", kinds.contains(kind) ? kind : QStringLiteral("note")},
                                     {"index", qBound(job.from, job.from + step - 1, job.to - 1)}};
+    }
+    if (batch.points.isEmpty()) {
+        // Points without words: as good as no reply.
+        if (job.session == m_session)
+            ++m_failures[job.uuid];
+        m_backoffUntil = QDateTime::currentMSecsSinceEpoch() + 60 * 1000;
+        return;
     }
     if (job.session == m_session) {
         m_summaries[job.uuid].append(batch);

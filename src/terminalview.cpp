@@ -805,30 +805,34 @@ void TerminalView::revealStep() {
         m_revealTimer.start(60);
         return;
     }
-    if (still || ++m_revealSteps > 500) {
+    // Down first is only a hint (the point is newer than the last one
+    // found), and an agent printing keeps the bottom from standing still:
+    // a short way, then up.
+    const int budget = m_revealDirection == m_revealFirst && m_revealFirst < 0 ? 20 : 500;
+    if (still || ++m_revealSteps > budget) {
         if (m_revealReturning) {
             endReveal(QStringLiteral("missing"));
             return;
         }
-        m_revealSteps = 0;
         if (m_revealDirection == m_revealFirst) {
             m_revealDirection = -m_revealDirection;
-        } else if (m_revealDirection > 0) {
+        } else if (m_revealDirection < 0 && still) {
+            endReveal(QStringLiteral("missing"));
+            return;
+        } else {
             // Not there at all, and up somewhere: back to the bottom.
             m_revealReturning = true;
             m_revealDirection = -1;
-        } else {
-            endReveal(QStringLiteral("missing"));
-            return;
         }
+        m_revealSteps = 0;
         m_revealScreen.clear();
     }
     m_revealWaits = 0;
     m_revealScreen = screen;
-    // A fifth of the screen a step (three lines a wheel notch, as usual; a
+    // A third of the screen a step (three lines a wheel notch, as usual; a
     // program scrolling more still shows every row on some step); on the way
     // back, a screen at a time.
-    const int lines = m_revealReturning ? qMax(1, m_rows - 2) : qMax(1, m_rows / 5);
+    const int lines = m_revealReturning ? qMax(1, m_rows - 2) : qMax(1, m_rows / 3);
     if (forwardsMouse(Qt::NoModifier)) {
         vterm_mouse_move(m_vt, m_rows / 2, m_cols / 2, VTERM_MOD_NONE);
         for (int i = 0; i < qMax(1, lines / 3); ++i)
