@@ -35,6 +35,8 @@ Surface::Surface(const QString &stateFile, QObject *parent)
                 m_fullscreen = parts[1] == "1";
             else if (parts[0] == "list")
                 m_listHidden = parts[1] == "hidden";
+            else if (parts[0] == "overview")
+                m_overviewShown = parts[1] != "hidden";
         }
     }
 }
@@ -55,14 +57,23 @@ void Surface::setListHidden(bool hidden) {
     emit panelStateChanged();
 }
 
+void Surface::setOverviewShown(bool shown) {
+    if (shown == m_overviewShown)
+        return;
+    m_overviewShown = shown;
+    savePanelState();
+    emit panelStateChanged();
+}
+
 void Surface::savePanelState() {
     QDir().mkpath(QFileInfo(m_panelFile).absolutePath());
     QSaveFile file(m_panelFile);
     if (!file.open(QIODevice::WriteOnly))
         return;
-    file.write(QStringLiteral("fullscreen %1\nlist %2\n")
+    file.write(QStringLiteral("fullscreen %1\nlist %2\noverview %3\n")
                    .arg(m_fullscreen ? 1 : 0)
                    .arg(m_listHidden ? "hidden" : "shown")
+                   .arg(m_overviewShown ? "shown" : "hidden")
                    .toUtf8());
     file.commit();
 }

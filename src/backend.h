@@ -41,6 +41,10 @@ class Backend : public QObject {
     Q_PROPERTY(QString selectedStatus READ selectedStatus NOTIFY selectedInfoChanged)
     // The herdr terminal of the selected agent's pane, for attaching to it.
     Q_PROPERTY(QString selectedTerminal READ selectedTerminal NOTIFY selectedInfoChanged)
+    // The selected agent's kind (claude, codex, ...) and its own session id,
+    // for its transcript.
+    Q_PROPERTY(QString selectedKind READ selectedKind NOTIFY selectedInfoChanged)
+    Q_PROPERTY(QString selectedSession READ selectedSession NOTIFY selectedInfoChanged)
     // herdr's full path, for the terminal to run; empty when it isn't installed.
     Q_PROPERTY(QString herdrPath READ herdr NOTIFY errorChanged)
     // The selected agent's pane closed; nothing is selected until the user
@@ -85,6 +89,8 @@ public:
     QString selectedTitle() const;
     QString selectedStatus() const;
     QString selectedTerminal() const;
+    QString selectedKind() const;
+    QString selectedSession() const;
     bool selectionLost() const { return m_selectionLost; }
     QString notice() const { return m_notice; }
     bool noticeIsError() const { return m_noticeIsError; }

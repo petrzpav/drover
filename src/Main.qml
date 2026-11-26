@@ -179,6 +179,9 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+B"; enabled: win.expanded && !backend.editing && !panel.picker.open
                && backend.selected !== ""; autoRepeat: false; context: Qt.ApplicationShortcut
                onActivated: surface.listHidden = !surface.listHidden }
+    Shortcut { sequence: "Ctrl+Alt+B"; enabled: win.expanded && !panel.picker.open && backend.selected !== ""
+               autoRepeat: false; context: Qt.ApplicationShortcut
+               onActivated: surface.overviewShown = !surface.overviewShown }
     Shortcut { sequence: "F1"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: panel.helpVisible = !panel.helpVisible }
     Shortcut { sequence: "Alt+Up"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: { backend.selectNext(-1); win.focusForAgent() } }
     Shortcut { sequence: "Alt+Down"; enabled: win.expanded; context: Qt.ApplicationShortcut; onActivated: { backend.selectNext(1); win.focusForAgent() } }

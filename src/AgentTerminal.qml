@@ -54,9 +54,9 @@ Item {
         // drover's own shortcuts; every other key belongs to the agent, or
         // the editor, which also takes Ctrl+P (its file finder) and Ctrl+B
         // (its file explorer); the shell keeps Ctrl+B too.
-        reservedShortcuts: root.shell ? ["Alt+Up", "Alt+Down", "Alt+E", "Ctrl+;", "Ctrl+W", "Ctrl+Shift+O", "F1", "Ctrl+Q"]
-                         : root.editor ? ["Alt+Up", "Alt+Down", "Alt+E", "Ctrl+;", "Ctrl+Shift+O", "F1", "Ctrl+Q"]
-                                       : ["Alt+Up", "Alt+Down", "Alt+E", "Ctrl+B", "Ctrl+P", "Ctrl+Shift+O", "F1", "Ctrl+Q"]
+        reservedShortcuts: root.shell ? ["Alt+Up", "Alt+Down", "Alt+E", "Ctrl+;", "Ctrl+W", "Ctrl+Shift+O", "Ctrl+Alt+B", "F1", "Ctrl+Q"]
+                         : root.editor ? ["Alt+Up", "Alt+Down", "Alt+E", "Ctrl+;", "Ctrl+Shift+O", "Ctrl+Alt+B", "F1", "Ctrl+Q"]
+                                       : ["Alt+Up", "Alt+Down", "Alt+E", "Ctrl+B", "Ctrl+P", "Ctrl+Shift+O", "Ctrl+Alt+B", "F1", "Ctrl+Q"]
         extendedKeys: root.editor && backend.editor === "fresh"
         doubleCtrlB: true
         onFinished: root.detached()

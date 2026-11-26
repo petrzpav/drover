@@ -22,12 +22,248 @@
 #include "terminalfont.h"
 #include "terminalview.h"
 #include "theme.h"
+#include "timeline.h"
 #include "translator.h"
+
+
+namespace {
+
+// Transcript lines as Claude Code writes them.
+QByteArray line(QJsonObject object, const char *time = "2026-11-26T09:00:00.000Z") {
+    object.insert("timestamp", time);
+    if (!object.contains("parentUuid"))
+        object.insert("parentUuid", QJsonValue::Null);
+    return QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n';
+}
+QByteArray prompt(const QString &text, const char *time = "2026-11-26T09:00:00.000Z") {
+    return line({{"type", "user"}, {"origin", QJsonObject{{"kind", "human"}}},
+                 {"message", QJsonObject{{"role", "user"}, {"content", text}}}}, time);
+}
+QByteArray use(const QString &id, const QString &name, const QJsonObject &input) {
+    return line({{"type", "assistant"}, {"message", QJsonObject{{"role", "assistant"}, {"content", QJsonArray{
+        QJsonObject{{"type", "tool_use"}, {"id", id}, {"name", name}, {"input", input}}}}}}});
+}
+QByteArray said(const QString &text) {
+    return line({{"type", "assistant"}, {"message", QJsonObject{{"role", "assistant"}, {"content", QJsonArray{
+        QJsonObject{{"type", "text"}, {"text", text}}}}}}});
+}
+QByteArray result(const QString &id, const QString &content, bool error = false, const QJsonObject &extra = {}) {
+    QJsonObject object{{"type", "user"}, {"message", QJsonObject{{"role", "user"}, {"content", QJsonArray{
+        QJsonObject{{"type", "tool_result"}, {"tool_use_id", id}, {"content", content}, {"is_error", error}}}}}}};
+    if (!extra.isEmpty())
+        object.insert("toolUseResult", extra);
+    return line(object);
+}
+QByteArray bash(const QString &id, const QString &command, const QString &description = {}) {
+    QJsonObject input{{"command", command}};
+    if (!description.isEmpty())
+        input.insert("description", description);
+    return use(id, "Bash", input);
+}
+TimelineParser parsed(const QByteArray &transcript) {
+    TimelineParser parser;
+    for (const QByteArray &l : transcript.split('\n'))
+        parser.feed(l);
+    return parser;
+}
+
+} // namespace
 
 class DroverTests : public QObject {
     Q_OBJECT
 
 private slots:
+
+    void theTimelineKeepsWhatMatters()
+    {
+        const auto parser = parsed(
+            prompt("Plant the tomato beds")
+            + use("r1", "Read", {{"file_path", "/home/ann/garden/beds.md"}}) + result("r1", "the beds")
+            + bash("b1", "ls", "List the beds") + result("b1", "a b")
+            + bash("b2", "cat plan", "Read the plan") + result("b2", "plan")
+            + bash("b3", "make", "Build the planner") + result("b3", "Exit code 2\nmake: *** no rule", true)
+            + bash("b4", "git add . && git commit -m \"Plant the south bed\" && git push") + result("b4", "ok")
+            + use("e1", "Edit", {{"file_path", "/home/ann/garden/beds.md"}}) + result("e1", "ok")
+            + use("e2", "Write", {{"file_path", "/home/ann/garden/gate.qml"}}) + result("e2", "ok")
+            + use("e3", "Edit", {{"file_path", "/home/ann/garden/beds.md"}}) + result("e3", "ok")
+            + said("The south bed gets the most sun.")
+            + use("q1", "AskUserQuestion", {{"questions", QJsonArray{QJsonObject{{"question", "Basil too?"}}}}})
+            + result("q1", "The user answered", false, {{"answers", QJsonObject{{"Basil too?", "Yes, between rows"}}}})
+            + line({{"type", "user"}, {"isMeta", true}, {"message", QJsonObject{{"content", "<system-reminder>x"}}}})
+            + line({{"type", "user"}, {"origin", QJsonObject{{"kind", "task-notification"}}},
+                    {"message", QJsonObject{{"content", "<task-notification>done"}}}})
+            + line({{"type", "user"}, {"isSidechain", true}, {"origin", QJsonObject{{"kind", "human"}}},
+                    {"message", QJsonObject{{"content", "a subagent's prompt"}}}})
+            + "{\"type\":\"api-request-blob\",\"message\":{not even json\n"
+            + line({{"type", "attachment"}, {"attachment", QJsonObject{{"type", "queued_command"}, {"commandMode", "prompt"},
+                    {"prompt", "and water them"}, {"origin", QJsonObject{{"kind", "human"}}}}}})
+            + line({{"type", "system"}, {"subtype", "away_summary"},
+                    {"content", "Beds planted, waiting for you. (turn off recaps in /config)"}})
+            + line({{"type", "system"}, {"subtype", "turn_duration"}, {"durationMs", 61000}})
+            + line({{"type", "user"}, {"message", QJsonObject{{"content",
+                    "<command-name>/review</command-name>\n<command-message>review</command-message>\n<command-args>beds</command-args>"}}}})
+            + bash("b5", "sleep 9", "Wait for the soil") + line({{"type", "user"}, {"message", QJsonObject{{"content",
+                    QJsonArray{QJsonObject{{"type", "text"}, {"text", "[Request interrupted by user for tool use]"}}}}}}}));
+
+        const auto &turns = parser.turns();
+        QCOMPARE(turns.size(), 2);
+        QCOMPARE(turns[0].prompt, QString("Plant the tomato beds"));
+        QCOMPARE(turns[0].durationMs, 61000);
+        QStringList kinds, texts, states;
+        for (const auto &item : turns[0].items) {
+            kinds << item.kind;
+            texts << item.text;
+            states << item.state;
+        }
+        QCOMPARE(kinds, (QStringList{"command", "command", "milestone", "edit", "said", "question", "nudge", "recap"}));
+        // Two commands that went well are one point; the failed one is its own.
+        QCOMPARE(texts[0], QString("Read the plan"));
+        QCOMPARE(turns[0].items[0].steps, (QStringList{"List the beds", "Read the plan"}));
+        QCOMPARE(texts[1], QString("Build the planner"));
+        QCOMPARE(states[1], QString("failed"));
+        QCOMPARE(turns[0].items[1].detail, QString("make: *** no rule"));
+        QCOMPARE(texts[2], QString("Commit: Plant the south bed · Push"));
+        QCOMPARE(texts[3], QString("beds.md, gate.qml"));
+        QCOMPARE(turns[0].items[5].detail, QString("Yes, between rows"));
+        QCOMPARE(texts[6], QString("and water them"));
+        QCOMPARE(texts[7], QString("Beds planted, waiting for you."));
+        QVERIFY(states.join("").isEmpty() || states.join("") == "failed");
+
+        QCOMPARE(turns[1].prompt, QString("/review beds"));
+        QCOMPARE(turns[1].items.size(), 2);
+        QCOMPARE(turns[1].items[0].state, QString());
+        QCOMPARE(turns[1].items[1].kind, QString("interrupted"));
+        QCOMPARE(parser.activity(), QString());
+        QCOMPARE(parser.lastSaid(), QString());
+    }
+
+    void theTimelineSaysWhatTheAgentDoesNow()
+    {
+        TimelineParser parser;
+        for (const QByteArray &l : (prompt("Fix the gate") + said("Looking at the hinge.")
+                                    + use("r1", "Read", {{"file_path", "/a/hinge.c"}})).split('\n'))
+            parser.feed(l);
+        QCOMPARE(parser.activity(), QString("Reads hinge.c"));
+        QCOMPARE(parser.lastSaid(), QString("Looking at the hinge."));
+        for (const QByteArray &l : (result("r1", "code") + bash("b1", "make", "Build the gate")).split('\n'))
+            parser.feed(l);
+        QCOMPARE(parser.activity(), QString("Build the gate"));
+        QCOMPARE(parser.turns().last().items.last().state, QString("running"));
+        parser.feed(result("b1", "ok"));
+        QCOMPARE(parser.activity(), QString());
+        QCOMPARE(parser.turns().last().items.last().state, QString());
+        // A denied command says so.
+        for (const QByteArray &l : (bash("b2", "rm -rf /", "Clean up")
+                                    + result("b2", "Permission for this action was denied by the classifier.", true)).split('\n'))
+            parser.feed(l);
+        QCOMPARE(parser.turns().last().items.last().state, QString("denied"));
+    }
+
+    void aFailedCommandOfARunIsTheOneThatFailed()
+    {
+        // Two commands at once: the first fails after the second went well.
+        const auto parser = parsed(prompt("Check the beds") + bash("a", "a", "Measure the soil")
+                                   + bash("b", "b", "Count the seeds") + result("b", "12")
+                                   + result("a", "Exit code 1\nno probe", true));
+        const auto &items = parser.turns().last().items;
+        QCOMPARE(items.size(), 2);
+        QCOMPARE(items[0].text, QString("Count the seeds"));
+        QCOMPARE(items[0].state, QString());
+        QCOMPARE(items[1].text, QString("Measure the soil"));
+        QCOMPARE(items[1].state, QString("failed"));
+        QVERIFY(items[0].id != items[1].id);
+
+        // The first fails while the second still runs: the run goes on.
+        const auto other = parsed(prompt("Check the beds") + bash("a", "a", "Measure the soil")
+                                  + bash("b", "b", "Count the seeds") + result("a", "no probe", true));
+        QCOMPARE(other.turns().last().items[0].state, QString("running"));
+        QCOMPARE(other.turns().last().items[1].text, QString("Measure the soil"));
+        QCOMPARE(other.activity(), QString("Count the seeds"));
+    }
+
+    void theTimelineKnowsWhatChangesTheWorld()
+    {
+        QVERIFY(TimelineParser::isMilestone("git commit -m x"));
+        QVERIFY(TimelineParser::isMilestone("cd a && git -C /x push origin main"));
+        QVERIFY(TimelineParser::isMilestone("gh release create v1.0 pkg.zst"));
+        QVERIFY(TimelineParser::isMilestone("gh pr create --fill"));
+        QVERIFY(TimelineParser::isMilestone("./run.sh deploy beta"));
+        QVERIFY(!TimelineParser::isMilestone("git status && git log --oneline"));
+        QVERIFY(!TimelineParser::isMilestone("gh pr view 12"));
+        QVERIFY(!TimelineParser::isMilestone("flow --pull"));
+        QVERIFY(!TimelineParser::isMilestone("ls deploy/ && cat docker/deploy.yml"));
+        QCOMPARE(TimelineParser::milestoneText({{"command", "git commit -q -m \"$(cat <<'EOF'\nPlant beds\n\nMore\nEOF\n)\""}}),
+                 QString("Commit: Plant beds"));
+        QCOMPARE(TimelineParser::milestoneText({{"command", "gh release create v0.7.0 a.zst"}}), QString("Release v0.7.0"));
+        QCOMPARE(TimelineParser::milestoneText({{"command", "git push"}, {"description", "Push the fix"}}),
+                 QString("Push the fix"));
+        QCOMPARE(TimelineParser::toolLabel("mcp__claude_ai_Linear__save_issue", {}), QString("Linear: save issue"));
+        QCOMPARE(TimelineParser::toolLabel("mcp__claude-in-chrome__computer", {}), QString("Chrome"));
+    }
+
+    void theTimelineFollowsTheTranscript()
+    {
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("projects/-home-ann-garden");
+        const QString path = dir.filePath("projects/-home-ann-garden/s-1.jsonl");
+        write(path, prompt("Plant the beds") + bash("b1", "ls", "List the beds"));
+        QCOMPARE(Timeline::findTranscript(dir.filePath("projects"), "s-1"), path);
+        QCOMPARE(Timeline::findTranscript(dir.filePath("projects"), "../s-1"), QString());
+
+        Timeline timeline;
+        timeline.setProjectsDirectory(dir.filePath("projects"));
+        timeline.setInterval(20);
+        QSignalSpy resets(&timeline, &QAbstractItemModel::modelReset);
+        QSignalSpy changes(&timeline, &QAbstractItemModel::dataChanged);
+        timeline.setSession("s-2");
+        timeline.setActive(true);
+        QTRY_COMPARE(timeline.state(), QString("missing"));
+        timeline.setSession("s-1");
+        QTRY_COMPARE(timeline.state(), QString("ready"));
+        QCOMPARE(timeline.count(), 1);
+        QCOMPARE(timeline.activity(), QString("List the beds"));
+        const QModelIndex first = timeline.index(0);
+        QCOMPARE(first.data(Timeline::PromptRole).toString(), QString("Plant the beds"));
+
+        // Appended lines come in, also a line written in two parts, and the
+        // turn changes in place.
+        const QByteArray more = result("b1", "a b") + said("Both beds are ready.");
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::Append));
+        file.write(more.left(more.size() - 10));
+        file.flush();
+        QTRY_COMPARE(timeline.activity(), QString());
+        file.write(more.mid(more.size() - 10));
+        file.flush();
+        QTRY_COMPARE(timeline.lastSaid(), QString("Both beds are ready."));
+        // Row by row, never all over again, so the list keeps its place.
+        QVERIFY(changes.count() > 0);
+        QCOMPARE(resets.count(), 0);
+        file.write(prompt("Now the gate"));
+        file.flush();
+        QTRY_COMPARE(timeline.count(), 2);
+
+        // Not looking, nothing is read.
+        timeline.setActive(false);
+        file.write(prompt("And the pond"));
+        file.flush();
+        QTest::qWait(100);
+        QCOMPARE(timeline.count(), 2);
+        timeline.setActive(true);
+        QTRY_COMPARE(timeline.count(), 3);
+        file.close();
+
+        // A transcript longer than what is read at first: its end, from a
+        // whole line on.
+        Timeline tail;
+        tail.setProjectsDirectory(dir.filePath("projects"));
+        tail.setTailBytes(prompt("And the pond").size() + 20);
+        tail.setSession("s-1");
+        tail.setActive(true);
+        QTRY_COMPARE(tail.state(), QString("ready"));
+        QCOMPARE(tail.count(), 1);
+        QCOMPARE(tail.index(0).data(Timeline::PromptRole).toString(), QString("And the pond"));
+    }
     void readsTheTerminalFont()
     {
         QTemporaryDir dir;

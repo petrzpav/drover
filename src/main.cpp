@@ -23,6 +23,7 @@
 
 #include "asker.h"
 #include "backend.h"
+#include "timeline.h"
 #include "hook.h"
 #include "surface.h"
 #include "terminalview.h"
@@ -189,6 +190,10 @@ int main(int argc, char *argv[]) {
     QObject::connect(&backend, &Backend::listed, &asker, &Asker::agentsListed);
     QObject::connect(&asker, &Asker::askingChanged, &backend, [&] { backend.setAsking(asker.askingPanes()); });
 
+    // The selected agent's conversation, in points, for the overview.
+    Timeline timeline;
+    QObject::connect(&translator, &Translator::changed, &timeline, &Timeline::reload);
+
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);
@@ -196,6 +201,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("backend", &backend);
     engine.rootContext()->setContextProperty("surface", &surface);
     engine.rootContext()->setContextProperty("asker", &asker);
+    engine.rootContext()->setContextProperty("timeline", &timeline);
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;

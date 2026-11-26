@@ -27,6 +27,7 @@
 #include "terminalfont.h"
 #include "terminalview.h"
 #include "theme.h"
+#include "timeline.h"
 #include "translator.h"
 
 namespace {
@@ -100,6 +101,7 @@ struct Rig {
     std::unique_ptr<Backend> backend;
     std::unique_ptr<Surface> surface;
     std::unique_ptr<Asker> asker;
+    std::unique_ptr<Timeline> timeline;
     QString askServer = "drover-ui-test-" + QUuid::createUuid().toString(QUuid::Id128);
     std::unique_ptr<QQmlApplicationEngine> engine;
     QQuickWindow *window = nullptr;
@@ -141,6 +143,9 @@ esac
         backend.reset(new Backend(herdr, dir.filePath("no-hyprctl")));
         surface.reset(new Surface(dir.filePath("position")));
         asker.reset(new Asker);
+        timeline.reset(new Timeline);
+        timeline->setProjectsDirectory(dir.filePath("projects"));
+        timeline->setInterval(30);
         QVERIFY(asker->listen(askServer));
         QObject::connect(backend.get(), &Backend::listed, asker.get(), &Asker::agentsListed);
         QObject::connect(asker.get(), &Asker::askingChanged, backend.get(), [this] { backend->setAsking(asker->askingPanes()); });
@@ -152,6 +157,7 @@ esac
         engine->rootContext()->setContextProperty("backend", backend.get());
         engine->rootContext()->setContextProperty("surface", surface.get());
         engine->rootContext()->setContextProperty("asker", asker.get());
+        engine->rootContext()->setContextProperty("timeline", timeline.get());
         engine->load(QUrl("qrc:/Main.qml"));
         window = qobject_cast<QQuickWindow *>(engine->rootObjects().value(0));
         QVERIFY(window);
@@ -192,7 +198,8 @@ QByteArray garden(const QStringList &states) {
                                      {"Fix the fence gate", "fence"}, {"Clean up the pond pump", "pond"}};
     QStringList rows;
     for (int i = 0; i < 4; ++i)
-        rows << QString(R"({"agent":"claude","agent_status":"%1","cwd":"/home/ann/Work/%2","pane_id":"w%3:p1",)"
+        rows << QString(R"({"agent":"claude","agent_session":{"kind":"id","value":"garden-%3"},)"
+                        R"("agent_status":"%1","cwd":"/home/ann/Work/%2","pane_id":"w%3:p1",)"
                         R"("terminal_id":"term_%3","terminal_title_stripped":"%4","workspace_id":"w%3"})")
                     .arg(states[i], tasks[i][1]).arg(i + 1).arg(tasks[i][0]);
     return "{\"result\":{\"agents\":[" + rows.join(",").toUtf8() + "]}}";
@@ -534,6 +541,47 @@ private slots:
         text.replace("  \"terminal attach\")\n", QString("  \"terminal attach\")\n    cat '%1/transcript'; exec sleep 60 ;;\n  \"terminal attach-old\")\n").arg(rig.dir.path()));
         write(rig.dir.filePath("herdr"), text.toUtf8());
 
+        // Its conversation so far, for the overview beside the terminal.
+        {
+            QDir(rig.dir.path()).mkpath("projects/-home-ann-Work-garden");
+            QByteArray transcript;
+            const auto add = [&](QJsonObject object) {
+                object.insert("timestamp", "2026-11-26T08:" + QString::number(10 + transcript.count('\n')) + ":00.000Z");
+                transcript += QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n';
+            };
+            const auto prompt = [&](const QString &text) {
+                add({{"type", "user"}, {"origin", QJsonObject{{"kind", "human"}}}, {"message", QJsonObject{{"content", text}}}});
+            };
+            const auto says = [&](const QString &text) {
+                add({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{QJsonObject{{"type", "text"}, {"text", text}}}}}}});
+            };
+            const auto runs = [&](const QString &id, const QString &name, const QJsonObject &input, const QString &out = "ok",
+                                  bool error = false) {
+                add({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
+                    QJsonObject{{"type", "tool_use"}, {"id", id}, {"name", name}, {"input", input}}}}}}});
+                if (!out.isEmpty())
+                    add({{"type", "user"}, {"message", QJsonObject{{"content", QJsonArray{QJsonObject{
+                        {"type", "tool_result"}, {"tool_use_id", id}, {"content", out}, {"is_error", error}}}}}}});
+            };
+            prompt("Plan the tomato beds for this spring, the south side gets the most sun");
+            runs("a", "Bash", {{"command", "ls"}, {"description", "List the beds and their soil tests"}});
+            runs("b", "Bash", {{"command", "cat"}, {"description", "Read last year's harvest notes"}});
+            runs("c", "Bash", {{"command", "make"}, {"description", "Check the planting calendar"}},
+                 "Exit code 1\ncalendar.ics: no events after March", true);
+            says("Last year's calendar ends in March, so I planned from the soil tests alone.");
+            runs("d", "AskUserQuestion", {{"questions", QJsonArray{QJsonObject{{"question", "Basil between the tomato rows?"}}}}}, "");
+            add({{"type", "user"}, {"toolUseResult", QJsonObject{{"answers", QJsonObject{{"Basil between the tomato rows?", "Yes, it keeps pests off"}}}}},
+                 {"message", QJsonObject{{"content", QJsonArray{QJsonObject{{"type", "tool_result"}, {"tool_use_id", "d"}, {"content", "answered"}}}}}}});
+            runs("e", "Edit", {{"file_path", "/home/ann/Work/garden/beds.md"}});
+            runs("f", "Write", {{"file_path", "/home/ann/Work/garden/calendar.ics"}});
+            runs("g", "Bash", {{"command", "git commit -m \"Plan the tomato beds\" && git push"}});
+            says("The plan is in beds.md: tomatoes on the south bed, basil between the rows, sowing from April 12.");
+            prompt("Order the seeds we're missing");
+            says("Looking at what's left in the seed box first.");
+            runs("h", "Bash", {{"command", "grep"}, {"description", "Count the seeds left in the box"}}, "");
+            write(rig.dir.filePath("projects/-home-ann-Work-garden/garden-1.jsonl"), transcript);
+        }
+
         // The window is see-through; the pictures put it on a black desktop.
         const auto grab = [&](const QRect &rect) {
             QImage image(rect.size(), QImage::Format_RGB32);
@@ -811,6 +859,146 @@ private slots:
         QTRY_VERIFY(panel->property("listShown").toBool());
         QVERIFY(panel->property("sidebarShown").toBool());
         QVERIFY(!button->isVisible());
+    }
+
+    void ctrlAltBShowsTheOverview()
+    {
+        // The first agent is Claude with a transcript, the second isn't Claude.
+        Rig rig(R"({"result":{"agents":[
+          {"agent":"claude","agent_session":{"kind":"id","value":"s-1"},"agent_status":"working","cwd":"/a","pane_id":"w1:p1","terminal_id":"term_1","terminal_title_stripped":"Plant the beds","workspace_id":"w1"},
+          {"agent":"codex","agent_status":"idle","cwd":"/b","pane_id":"w2:p1","terminal_id":"term_2","terminal_title_stripped":"Fix the gate","workspace_id":"w2"}]}})");
+        QDir(rig.dir.path()).mkpath("projects/-a");
+        const auto entry = [](const QJsonObject &object) { return QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n'; };
+        QByteArray transcript = entry({{"type", "user"}, {"timestamp", "2026-11-26T09:00:00.000Z"}, {"origin", QJsonObject{{"kind", "human"}}},
+                                       {"message", QJsonObject{{"role", "user"}, {"content", "Plant the tomato beds"}}}});
+        transcript += entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
+            QJsonObject{{"type", "text"}, {"text", "The south bed gets the most sun."}},
+            QJsonObject{{"type", "tool_use"}, {"id", "b1"}, {"name", "Bash"},
+                        {"input", QJsonObject{{"command", "make"}, {"description", "Water the beds"}}}}}}}}});
+        write(rig.dir.filePath("projects/-a/s-1.jsonl"), transcript);
+        rig.surface->setOverviewShown(false);
+
+        rig.expand();
+        auto *panel = rig.find("panel");
+        QTRY_VERIFY(panel->property("agentTerminal").value<QQuickItem *>());
+        auto *terminal = panel->property("agentTerminal").value<QQuickItem *>();
+        QTRY_VERIFY(panel->property("terminalFocused").toBool());
+        auto *overview = rig.find("overview");
+        QVERIFY(overview && !overview->isVisible());
+        auto *button = rig.find("overviewButton");
+        const QPointF place = button->mapToScene(QPointF(0, 0));
+        const qreal wide = terminal->width();
+
+        // Ctrl+Alt+B: the overview takes the terminal's right side, and the
+        // terminal keeps the keyboard; the key never reaches the agent.
+        QTest::keyClick(rig.window, Qt::Key_B, Qt::ControlModifier | Qt::AltModifier);
+        QTRY_VERIFY(overview->isVisible());
+        QTRY_VERIFY(terminal->width() < wide - 300);
+        QVERIFY(panel->property("terminalFocused").toBool());
+        QCOMPARE(button->mapToScene(QPointF(0, 0)), place);
+        QTRY_COMPARE(rig.timeline->state(), QString("ready"));
+        QTRY_COMPARE(rig.find("overviewNowText")->property("text").toString(), QString("Water the beds"));
+        auto *list = rig.find("overviewList");
+        QTRY_COMPARE(list->property("count").toInt(), 1);
+        QTest::keyClick(rig.window, Qt::Key_X);
+        QTRY_VERIFY(rig.log().contains("key 78"));
+        QVERIFY(!rig.log().contains("key 02"));
+
+        // What the agent does next comes in while you look.
+        QFile file(rig.dir.filePath("projects/-a/s-1.jsonl"));
+        QVERIFY(file.open(QIODevice::Append));
+        file.write(entry({{"type", "user"}, {"message", QJsonObject{{"content", QJsonArray{
+            QJsonObject{{"type", "tool_result"}, {"tool_use_id", "b1"}, {"content", "ok"}}}}}}}));
+        file.write(entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
+            QJsonObject{{"type", "text"}, {"text", "Both beds are watered."}}}}}}}));
+        file.close();
+        QTRY_COMPARE(rig.find("overviewNowText")->property("text").toString(), QString("Both beds are watered."));
+
+        // Text is text, even when it looks like markup, and keeps its lines.
+        {
+            QFile more(rig.dir.filePath("projects/-a/s-1.jsonl"));
+            QVERIFY(more.open(QIODevice::Append));
+            for (int i = 0; i < 30; ++i)
+                more.write(entry({{"type", "user"}, {"timestamp", "2026-11-26T09:10:00.000Z"}, {"origin", QJsonObject{{"kind", "human"}}},
+                                  {"message", QJsonObject{{"content", QString("Why does the <b>bed</b> %1 wrap?").arg(i)}}}}));
+            more.close();
+        }
+        QTRY_COMPARE(list->property("count").toInt(), 31);
+        QTRY_VERIFY(list->property("atYEnd").toBool());
+        // Scrolled up, the list stays where you are as more comes.
+        QTest::qWait(100);
+        const QPoint middle = list->mapToScene(QPointF(list->width() / 2, list->height() / 2)).toPoint();
+        for (int i = 0; i < 6; ++i) {
+            QWheelEvent wheel(middle, rig.window->mapToGlobal(middle), QPoint(), QPoint(0, 120), Qt::NoButton, Qt::NoModifier,
+                              Qt::NoScrollPhase, false);
+            QCoreApplication::sendEvent(rig.window, &wheel);
+        }
+        QTRY_VERIFY(!list->property("atYEnd").toBool());
+        QTRY_VERIFY(!list->property("moving").toBool());
+        QTest::qWait(100);
+        const qreal scrolled = list->property("contentY").toReal();
+        {
+            QFile more(rig.dir.filePath("projects/-a/s-1.jsonl"));
+            QVERIFY(more.open(QIODevice::Append));
+            more.write(entry({{"type", "user"}, {"origin", QJsonObject{{"kind", "human"}}},
+                              {"message", QJsonObject{{"content", "One more"}}}}));
+        }
+        QTRY_COMPARE(list->property("count").toInt(), 32);
+        QTest::qWait(100);
+        QCOMPARE(list->property("contentY").toReal(), scrolled);
+        // The agent's words keep their lines.
+        {
+            QFile more(rig.dir.filePath("projects/-a/s-1.jsonl"));
+            QVERIFY(more.open(QIODevice::Append));
+            more.write(entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
+                QJsonObject{{"type", "text"}, {"text", "Line <one>\nLine two"}}}}}}}));
+        }
+        QTRY_VERIFY(rig.find("pointText4"));
+        QTRY_COMPARE(rig.find("pointText4")->property("lineCount").toInt(), 2);
+
+        // Kept for the next start.
+        QVERIFY(rig.surface->overviewShown());
+        Surface again(rig.dir.filePath("position"));
+        QVERIFY(again.overviewShown());
+
+        // Another kind of agent: the overview stays, so nothing moves, and says why it's empty.
+        QTest::keyClick(rig.window, Qt::Key_Down, Qt::AltModifier);
+        QTRY_COMPARE(rig.backend->selected(), QString("w2:p1"));
+        QTRY_COMPARE(rig.timeline->session(), QString());
+        QVERIFY(overview->isVisible());
+
+        // The button hides it again, from the same place.
+        QTest::mouseClick(rig.window, Qt::LeftButton, {},
+                          button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+        QTRY_VERIFY(!overview->isVisible());
+        QVERIFY(!rig.surface->overviewShown());
+        QVERIFY(!rig.timeline->active());
+    }
+
+    void aNarrowPanelHasTheOverviewOverTheTerminal()
+    {
+        Rig rig(agents("working", "idle"));
+        rig.window->resize(820, 900);
+        rig.expand();
+        auto *panel = rig.find("panel");
+        QTRY_VERIFY(panel->property("agentTerminal").value<QQuickItem *>());
+        auto *overview = rig.find("overview");
+        auto *area = rig.find("terminalArea");
+        QTRY_VERIFY(overview->isVisible());
+        // Too narrow for both: the terminal keeps its width, the overview lies over it.
+        const QRectF panelRect = rig.window->property("panelRect").toRectF();
+        QTRY_VERIFY(panelRect.contains(overview->mapRectToScene(overview->boundingRect())));
+        QCOMPARE(area->width(), overview->parentItem()->width());
+        // The terminal detached: its message and button are above the overview.
+        area->setProperty("detached", true);
+        auto *again = rig.find("attachAgain");
+        QTRY_VERIFY(again->isVisible());
+        const QPointF center = again->mapToScene(QPointF(again->width() / 2, again->height() / 2));
+        QVERIFY(overview->contains(overview->mapFromScene(center)));
+        // A frame for the button to take the pointer.
+        QTest::qWait(50);
+        QTest::mouseClick(rig.window, Qt::LeftButton, {}, center.toPoint());
+        QTRY_VERIFY(!area->property("detached").toBool());
     }
 
     void superAltHPutsThePanelOverTheWholeScreen()

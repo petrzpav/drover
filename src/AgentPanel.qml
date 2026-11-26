@@ -72,12 +72,20 @@ Rectangle {
     readonly property color line: Qt.alpha(theme.foreground, 0.12)
     readonly property color dim: Qt.alpha(theme.foreground, 0.55)
     readonly property int sidebarWidth: 280
+    readonly property int overviewWidth: 360
+    // A narrow panel's header keeps to the dot and icons, so it never runs
+    // past the panel's edge.
+    readonly property bool compactHeader: width - (listShown ? sidebarWidth : 0) < 640
     readonly property int headerHeight: 48
 
     color: theme.background
     radius: theme.radius
     border.width: 2
     border.color: theme.border
+
+    // The overview follows the selected Claude agent while it shows.
+    Binding { target: timeline; property: "session"; value: backend.selectedKind === "claude" ? backend.selectedSession : "" }
+    Binding { target: timeline; property: "active"; value: panel.attached && surface.overviewShown && backend.selected !== "" }
 
     function statusLabel(status) {
         switch (status) {
@@ -361,7 +369,7 @@ Rectangle {
                 // Quiet, in a fixed width, so the title never re-elides; the dot
                 // carries the state's color.
                 Text {
-                    visible: backend.selected !== ""
+                    visible: backend.selected !== "" && !panel.compactHeader
                     Layout.preferredWidth: Math.max(...["working", "blocked", "done", "idle", "unknown"].map(
                         s => statusMetrics.advanceWidth("·  " + panel.statusLabel(s))))
                     text: "·  " + panel.statusLabel(backend.selectedStatus)
@@ -409,7 +417,7 @@ Rectangle {
                                 width: segments.parent.segmentWidth
                                 implicitHeight: 26
                                 icon: modelData.icon
-                                label: modelData.label
+                                label: panel.compactHeader ? "" : modelData.label
                                 tint: current ? theme.foreground : panel.dim
                                 hint: modelData.view === "editor" ? qsTr("Edit files beside the agent") : qsTr("Back to the agent")
                                 shortcut: "Alt+E"
@@ -436,6 +444,15 @@ Rectangle {
                     onClicked: panel.fullscreenToggled()
                 }
                 IconButton {
+                    objectName: "overviewButton"
+                    icon: "\uf0ca"
+                    hint: qsTr("Show or hide the overview of the conversation")
+                    shortcut: "Ctrl+Alt+B"
+                    tint: surface.overviewShown ? theme.foreground : panel.dim
+                    enabled: backend.selected !== ""
+                    onClicked: surface.overviewShown = !surface.overviewShown
+                }
+                IconButton {
                     icon: ""
                     hint: qsTr("Keyboard shortcuts")
                     shortcut: "F1"
@@ -452,167 +469,204 @@ Rectangle {
 
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: panel.line }
 
-            // The terminal, attached to the selected agent.
+            // The terminal, and the overview of the conversation beside it.
             Item {
-                id: terminalArea
+                id: conversationBody
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                readonly property bool overviewShown: surface.overviewShown && backend.selected !== ""
+                // Too narrow for both, the overview lies over the terminal's
+                // right side, and the terminal keeps its width.
+                readonly property bool overviewBeside: width >= panel.overviewWidth + 480
 
-                property bool detached: false
-                // The terminals' size: while the panel glides to another size
-                // they keep theirs, clipped, and take the new one once at the
-                // end, so the agent's screen is redrawn once, not every frame.
-                clip: true
-                property real areaWidth: 0
-                property real areaHeight: 0
-                Binding {
-                    target: terminalArea; property: "areaWidth"; value: terminalArea.width
-                    when: !panel.morphing; restoreMode: Binding.RestoreNone
-                }
-                Binding {
-                    target: terminalArea; property: "areaHeight"; value: terminalArea.height
-                    when: !panel.morphing; restoreMode: Binding.RestoreNone
-                }
-                Connections {
-                    target: backend
-                    function onSelectedChanged() { terminalArea.detached = false }
-                    // The other view comes to the front with the keyboard.
-                    function onEditorChanged() {
-                        if (panel.attached && !panel.helpVisible && !panel.picker.open)
-                            Qt.callLater(panel.focusTerminal)
+                // The terminal, attached to the selected agent.
+                Item {
+                    id: terminalArea
+                    objectName: "terminalArea"
+                    width: conversationBody.width
+                           - (conversationBody.overviewShown && conversationBody.overviewBeside ? panel.overviewWidth : 0)
+                    height: conversationBody.height
+
+                    property bool detached: false
+                    // The terminals' size: while the panel glides to another size
+                    // they keep theirs, clipped, and take the new one once at the
+                    // end, so the agent's screen is redrawn once, not every frame.
+                    clip: true
+                    property real areaWidth: 0
+                    property real areaHeight: 0
+                    Binding {
+                        target: terminalArea; property: "areaWidth"; value: terminalArea.width
+                        when: !panel.morphing; restoreMode: Binding.RestoreNone
                     }
-                    // The terminal takes the keyboard as it shows, the editor as it hides.
-                    function onShellChanged() {
-                        if (!panel.attached || panel.helpVisible || panel.picker.open)
+                    Binding {
+                        target: terminalArea; property: "areaHeight"; value: terminalArea.height
+                        when: !panel.morphing; restoreMode: Binding.RestoreNone
+                    }
+                    Connections {
+                        target: backend
+                        function onSelectedChanged() { terminalArea.detached = false }
+                        // The other view comes to the front with the keyboard.
+                        function onEditorChanged() {
+                            if (panel.attached && !panel.helpVisible && !panel.picker.open)
+                                Qt.callLater(panel.focusTerminal)
+                        }
+                        // The terminal takes the keyboard as it shows, the editor as it hides.
+                        function onShellChanged() {
+                            if (!panel.attached || panel.helpVisible || panel.picker.open)
+                                return
+                            Qt.callLater(() => {
+                                if (backend.shellShown && panel.shellTerminal)
+                                    panel.shellTerminal.focusTerminal()
+                                else if (panel.editorTerminal)
+                                    panel.editorTerminal.focusTerminal()
+                            })
+                        }
+                    }
+                    // The editor's side, split when its terminal shows: the editor
+                    // above, the terminal below over the whole width.
+                    readonly property real shellHeight: backend.editing && backend.shellShown
+                        ? Math.round(terminalArea.areaHeight * 0.35) : 0
+
+                    // Switching agents keeps the previous terminal on screen until
+                    // the new one has drawn, so nothing flashes blank.
+                    readonly property string agentKey: panel.attached && !terminalArea.detached && backend.selectedTerminal !== ""
+                        && backend.herdrPath !== "" ? backend.selectedTerminal + "#" + panel.attachRound : ""
+                    onAgentKeyChanged: {
+                        if (agentKey === "") {
+                            agentTerminals.clear()
                             return
-                        Qt.callLater(() => {
-                            if (backend.shellShown && panel.shellTerminal)
-                                panel.shellTerminal.focusTerminal()
-                            else if (panel.editorTerminal)
-                                panel.editorTerminal.focusTerminal()
-                        })
+                        }
+                        if (agentTerminals.count > 0 && agentTerminals.get(agentTerminals.count - 1).key === agentKey)
+                            return
+                        while (agentTerminals.count > 1)
+                            agentTerminals.remove(0)
+                        agentTerminals.append({ key: agentKey })
                     }
-                }
-                // The editor's side, split when its terminal shows: the editor
-                // above, the terminal below over the whole width.
-                readonly property real shellHeight: backend.editing && backend.shellShown
-                    ? Math.round(terminalArea.areaHeight * 0.35) : 0
+                    function dropOlderAgentTerminals() {
+                        while (agentTerminals.count > 1)
+                            agentTerminals.remove(0)
+                    }
+                    ListModel { id: agentTerminals }
+                    Repeater {
+                        id: terminals
+                        model: agentTerminals
+                        delegate: AgentTerminal {
+                            required property string key
+                            required property int index
+                            readonly property bool newest: index === agentTerminals.count - 1
+                            terminalId: key.split("#")[0]
+                            // While the editor is still drawing, the agent stays in view.
+                            visible: !backend.editing || !(panel.editorTerminal && panel.editorTerminal.ready)
+                            opacity: !newest || ready ? 1 : 0
+                            width: terminalArea.areaWidth
+                            height: terminalArea.areaHeight
+                            onReadyChanged: if (ready && newest) terminalArea.dropOlderAgentTerminals()
+                            onDetached: if (newest) terminalArea.detached = true
+                            Component.onCompleted: if (panel.attached && !backend.editing && !panel.picker.open && !panel.helpVisible) focusTerminal()
+                        }
+                    }
+                    Repeater {
+                        id: editorTerminals
+                        model: panel.attached && backend.editorTerminal !== "" && backend.herdrPath !== ""
+                               ? [backend.editorTerminal + "#" + panel.attachRound] : []
+                        delegate: AgentTerminal {
+                            required property string modelData
+                            objectName: "editorTerminal"
+                            terminalId: modelData.split("#")[0]
+                            editor: true
+                            visible: backend.editing
+                            opacity: ready ? 1 : 0
+                            width: terminalArea.areaWidth
+                            height: terminalArea.areaHeight - (terminalArea.shellHeight > 0 ? terminalArea.shellHeight + 1 : 0)
+                            // An editor that quits closes its pane: back to the agent.
+                            onDetached: backend.editorClosed()
+                            Component.onCompleted: if (panel.attached && visible && !panel.picker.open && !panel.helpVisible) focusTerminal()
+                        }
+                    }
+                    Rectangle {
+                        visible: terminalArea.shellHeight > 0
+                        y: terminalArea.areaHeight - terminalArea.shellHeight - 1
+                        width: terminalArea.areaWidth
+                        height: 1
+                        color: panel.line
+                    }
+                    Repeater {
+                        id: shellTerminals
+                        model: panel.attached && backend.shellTerminal !== "" && backend.herdrPath !== ""
+                               ? [backend.shellTerminal + "#" + panel.attachRound] : []
+                        delegate: AgentTerminal {
+                            required property string modelData
+                            objectName: "shellTerminal"
+                            terminalId: modelData.split("#")[0]
+                            shell: true
+                            // Hidden, it keeps its size, so its pane isn't squeezed.
+                            visible: backend.editing && terminalArea.shellHeight > 0
+                            y: terminalArea.areaHeight - height
+                            width: terminalArea.areaWidth
+                            height: Math.round(terminalArea.areaHeight * 0.35)
+                            // Its shell exited: the terminal is gone.
+                            onDetached: backend.shellClosed()
+                            Component.onCompleted: if (panel.attached && visible && !panel.picker.open && !panel.helpVisible) focusTerminal()
+                        }
+                    }
 
-                // Switching agents keeps the previous terminal on screen until
-                // the new one has drawn, so nothing flashes blank.
-                readonly property string agentKey: panel.attached && !terminalArea.detached && backend.selectedTerminal !== ""
-                    && backend.herdrPath !== "" ? backend.selectedTerminal + "#" + panel.attachRound : ""
-                onAgentKeyChanged: {
-                    if (agentKey === "") {
-                        agentTerminals.clear()
-                        return
-                    }
-                    if (agentTerminals.count > 0 && agentTerminals.get(agentTerminals.count - 1).key === agentKey)
-                        return
-                    while (agentTerminals.count > 1)
-                        agentTerminals.remove(0)
-                    agentTerminals.append({ key: agentKey })
                 }
-                function dropOlderAgentTerminals() {
-                    while (agentTerminals.count > 1)
-                        agentTerminals.remove(0)
+
+                Overview {
+                    id: overview
+                    objectName: "overview"
+                    x: conversationBody.width - width
+                    width: panel.overviewWidth
+                    height: conversationBody.height
+                    visible: conversationBody.overviewShown
+                    statusLabel: panel.statusLabel
                 }
-                ListModel { id: agentTerminals }
-                Repeater {
-                    id: terminals
-                    model: agentTerminals
-                    delegate: AgentTerminal {
-                        required property string key
-                        required property int index
-                        readonly property bool newest: index === agentTerminals.count - 1
-                        terminalId: key.split("#")[0]
-                        // While the editor is still drawing, the agent stays in view.
-                        visible: !backend.editing || !(panel.editorTerminal && panel.editorTerminal.ready)
-                        opacity: !newest || ready ? 1 : 0
-                        width: terminalArea.areaWidth
-                        height: terminalArea.areaHeight
-                        onReadyChanged: if (ready && newest) terminalArea.dropOlderAgentTerminals()
-                        onDetached: if (newest) terminalArea.detached = true
-                        Component.onCompleted: if (panel.attached && !backend.editing && !panel.picker.open && !panel.helpVisible) focusTerminal()
-                    }
-                }
-                Repeater {
-                    id: editorTerminals
-                    model: panel.attached && backend.editorTerminal !== "" && backend.herdrPath !== ""
-                           ? [backend.editorTerminal + "#" + panel.attachRound] : []
-                    delegate: AgentTerminal {
-                        required property string modelData
-                        objectName: "editorTerminal"
-                        terminalId: modelData.split("#")[0]
-                        editor: true
-                        visible: backend.editing
-                        opacity: ready ? 1 : 0
-                        width: terminalArea.areaWidth
-                        height: terminalArea.areaHeight - (terminalArea.shellHeight > 0 ? terminalArea.shellHeight + 1 : 0)
-                        // An editor that quits closes its pane: back to the agent.
-                        onDetached: backend.editorClosed()
-                        Component.onCompleted: if (panel.attached && visible && !panel.picker.open && !panel.helpVisible) focusTerminal()
-                    }
-                }
+
+                // Why there is no terminal, in the terminal's middle: on a card
+                // above the overview where that lies over the terminal.
                 Rectangle {
-                    visible: terminalArea.shellHeight > 0
-                    y: terminalArea.areaHeight - terminalArea.shellHeight - 1
-                    width: terminalArea.areaWidth
-                    height: 1
-                    color: panel.line
-                }
-                Repeater {
-                    id: shellTerminals
-                    model: panel.attached && backend.shellTerminal !== "" && backend.herdrPath !== ""
-                           ? [backend.shellTerminal + "#" + panel.attachRound] : []
-                    delegate: AgentTerminal {
-                        required property string modelData
-                        objectName: "shellTerminal"
-                        terminalId: modelData.split("#")[0]
-                        shell: true
-                        // Hidden, it keeps its size, so its pane isn't squeezed.
-                        visible: backend.editing && terminalArea.shellHeight > 0
-                        y: terminalArea.areaHeight - height
-                        width: terminalArea.areaWidth
-                        height: Math.round(terminalArea.areaHeight * 0.35)
-                        // Its shell exited: the terminal is gone.
-                        onDetached: backend.shellClosed()
-                        Component.onCompleted: if (panel.attached && visible && !panel.picker.open && !panel.helpVisible) focusTerminal()
-                    }
-                }
-
-                Column {
-                    anchors.centerIn: parent
-                    width: parent.width - 48
-                    spacing: 12
+                    anchors.centerIn: terminalArea
+                    width: Math.min(terminalArea.width - 32, 440)
+                    height: message.implicitHeight + 24
                     visible: panel.terminal === null
-                    Text {
-                        width: parent.width
-                        horizontalAlignment: Text.AlignHCenter
-                        wrapMode: Text.Wrap
-                        text: backend.herdrPath === "" ? qsTr("herdr is not installed.")
-                            : terminalArea.detached ? qsTr("The terminal was detached from the agent.")
-                            : backend.selectionLost ? qsTr("The agent you were talking to is gone. Pick another one.")
-                            : list.count > 0 ? qsTr("Pick an agent to talk to it.") : ""
-                        color: panel.dim
-                    }
-                    IconButton {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        visible: terminalArea.detached && backend.selected !== ""
-                        label: qsTr("Attach again")
-                        border.width: 1
-                        border.color: theme.border
-                        onClicked: {
-                            terminalArea.detached = false
-                            panel.attachRound++
+                    radius: theme.radius
+                    color: theme.background
+                    border.width: conversationBody.overviewShown && !conversationBody.overviewBeside ? 1 : 0
+                    border.color: panel.line
+                    Column {
+                        id: message
+                        anchors.centerIn: parent
+                        width: parent.width - 24
+                        spacing: 12
+                        Text {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                            text: backend.herdrPath === "" ? qsTr("herdr is not installed.")
+                                : terminalArea.detached ? qsTr("The terminal was detached from the agent.")
+                                : backend.selectionLost ? qsTr("The agent you were talking to is gone. Pick another one.")
+                                : list.count > 0 ? qsTr("Pick an agent to talk to it.") : ""
+                            color: panel.dim
+                        }
+                        IconButton {
+                            objectName: "attachAgain"
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            visible: terminalArea.detached && backend.selected !== ""
+                            label: qsTr("Attach again")
+                            border.width: 1
+                            border.color: theme.border
+                            onClicked: {
+                                terminalArea.detached = false
+                                panel.attachRound++
+                            }
                         }
                     }
                 }
 
                 // The result of an action, over the terminal's bottom corner.
                 Rectangle {
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
+                    anchors.right: terminalArea.right
+                    anchors.bottom: terminalArea.bottom
                     anchors.margins: 16
                     opacity: backend.notice !== "" ? 1 : 0
                     visible: backend.notice !== "" || opacity > 0
@@ -680,6 +734,7 @@ Rectangle {
                         "Ctrl+;", qsTr("In the editor: show or hide a terminal below it (Ctrl+W closes it)"),
                         "Ctrl+Shift+O", qsTr("Open the agent in herdr"),
                         "Ctrl+B", qsTr("In the agent view: show or hide the agent list"),
+                        "Ctrl+Alt+B", qsTr("Show or hide the overview of the conversation"),
                         "Super+H", qsTr("Show or hide the panel"),
                         "Super+Alt+H", qsTr("Put the panel over the whole screen, and back"),
                         "Esc", qsTr("Close the picker or help; outside the terminal, hide the panel"),

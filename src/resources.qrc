@@ -13,6 +13,7 @@
         <file alias="Hint.qml">Hint.qml</file>
         <file alias="WorkspacePicker.qml">WorkspacePicker.qml</file>
         <file alias="AgentTerminal.qml">AgentTerminal.qml</file>
+        <file alias="Overview.qml">Overview.qml</file>
         <file alias="AskStage.qml">AskStage.qml</file>
         <file alias="StageSheep.qml">StageSheep.qml</file>
         <file alias="i18n/en.json">i18n/en.json</file>

@@ -25,6 +25,10 @@ who needs you, and you answer them without leaving what you're doing.
   opens in a panel: Shift+Tab, Esc, Ctrl+C, menus and colors work as they do in
   herdr. `Alt+↑` `Alt+↓` switch agents instantly, `Super+Alt+H` puts the panel
   over the whole screen, and `Ctrl+B` hides the agent list.
+- **What the agent did, at a glance.** Beside the terminal, an overview
+  lists each of your prompts with what came of it: commands, failures,
+  commits and pushes, edited files, its questions with your answers, and
+  what it said. `Ctrl+Alt+B` hides it.
 - **An editor beside every agent.** `Alt+E` opens [Fresh](https://github.com/sinelaw/fresh)
   in the agent's folder, and `Ctrl+;` opens a shell below it.
 - **New agents in a keystroke.** `Ctrl+P` lists your running agents to jump
@@ -134,6 +138,7 @@ size while it's open and gets herdr's size back when you close it.
 | `Super+H` | Show or hide the panel; with a question on stage, give it the keyboard |
 | `Super+Alt+H` | Put the panel over the whole screen, and back |
 | `Ctrl+B` | In the agent view: show or hide the agent list. Its button stays in the header, red when another agent asks |
+| `Ctrl+Alt+B` | Show or hide the overview of the conversation |
 | `Alt+↑` `Alt+↓` | Pick an agent |
 | `Alt+E` | Switch between the agent and its editor |
 | `Ctrl+;` (editor) | Show or hide a shell below the editor |
@@ -142,11 +147,26 @@ size while it's open and gets herdr's size back when you close it.
 | `Shift`+drag, `Ctrl+Shift+C` `V` | Select, copy, paste |
 | `F1` | All shortcuts |
 
+On the terminal's right is an overview of the selected Claude agent's
+conversation, read from its transcript in `~/.claude/projects`. At the top is
+what the agent does right now, or its last words. Below, each of your prompts
+lists what came of it. Commands in a row become one line, with the number of
+the others after it. A failed or refused command gets a red line of its own,
+and commits, pushes, releases and deploys a green one. Files edited with
+Claude's Edit and Write tools are listed too; changes made by shell commands
+show as those commands' descriptions. The agent's questions with your answers, what you typed while it worked, what it
+said and Claude's recaps are there too. Reading and searching are left out.
+Click a line to see all of it: the whole text, the error, every command of a
+run. The list stays at the bottom as the agent goes on, unless you scrolled up.
+When the panel is too narrow for both, the overview lies over the terminal's
+right side. drover reads only the end of a long transcript, and only while
+the overview shows.
+
 Any other key goes to the agent, as in herdr. In the agent view, `Ctrl+B` is
 drover's, not Claude's (run in the background); the editor and the shell keep
 theirs. Mouse wheel and clicks go to herdr too, which scrolls the agent's
-history. drover remembers the full screen and the hidden list, also after a
-restart.
+history. drover remembers the full screen, the hidden list and the hidden
+overview, also after a restart.
 
 ## Configuration
 

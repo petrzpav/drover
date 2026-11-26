@@ -1,4 +1,4 @@
-QT += core gui quick quickcontrols2 testlib network dbus
+QT += core gui quick quickcontrols2 testlib network dbus concurrent
 CONFIG += c++20 testcase
 TARGET = drover_tests
 TEMPLATE = app
@@ -6,5 +6,5 @@ TEMPLATE = app
 INCLUDEPATH += ../src
 LIBS += -lvterm -lutil
 
-HEADERS += ../src/asker.h ../src/hook.h ../src/agentmodel.h ../src/backend.h ../src/terminalview.h ../src/theme.h ../src/freshtheme.h ../src/translator.h ../src/terminalfont.h
-SOURCES += drover_tests.cpp ../src/asker.cpp ../src/hook.cpp ../src/agentmodel.cpp ../src/backend.cpp ../src/terminalview.cpp ../src/theme.cpp ../src/freshtheme.cpp ../src/translator.cpp ../src/terminalfont.cpp
+HEADERS += ../src/asker.h ../src/hook.h ../src/agentmodel.h ../src/backend.h ../src/terminalview.h ../src/theme.h ../src/timeline.h ../src/freshtheme.h ../src/translator.h ../src/terminalfont.h
+SOURCES += drover_tests.cpp ../src/asker.cpp ../src/hook.cpp ../src/agentmodel.cpp ../src/backend.cpp ../src/terminalview.cpp ../src/theme.cpp ../src/timeline.cpp ../src/freshtheme.cpp ../src/translator.cpp ../src/terminalfont.cpp

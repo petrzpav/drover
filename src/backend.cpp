@@ -89,6 +89,16 @@ QString Backend::selectedTerminal() const {
     return row < 0 ? QString() : m_model.agents().at(row).terminalId;
 }
 
+QString Backend::selectedKind() const {
+    const int row = selectedIndex();
+    return row < 0 ? QString() : m_model.agents().at(row).kind;
+}
+
+QString Backend::selectedSession() const {
+    const int row = selectedIndex();
+    return row < 0 ? QString() : m_model.agents().at(row).sessionId;
+}
+
 QString Backend::selectedStatus() const {
     const int row = selectedIndex();
     return row < 0 ? QString() : m_model.agents().at(row).status;
@@ -280,7 +290,8 @@ void Backend::applyAgents(const QList<Agent> &listedAgents) {
         if (m_asking.contains(agent.paneId))
             agent.status = QStringLiteral("blocked");
     emit listed(listedAgents);
-    const QString before = selectedTitle() + '\n' + selectedStatus() + '\n' + QString::number(selectedIndex());
+    const QString before = selectedTitle() + '\n' + selectedStatus() + '\n' + QString::number(selectedIndex()) + '\n'
+                           + selectedKind() + '\n' + selectedSession();
     // An agent counts as ended once it has been missing for three seconds,
     // so a moment herdr doesn't see it never closes its editor.
     const auto listed = [&](const QString &paneId) {
@@ -340,7 +351,8 @@ void Backend::applyAgents(const QList<Agent> &listedAgents) {
         select(agents.first().paneId);
         return;
     }
-    if (before != selectedTitle() + '\n' + selectedStatus() + '\n' + QString::number(selectedIndex()))
+    if (before != selectedTitle() + '\n' + selectedStatus() + '\n' + QString::number(selectedIndex()) + '\n'
+                           + selectedKind() + '\n' + selectedSession())
         emit selectedInfoChanged();
 }
 

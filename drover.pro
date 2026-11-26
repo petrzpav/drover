@@ -1,4 +1,4 @@
-QT += core gui qml quick quickcontrols2 network dbus
+QT += core gui qml quick quickcontrols2 network dbus concurrent
 
 CONFIG += c++20 release
 TARGET = drover
@@ -21,6 +21,7 @@ HEADERS += \
     src/terminalview.h \
     src/terminalfont.h \
     src/theme.h \
+    src/timeline.h \
     src/translator.h
 
 SOURCES += \
@@ -34,6 +35,7 @@ SOURCES += \
     src/terminalview.cpp \
     src/terminalfont.cpp \
     src/theme.cpp \
+    src/timeline.cpp \
     src/translator.cpp
 
 RESOURCES += src/resources.qrc
