@@ -13,6 +13,7 @@
 #include <QSocketNotifier>
 #include <QTimer>
 #include <QWheelEvent>
+#include <QRegularExpression>
 #include <cerrno>
 #include <csignal>
 #include <cstring>
@@ -747,14 +748,17 @@ QString TerminalView::squeezed(const QString &text) {
     return text.simplified();
 }
 
-void TerminalView::reveal(const QString &needle) {
+void TerminalView::reveal(const QString &needle, int direction) {
     stopRevealing();
-    m_needle = squeezed(needle);
-    if (m_needle.isEmpty()) {
+    const QString words = squeezed(needle);
+    if (words.isEmpty()) {
         emit revealEnded(QStringLiteral("missing"));
         return;
     }
-    m_revealDirection = 1;
+    // The words as words: not inside longer ones.
+    m_needle = QRegularExpression("(?<!\\w)" + QRegularExpression::escape(words) + "(?!\\w)");
+    m_revealFirst = m_revealDirection = direction < 0 ? -1 : 1;
+    m_revealReturning = false;
     m_revealSteps = m_revealWaits = 0;
     m_revealScreen.clear();
     if (!m_revealTimer.isSingleShot()) {
@@ -782,38 +786,49 @@ void TerminalView::endReveal(const QString &result) {
     emit revealEnded(result);
 }
 
+// One step: the words in view end it; otherwise the history moves on a
+// fifth of the screen. At the history's end (the screen stays as it was), or
+// after a long way, the other direction; after both, back to the bottom.
 void TerminalView::revealStep() {
     if (m_revealDirection == 0)
         return;
-    if (visibleText().contains(m_needle)) {
+    if (!m_revealReturning && m_needle.match(visibleText()).hasMatch()) {
         endReveal(QStringLiteral("found"));
         return;
     }
     // Whether the history moved, by its upper rows: an agent at work redraws
     // its spinner and status at the bottom all the time.
     const QString screen = visibleText(qMax(1, m_rows * 2 / 3));
-    if (screen == m_revealScreen) {
-        // The program may take a moment to redraw; past that, this is an
-        // end of its history.
-        if (++m_revealWaits < 6) {
-            m_revealTimer.start(50);
-            return;
-        }
-        if (m_revealDirection < 0) {
+    const bool still = screen == m_revealScreen;
+    // A program may take a moment to redraw.
+    if (still && ++m_revealWaits < 10) {
+        m_revealTimer.start(60);
+        return;
+    }
+    if (still || ++m_revealSteps > 500) {
+        if (m_revealReturning) {
             endReveal(QStringLiteral("missing"));
             return;
         }
-        m_revealDirection = -1;
-    }
-    if (++m_revealSteps > 600) {
-        endReveal(QStringLiteral("missing"));
-        return;
+        m_revealSteps = 0;
+        if (m_revealDirection == m_revealFirst) {
+            m_revealDirection = -m_revealDirection;
+        } else if (m_revealDirection > 0) {
+            // Not there at all, and up somewhere: back to the bottom.
+            m_revealReturning = true;
+            m_revealDirection = -1;
+        } else {
+            endReveal(QStringLiteral("missing"));
+            return;
+        }
+        m_revealScreen.clear();
     }
     m_revealWaits = 0;
     m_revealScreen = screen;
     // A fifth of the screen a step (three lines a wheel notch, as usual; a
-    // program scrolling more still shows every row on some step).
-    const int lines = qMax(1, m_rows / 5);
+    // program scrolling more still shows every row on some step); on the way
+    // back, a screen at a time.
+    const int lines = m_revealReturning ? qMax(1, m_rows - 2) : qMax(1, m_rows / 5);
     if (forwardsMouse(Qt::NoModifier)) {
         vterm_mouse_move(m_vt, m_rows / 2, m_cols / 2, VTERM_MOD_NONE);
         for (int i = 0; i < qMax(1, lines / 3); ++i)

@@ -15,18 +15,20 @@ Rectangle {
     // the terminal went: "seeking", "found", "missing" or "stopped".
     property string picked: ""
     property string pickState: ""
-    // Words to find in the agent's terminal.
-    signal pointPicked(string needle)
+    // Words to find in the agent's terminal, and which way first: down (-1)
+    // for a point newer than the last one found, else up.
+    signal pointPicked(string needle, int direction)
+    // Where the last point found is, as turn and place in it.
+    property real foundAt: -1
+    property real seekingAt: -1
 
     color: theme.background
 
     function pick(key, serial, index) {
-        pickNeedle(key, timeline.needle(serial, index))
-    }
-    function pickNeedle(key, needle) {
         picked = key
         pickState = "seeking"
-        pointPicked(needle)
+        seekingAt = serial * 100000 + index
+        pointPicked(timeline.needle(serial, index), foundAt >= 0 && seekingAt > foundAt ? -1 : 1)
     }
     // A summary point's mark and color.
     function summaryGlyph(kind) {
@@ -47,6 +49,10 @@ Rectangle {
     // The terminal's answer.
     function revealEnded(result) {
         pickState = result
+        if (result === "found")
+            foundAt = seekingAt
+        else if (result === "missing")
+            foundAt = -1
         if (result === "missing")
             missingFade.restart()
     }
@@ -93,6 +99,7 @@ Rectangle {
         function onSessionChanged() {
             overview.picked = ""
             overview.pickState = ""
+            overview.foundAt = -1
             list.follow = true
         }
         // Read again from the start: the points are new ones.
@@ -101,6 +108,10 @@ Rectangle {
                 overview.picked = ""
         }
     }
+
+    // Nothing moves under the pointer: a summary takes the place of its
+    // points once the pointer has left the overview.
+    HoverHandler { id: hover }
 
     // Clicks and the wheel stay here, never reaching the terminal beneath.
     MouseArea {
@@ -155,6 +166,11 @@ Rectangle {
             required property bool summarizing
             width: ListView.view.width
             Component.onCompleted: timeline.want(turn.serial)
+            // The summary as shown: held while the pointer is over the overview.
+            property var shownPoints: []
+            property int shownCovered: 0
+            Binding on shownPoints { value: turn.points; when: !hover.hovered; restoreMode: Binding.RestoreNone }
+            Binding on shownCovered { value: turn.covered; when: !hover.hovered; restoreMode: Binding.RestoreNone }
             spacing: 2
 
             Rectangle {
@@ -214,7 +230,7 @@ Rectangle {
 
             // The summary, for the points it covers.
             Repeater {
-                model: turn.points
+                model: turn.shownPoints
                 delegate: Rectangle {
                     id: summary
                     required property var modelData
@@ -248,7 +264,7 @@ Rectangle {
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: overview.pickNeedle(summary.key, summary.modelData.needle)
+                        onClicked: overview.pick(summary.key, turn.serial, summary.modelData.index)
                     }
                 }
             }
@@ -264,7 +280,7 @@ Rectangle {
                     readonly property string key: "point" + modelData.id
                     readonly property bool failed: modelData.state === "failed" || modelData.state === "denied"
                     readonly property int more: modelData.steps.length - 1
-                    visible: index >= turn.covered
+                    visible: index >= turn.shownCovered
                     x: 6
                     width: turn.width - 12
                     height: body.implicitHeight + 6

@@ -183,9 +183,15 @@ private slots:
 
     void aPointIsFoundByTheWordsTheTerminalShows()
     {
-        QCOMPARE(TimelineParser::shownStart("## The **south** bed\n\n- gets `sun`, see [the plan](beds.md)"),
-                 QString("The south bed gets sun, see the plan"));
-        QCOMPARE(TimelineParser::shownStart("Done.\n```\ncode\n```"), QString("Done."));
+        // The first line as Claude shows it: no marks, a link with its target.
+        QCOMPARE(TimelineParser::shownStart("## The **south** bed\n\n- gets `sun`"), QString("The south bed"));
+        QCOMPARE(TimelineParser::shownStart("See [IG-1](https://x.org/1) for `beds`"),
+                 QString("See IG-1 (https://x.org/1) for beds"));
+        QCOMPARE(TimelineParser::shownStart("```\ncode\n```"), QString());
+        // Up to 40 characters, at a word; what the user typed stays as typed.
+        QCOMPARE(TimelineParser::shownStart("Plant the tomatoes in the south bed please"),
+                 QString("Plant the tomatoes in the south bed"));
+        QCOMPARE(TimelineParser::typedStart("why  is **this**\nbold"), QString("why is **this** bold"));
         const auto parser = parsed(prompt("ok") + said("Planting the **south** bed now.")
                                    + bash("b1", "make", "Water the beds") + result("b1", "ok")
                                    + prompt("Plant the tomatoes in the south bed please")
@@ -193,11 +199,12 @@ private slots:
         const auto &turns = parser.turns();
         // A command: the agent's words before it.
         QCOMPARE(parser.needle(turns[0].serial, 1), QString("Planting the south bed now."));
-        // A prompt: its own words, unless it is short and said again later.
-        QCOMPARE(parser.needle(turns[1].serial, -1), QString("Plant the tomatoes in the south bed plea"));
-        QCOMPARE(parser.needle(turns[1].serial, 0), QString("Plant the tomatoes in the south bed plea"));
+        // A prompt: its own words, unless they are short (they would turn up
+        // anywhere): then the agent's words after them, or none.
+        QCOMPARE(parser.needle(turns[1].serial, -1), QString("Plant the tomatoes in the south bed"));
+        QCOMPARE(parser.needle(turns[1].serial, 0), QString("Plant the tomatoes in the south bed"));
         QCOMPARE(parser.needle(turns[0].serial, -1), QString("Planting the south bed now."));
-        QCOMPARE(parser.needle(turns[2].serial, -1), QString("ok"));
+        QCOMPARE(parser.needle(turns[2].serial, -1), QString());
         QCOMPARE(parser.needle(999, 0), QString());
     }
 
@@ -238,7 +245,9 @@ private slots:
             QCOMPARE(point.value("text").toString(), QString("Done it"));
             QCOMPARE(point.value("kind").toString(), QString("done"));
             // Step 2 is a command: found by the agent's words before it.
-            QCOMPARE(point.value("needle").toString(), QString("Digging the south bed first."));
+            QCOMPARE(point.value("index").toInt(), 1);
+            QCOMPARE(timeline.needle(timeline.index(0).data(Timeline::SerialRole).toLongLong(), 1),
+                     QString("Digging the south bed first."));
             QCOMPARE(timeline.index(0).data(Timeline::CoveredRole).toInt(), 3);
             QFile input(dir.filePath("input"));
             QVERIFY(input.open(QIODevice::ReadOnly));
@@ -296,11 +305,60 @@ private slots:
         }
 
         // Off in the config, or another model.
-        write(dir.filePath("config"), "summary = off\n");
-        QCOMPARE(Timeline::readSummaryModel(dir.filePath("config")), QString());
+        for (const char *off : {"off", "Off", "no", "false", "none", "0"}) {
+            write(dir.filePath("config"), QByteArray("summary = ") + off + "\n");
+            QCOMPARE(Timeline::readSummaryModel(dir.filePath("config")), QString());
+        }
         write(dir.filePath("config"), "summary = haiku  # quick\n");
         QCOMPARE(Timeline::readSummaryModel(dir.filePath("config")), QString("haiku"));
         QCOMPARE(Timeline::readSummaryModel(dir.filePath("none")), QString("sonnet"));
+    }
+
+    void aTurnGoesOnInBatchesAndWaitsForWhatRuns()
+    {
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("projects/-a");
+        const QString path = dir.filePath("projects/-a/s-1.jsonl");
+        QByteArray first = prompt("Plant the beds");
+        first.replace("\"type\":\"user\"", "\"type\":\"user\",\"uuid\":\"u1\"");
+        write(path, first + said("Digging the south bed first.") + bash("b1", "dig", "Dig the bed") + result("b1", "ok")
+                    + said("The bed is planted.")
+                    + line({{"type", "system"}, {"subtype", "turn_duration"}, {"durationMs", 9000}}));
+        qputenv("DROVER_TEST_DIR", dir.path().toUtf8());
+        const auto calls = [&] {
+            QFile file(dir.filePath("calls"));
+            return file.open(QIODevice::ReadOnly) ? int(QString::fromUtf8(file.readAll()).count("--model")) : 0;
+        };
+        Timeline timeline;
+        timeline.setProjectsDirectory(dir.filePath("projects"));
+        timeline.setCacheDirectory(dir.filePath("cache"));
+        timeline.setSummaryProgram(TESTS_DIR "/fake_claude.sh");
+        timeline.setSummaryModel("sonnet");
+        timeline.setInterval(20);
+        timeline.setBatching(2, 0);
+        timeline.setSession("s-1");
+        timeline.setActive(true);
+        QTRY_COMPARE(timeline.index(0).data(Timeline::CoveredRole).toInt(), 3);
+        QCOMPARE(calls(), 1);
+
+        // A notification wakes the agent after the turn's end: its steps wait
+        // for a batch, not a call each.
+        QFile more(path);
+        QVERIFY(more.open(QIODevice::Append));
+        more.write(said("A notification came in.") + said("Looking at it."));
+        more.flush();
+        QTest::qWait(300);
+        QCOMPARE(calls(), 1);
+        // A command still running holds the batch before it: it may fail.
+        more.write(bash("b2", "test", "Run the long tests") + said("Waiting for the tests.") + said("Still waiting.")
+                   + said("Nearly there."));
+        more.flush();
+        QTRY_COMPARE(calls(), 2);
+        QCOMPARE(timeline.index(0).data(Timeline::CoveredRole).toInt(), 5);
+        more.write(result("b2", "Exit code 1\\nfailed", true));
+        more.close();
+        QTRY_VERIFY(timeline.index(0).data(Timeline::ItemsRole).toList().at(5).toMap().value("state") == "failed");
+        QVERIFY(timeline.index(0).data(Timeline::CoveredRole).toInt() <= 5);
     }
 
     void theTimelineKnowsWhatChangesTheWorld()

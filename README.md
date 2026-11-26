@@ -161,14 +161,16 @@ searching are left out.
 
 A model sums up each turn in two to four points as it goes on: `claude -p`
 with Sonnet, one call at a time, on your Claude account. The summary takes
-the place of the points it covers; the newest points show as they come until
-the next batch (four more points and a minute later, or the turn's end). Each
+the place of the points it covers once the pointer is off the overview, so
+nothing moves under it; the newest points show as they come until the next
+batch (four more points and a minute later, or the turn's end). Each
 batch is summed up once and kept in `~/.cache/drover/summaries`. A short turn
 needs no summary, and an older one gets it when you scroll to it. After a
 failed call or a usage limit, summaries rest for a while; `summary = off` in
 the config turns them off.
 
-Click a point and the agent's terminal scrolls to it, with the keyboard.
+Click a point and the agent's terminal scrolls to it, with the keyboard; when
+its words aren't there, the terminal goes back to the bottom.
 Claude folds commands and edits into lines like "Ran 3 shell commands", so
 for those it scrolls to the agent's words just before them. The list stays at
 the bottom as the agent goes on, unless you scrolled up. When the panel is

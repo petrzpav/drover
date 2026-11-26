@@ -620,7 +620,7 @@ Rectangle {
                     height: conversationBody.height
                     visible: conversationBody.overviewShown
                     // The agent's terminal scrolls to the point and takes the keyboard.
-                    onPointPicked: (needle) => {
+                    onPointPicked: (needle, direction) => {
                         if (backend.editing)
                             backend.toggleEditor()
                         const terminal = panel.agentTerminal
@@ -628,7 +628,7 @@ Rectangle {
                             overview.revealEnded("missing")
                             return
                         }
-                        terminal.reveal(needle)
+                        terminal.reveal(needle, direction)
                         terminal.focusTerminal()
                     }
                 }

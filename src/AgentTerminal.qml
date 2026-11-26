@@ -24,8 +24,8 @@ Item {
         terminal.sendControl(letter)
     }
     // Scrolls the agent's history until it shows these words.
-    function reveal(needle) {
-        terminal.reveal(needle)
+    function reveal(needle, direction) {
+        terminal.reveal(needle, direction)
     }
     signal revealEnded(string result)
     readonly property bool terminalFocused: terminal.activeFocus

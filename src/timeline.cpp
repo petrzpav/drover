@@ -185,6 +185,10 @@ void TimelineParser::dropPending() {
 
 void TimelineParser::addItem(Item item, const QString &toolId, const QString &activity) {
     Turn &turn = current(item.time);
+    // More of the agent's work after its end (a notification woke it): it
+    // goes on. Claude's recap of an ended turn doesn't.
+    if (item.kind != QLatin1String("recap") && item.kind != QLatin1String("compact"))
+        turn.ended = false;
     if (item.steps.isEmpty())
         item.steps << item.text;
     int index = -1, step = -1;
@@ -488,27 +492,37 @@ QString TimelineParser::activity() const {
     return {};
 }
 
+namespace {
+// Up to 40 characters, ending at a whole word.
+QString wordsUpTo40(const QString &text) {
+    if (text.size() <= 40)
+        return text;
+    const int space = text.lastIndexOf(' ', 40);
+    return (space > 12 ? text.left(space) : text.left(40)).trimmed();
+}
+} // namespace
+
 QString TimelineParser::shownStart(const QString &markdown) {
-    static const QRegularExpression link("\\[([^\\]]*)\\]\\([^)]*\\)");
+    static const QRegularExpression link("\\[([^\\]]*)\\]\\(([^)]*)\\)");
     static const QRegularExpression marks("[*`]|(?<!\\w)_|_(?!\\w)");
     static const QRegularExpression lead("^\\s*(#+|>|[-*+]|\\d+\\.)\\s+");
-    // Lines as far as 40 characters, up to a code block or a table, which
-    // the terminal draws differently.
-    QString text;
-    for (QString line : markdown.split('\n')) {
-        const QString bare = line.trimmed();
-        if (bare.startsWith(QLatin1String("```")) || bare.startsWith('|'))
-            break;
-        line.replace(link, QStringLiteral("\\1"));
-        line.remove(lead);
-        line.remove(marks);
-        text = (text + ' ' + line).simplified();
-        if (text.size() >= 40)
-            break;
-    }
-    return text.left(40).trimmed();
+    QString line = firstLine(markdown);
+    if (line.startsWith(QLatin1String("```")) || line.startsWith('|'))
+        return {};
+    // A link shows as its text and its target in brackets.
+    line.replace(link, QStringLiteral("\\1 (\\2)"));
+    line.remove(lead);
+    line.remove(marks);
+    return wordsUpTo40(line.simplified());
 }
 
+QString TimelineParser::typedStart(const QString &text) {
+    return wordsUpTo40(text.simplified());
+}
+
+// Words long enough not to turn up anywhere: the agent's words at or before
+// the point, else the prompt (when it isn't said again later), else the
+// agent's words after it.
 QString TimelineParser::needle(qint64 serial, int index) const {
     int at = -1;
     for (int i = 0; i < m_turns.size(); ++i)
@@ -517,22 +531,24 @@ QString TimelineParser::needle(qint64 serial, int index) const {
     if (at < 0)
         return {};
     const Turn &turn = m_turns[at];
-    const auto words = [](const Item &item) {
-        return item.kind == QLatin1String("said") || item.kind == QLatin1String("nudge");
+    const auto wordsOf = [](const Item &item) {
+        return item.kind == QLatin1String("said") ? shownStart(item.text)
+             : item.kind == QLatin1String("nudge") ? typedStart(item.text) : QString();
     };
+    const auto good = [](const QString &words) { return words.size() >= 12; };
     for (int i = qMin(index, int(turn.items.size()) - 1); i >= 0; --i)
-        if (words(turn.items[i]))
-            return shownStart(turn.items[i].text);
-    const QString prompt = shownStart(turn.prompt);
+        if (const QString words = wordsOf(turn.items[i]); good(words))
+            return words;
+    const QString prompt = typedStart(turn.prompt);
     bool again = false;
-    for (int i = at + 1; i < m_turns.size() && prompt.size() < 16; ++i)
-        again = again || shownStart(m_turns[i].prompt) == prompt;
-    if (prompt.isEmpty() || again) {
-        for (const Item &item : turn.items)
-            if (words(item))
-                return shownStart(item.text);
-    }
-    return prompt;
+    for (int i = at + 1; i < m_turns.size(); ++i)
+        again = again || typedStart(m_turns[i].prompt) == prompt;
+    if (good(prompt) && !again)
+        return prompt;
+    for (int i = qMax(0, index + 1); i < turn.items.size(); ++i)
+        if (const QString words = wordsOf(turn.items[i]); good(words))
+            return words;
+    return {};
 }
 
 const TimelineParser::Turn *TimelineParser::find(qint64 serial) const {
@@ -810,7 +826,8 @@ QString Timeline::readSummaryModel(const QString &configFile) {
                 continue;
             const QString value = line.section('=', 1).trimmed();
             static const QRegularExpression model("^[A-Za-z0-9._-]+$");
-            if (value == QLatin1String("off") || value == QLatin1String("no"))
+            static const QStringList none{"off", "no", "none", "false", "0"};
+            if (none.contains(value.toLower()))
                 return {};
             if (model.match(value).hasMatch())
                 return value;
@@ -836,14 +853,19 @@ QString Timeline::summaryInstructions(bool more) {
 }
 
 void Timeline::loadSummaries() {
-    m_summaries.clear();
     m_batchStarted.clear();
     m_wanted.clear();
-    if (m_session.isEmpty() || m_cache.isEmpty())
-        return;
-    QFile file(m_cache + '/' + m_session + ".json");
+    m_failures.clear();
+    m_summaries = readCache(m_cache, m_session);
+}
+
+QHash<QString, QList<Timeline::Batch>> Timeline::readCache(const QString &cache, const QString &session) {
+    QHash<QString, QList<Batch>> summaries;
+    if (session.isEmpty() || cache.isEmpty())
+        return summaries;
+    QFile file(cache + '/' + session + ".json");
     if (!file.open(QIODevice::ReadOnly))
-        return;
+        return summaries;
     const QJsonObject turns = QJsonDocument::fromJson(file.readAll()).object();
     for (auto it = turns.begin(); it != turns.end(); ++it) {
         QList<Batch> batches;
@@ -851,8 +873,9 @@ void Timeline::loadSummaries() {
             const QJsonObject object = value.toObject();
             batches.append({object.value("to").toInt(), object.value("points").toArray().toVariantList()});
         }
-        m_summaries.insert(it.key(), batches);
+        summaries.insert(it.key(), batches);
     }
+    return summaries;
 }
 
 void Timeline::saveSummaries(const QString &session, const QHash<QString, QList<Batch>> &summaries) const {
@@ -890,10 +913,16 @@ void Timeline::summarizeNext() {
             continue;
         if (++considered > 8 && !m_wanted.contains(turn.uuid))
             continue;
+        if (m_failures.value(turn.uuid) >= 2)
+            continue;
         const QList<Batch> batches = m_summaries.value(turn.uuid);
         const int covered = batches.isEmpty() ? 0 : batches.last().to;
         const int total = int(turn.items.size());
-        const int target = turn.ended ? total : total - 1;
+        // Up to a point still waiting for its tool: it may yet fail.
+        int target = turn.ended ? total : total - 1;
+        for (int k = covered; k < target; ++k)
+            if (turn.items[k].state == QLatin1String("running"))
+                target = k;
         if (target <= covered)
             continue;
         if (turn.ended) {
@@ -981,10 +1010,20 @@ void Timeline::summaryDone(int code) {
     const int open = result.indexOf('{'), close = result.lastIndexOf('}');
     const QJsonArray points = QJsonDocument::fromJson(result.mid(open, close - open + 1).toUtf8())
                                   .object().value("points").toArray();
-    if (code != 0 || reply.value("is_error").toBool() || open < 0 || points.isEmpty()) {
-        // A usage limit, or anything else: summaries rest a while.
+    if (code != 0 || reply.value("is_error").toBool()) {
+        // A usage limit, or claude not working: summaries rest a while.
         const bool limit = QString::fromUtf8(out).contains(QLatin1String("limit"), Qt::CaseInsensitive);
         m_backoffUntil = QDateTime::currentMSecsSinceEpoch() + (limit ? 30 : 5) * 60 * 1000;
+        if (job.generation == m_generation)
+            publish();
+        return;
+    }
+    if (open < 0 || points.isEmpty()) {
+        // A reply that makes no sense: once more later, then that turn keeps
+        // its points.
+        if (job.session == m_session)
+            ++m_failures[job.uuid];
+        m_backoffUntil = QDateTime::currentMSecsSinceEpoch() + 60 * 1000;
         if (job.generation == m_generation)
             publish();
         return;
@@ -999,11 +1038,9 @@ void Timeline::summaryDone(int code) {
             continue;
         const QString kind = point.value("kind").toString();
         const int step = point.value("step").toInt(1);
-        // Where to find it in the terminal, while the points are as numbered.
-        const QString needle = job.generation == m_generation
-            ? m_parser.needle(job.serial, qBound(job.from, job.from + step - 1, job.to - 1)) : QString();
+        // The point it is about, to find in the terminal on a click.
         batch.points << QVariantMap{{"text", text}, {"kind", kinds.contains(kind) ? kind : QStringLiteral("note")},
-                                    {"needle", needle}};
+                                    {"index", qBound(job.from, job.from + step - 1, job.to - 1)}};
     }
     if (job.session == m_session) {
         m_summaries[job.uuid].append(batch);
@@ -1011,12 +1048,9 @@ void Timeline::summaryDone(int code) {
         publish();
     } else {
         // Another agent by now: its summary is kept for when it's back.
-        Timeline other;
-        other.m_cache = m_cache;
-        other.m_session = job.session;
-        other.loadSummaries();
-        other.m_summaries[job.uuid].append(batch);
-        saveSummaries(job.session, other.m_summaries);
+        auto other = readCache(m_cache, job.session);
+        other[job.uuid].append(batch);
+        saveSummaries(job.session, other);
     }
     QTimer::singleShot(0, this, &Timeline::summarizeNext);
 }

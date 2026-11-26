@@ -1033,6 +1033,14 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(screen().contains("history line 0\n"), 10000);
         QTRY_COMPARE_WITH_TIMEOUT(ended.count(), 1, 20000);
         QVERIFY(screen().contains("history line 299"));
+
+        // Words, not parts of words: "story line 299" is nowhere.
+        QMetaObject::invokeMethod(view, "reveal", Q_ARG(QString, "story line 299"), Q_ARG(int, -1));
+        // Down first (already at the end), then up to the top, then back down.
+        QTRY_VERIFY_WITH_TIMEOUT(screen().contains("history line 0\n"), 20000);
+        QTRY_COMPARE_WITH_TIMEOUT(ended.count(), 2, 20000);
+        QCOMPARE(ended.last().first().toString(), QString("missing"));
+        QVERIFY(screen().contains("history line 299"));
         QCOMPARE(ended.first().first().toString(), QString("missing"));
     }
 
@@ -1074,34 +1082,45 @@ private slots:
         auto *list = rig.find("overviewList");
         QTRY_COMPARE(list->property("count").toInt(), 21);
         QTRY_VERIFY(list->property("atYEnd").toBool());
+        auto *view = rig.find("agentTerminal");
+        QTRY_VERIFY(view->property("ready").toBool());
 
-        // Scrolled up, past the first turn (as the user would: the list
-        // stops following the end): a summary coming in above moves nothing
-        // in view.
-        const auto scrollTo = [&](qreal y) {
-            list->setProperty("follow", false);
-            list->setProperty("contentY", y);
-            QTest::qWait(100);
-        };
+        // Scrolled up, past the first turn (as the user would: the list stops
+        // following the end): a summary coming in above moves nothing in view.
         QMetaObject::invokeMethod(list, "positionViewAtBeginning");
         list->setProperty("follow", false);
         QTRY_VERIFY(rig.find("prompt1"));
-        scrollTo(list->property("contentY").toReal() + 300);
+        list->setProperty("contentY", list->property("contentY").toReal() + 300);
+        QTest::qWait(100);
         QTRY_VERIFY(rig.find("prompt8"));
         auto *anchor = rig.find("prompt8");
         const qreal before = anchor->mapToScene(QPointF(0, 0)).y();
+        QTest::mouseMove(rig.window, rig.find("terminalArea")->mapToScene(QPointF(20, 20)).toPoint());
         rig.timeline->setSummaryModel("sonnet");
         QTRY_COMPARE(rig.timeline->index(0).data(Timeline::PointsRole).toList().size(), 1);
         QTest::qWait(100);
         QCOMPARE(anchor->mapToScene(QPointF(0, 0)).y(), before);
 
-        // At the top: the summary in place of the points it covers; a click
-        // on it scrolls the terminal to the agent's words.
+        // In view, under the pointer: the points stay until the pointer leaves.
         QMetaObject::invokeMethod(list, "positionViewAtBeginning");
+        QTRY_VERIFY(rig.find("point2"));
+        QTest::mouseMove(rig.window, list->mapToScene(QPointF(list->width() / 2, list->height() - 20)).toPoint());
+        QTest::qWait(100);
+        rig.timeline->setSummaryModel("");
+        // (a fresh turn summed up while the pointer is here: the cached one
+        // is dropped and comes again)
+        QFile::remove(rig.dir.filePath("cache/s-1.json"));
+        rig.timeline->reload();
+        rig.timeline->setSummaryModel("sonnet");
+        QTRY_COMPARE(rig.timeline->index(0).data(Timeline::PointsRole).toList().size(), 1);
+        QTRY_VERIFY(rig.find("point2"));
+        QTest::qWait(200);
+        QVERIFY(rig.find("point2")->isVisible());
+        QTest::mouseMove(rig.window, rig.find("terminalArea")->mapToScene(QPointF(20, 20)).toPoint());
         QTRY_VERIFY(rig.find("summary1_0") && rig.find("summary1_0")->isVisible());
         QVERIFY(!rig.find("point2")->isVisible());
-        auto *view = rig.find("agentTerminal");
-        QTRY_VERIFY(view->property("ready").toBool());
+
+        // A click on the summary scrolls the terminal to the agent's words.
         auto *point = rig.find("summary1_0");
         QTest::qWait(50);
         QTest::mouseClick(rig.window, Qt::LeftButton, {},

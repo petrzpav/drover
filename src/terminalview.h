@@ -3,6 +3,7 @@
 #include <QColor>
 #include <QFont>
 #include <QPoint>
+#include <QRegularExpression>
 #include <QQuickPaintedItem>
 #include <QTimer>
 #include <QStringList>
@@ -87,10 +88,10 @@ public:
     // The color a cell's text is drawn in.
     Q_INVOKABLE QColor textColorAt(int row, int column) const;
     // Scrolls the program's history the way the wheel does, until the screen
-    // shows `needle` (spaces and line breaks aside): up first, then down from
-    // the top. Ends at the history's far end, or on the user's own key,
-    // click or wheel.
-    Q_INVOKABLE void reveal(const QString &needle);
+    // shows `needle` as words (spaces and line breaks aside): up first (or
+    // down, direction -1), then the other way. Not found, it goes back to the
+    // bottom. Ends on the user's own key, click or wheel too.
+    Q_INVOKABLE void reveal(const QString &needle, int direction = 1);
     Q_INVOKABLE void stopRevealing();
     // Text with every run of whitespace one space, as reveal() compares it.
     static QString squeezed(const QString &text);
@@ -199,8 +200,10 @@ private:
     // The rows in view (the first `rows` of them), scrolled back or not, as
     // one squeezed line.
     QString visibleText(int rows = 1 << 20) const;
-    QString m_needle, m_revealScreen;
-    int m_revealDirection = 0, m_revealSteps = 0, m_revealWaits = 0;
+    QRegularExpression m_needle;
+    QString m_revealScreen;
+    int m_revealDirection = 0, m_revealFirst = 1, m_revealSteps = 0, m_revealWaits = 0;
+    bool m_revealReturning = false;
     QTimer m_revealTimer;
 
     // Selection, in lines counted from the oldest line of scrollback.

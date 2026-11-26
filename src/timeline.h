@@ -65,12 +65,15 @@ public:
     // Words the agent's terminal shows for a point (index -1: the turn's
     // prompt), to find it there. The terminal folds commands and edits into
     // lines like "Ran 3 shell commands", so for those it is the nearest of
-    // the agent's words before them. A short prompt said again later ("ok")
-    // gives way to the agent's first words after it.
+    // the agent's words before them. Short words ("ok", "Done.") would turn
+    // up anywhere, so they give way to longer ones near them.
     QString needle(qint64 serial, int index) const;
-    // The start of a Markdown text as the terminal shows it: its first 40
-    // characters, without emphasis, code marks, list marks or link targets.
+    // The start of the agent's Markdown as the terminal shows it: its first
+    // line, up to 40 characters at a word, without emphasis, code or list
+    // marks, a link as its text and target in brackets.
     static QString shownStart(const QString &markdown);
+    // The start of what the user typed, shown as typed.
+    static QString typedStart(const QString &text);
     // A turn's points from `from` up to `to`, numbered from 1, as plain text
     // for a model to summarize.
     QString digest(qint64 serial, int from, int to) const;
@@ -215,6 +218,7 @@ private:
         QVariantList points;
     };
     void loadSummaries();
+    static QHash<QString, QList<Batch>> readCache(const QString &cache, const QString &session);
     void saveSummaries(const QString &session, const QHash<QString, QList<Batch>> &summaries) const;
     void summarizeNext();
     void summaryDone(int code);
@@ -223,6 +227,7 @@ private:
     QHash<QString, QList<Batch>> m_summaries;  // by prompt uuid, this session's
     QHash<QString, qint64> m_batchStarted;     // by prompt uuid
     QSet<QString> m_wanted;                    // prompt uuids of turns seen
+    QHash<QString, int> m_failures;            // replies that made no sense, by prompt uuid
     struct Job {
         QString session, uuid;
         qint64 serial = 0;
