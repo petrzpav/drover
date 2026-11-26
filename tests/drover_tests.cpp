@@ -462,6 +462,31 @@ private slots:
         QCOMPARE(parser.turns().size(), 1);
     }
 
+    void aParkedConversationIsFollowed()
+    {
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("projects/-a");
+        QDir(dir.path()).mkpath("sessions");
+        write(dir.filePath("projects/-a/s-1.jsonl"), prompt("Plant the beds"));
+        write(dir.filePath("projects/-a/s-2.jsonl"), prompt("Plant the beds") + prompt("And the gate"));
+        // Not parked: the session herdr knows.
+        write(dir.filePath("sessions/10.json"), R"({"pid":10,"sessionId":"s-1","kind":"interactive"})");
+        QCOMPARE(Timeline::followSession(dir.filePath("sessions"), "s-1"), QString("s-1"));
+        Timeline timeline;
+        timeline.setProjectsDirectory(dir.filePath("projects"));
+        timeline.setSessionsDirectory(dir.filePath("sessions"));
+        timeline.setInterval(20);
+        timeline.setSession("s-1");
+        timeline.setActive(true);
+        QTRY_COMPARE(timeline.count(), 1);
+        // Parked as a job in the background, which writes its own transcript.
+        write(dir.filePath("sessions/10.json"), R"({"pid":10,"sessionId":"s-1","kind":"interactive","parkedJobId":"j2"})");
+        write(dir.filePath("sessions/20.json"), R"({"pid":20,"sessionId":"s-2","kind":"bg","jobId":"j2"})");
+        QCOMPARE(Timeline::followSession(dir.filePath("sessions"), "s-1"), QString("s-2"));
+        QTRY_COMPARE(timeline.count(), 2);
+        QCOMPARE(timeline.index(1).data(Timeline::PromptRole).toString(), QString("And the gate"));
+    }
+
     void theTimelineKnowsWhatChangesTheWorld()
     {
         QVERIFY(TimelineParser::isMilestone("git commit -m x"));

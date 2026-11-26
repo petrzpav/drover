@@ -24,6 +24,15 @@ Rectangle {
     // The agent asks something: its terminal is where to answer.
     signal answerWanted()
     readonly property int readable: 900
+    // The outline on the left, where the panel leaves room beside the text.
+    readonly property int outlineWidth: 280
+    readonly property bool outlined: claude && width >= outlineWidth + 32 + 640
+    // The text's room: right of the outline when it shows, then in its middle.
+    readonly property real textLeft: outlined ? outlineWidth + 32 : 0
+    readonly property real textWidth: Math.min(width - textLeft - 32, readable)
+    readonly property real textX: textLeft + (width - textLeft - textWidth) / 2
+    // The turn at the top of the view, for the outline to mark.
+    readonly property int topTurn: { list.contentY; list.count; return Math.max(0, list.indexAt(list.width / 2, list.contentY + 24)) }
     // How many of a turn's newest points show before the rest is asked for:
     // a long turn's hundreds would take a while to draw, at every change.
     readonly property int newest: 6
@@ -269,7 +278,8 @@ Rectangle {
                     textFormat: Text.MarkdownText
                     text: overview.markdown(row.point.text)
                     color: theme.foreground
-                    linkColor: theme.accent
+                    // Readable on any theme: the text's color, a touch of the accent.
+                    linkColor: Qt.tint(theme.foreground, Qt.alpha(theme.accent, 0.35))
                     wrapMode: Text.Wrap
                     onLinkActivated: (link) => overview.openLink(link)
                 }
@@ -402,8 +412,8 @@ Rectangle {
             Column {
                 id: column
                 // A readable measure, in the middle of a wide panel.
-                width: Math.min(parent.width - 32, overview.readable)
-                x: (parent.width - width) / 2
+                width: overview.textWidth
+                x: overview.textX
                 spacing: 2
 
                 Rectangle {
@@ -697,6 +707,105 @@ Rectangle {
         color: overview.dim
     }
 
+    // The outline: each turn's time, prompt and headline, the one in view
+    // marked; a click goes to it.
+    ListView {
+        id: outline
+        objectName: "outline"
+        visible: overview.outlined
+        x: 16
+        width: overview.outlineWidth
+        anchors.top: parent.top
+        anchors.topMargin: 16
+        anchors.bottom: composer.top
+        anchors.bottomMargin: 8
+        clip: true
+        model: overview.claude ? timeline : null
+        spacing: 2
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+        // The turn in view stays in the outline's view.
+        Connections {
+            target: overview
+            function onTopTurnChanged() { outline.positionViewAtIndex(overview.topTurn, ListView.Contain) }
+        }
+
+        delegate: Rectangle {
+            id: entry
+            required property int index
+            required property string prompt
+            required property var time
+            required property var batches
+            readonly property bool current: index === overview.topTurn
+            readonly property bool newest: index === outline.count - 1
+            readonly property string headline: batches.length > 0 && batches[batches.length - 1].points.length > 0
+                                                ? batches[batches.length - 1].points[0].text : ""
+            objectName: "outline" + index
+            width: outline.width - 8
+            height: entryColumn.implicitHeight + 10
+            radius: theme.radius
+            color: current ? Qt.alpha(theme.foreground, 0.08)
+                 : entryHover.hovered ? Qt.alpha(theme.foreground, 0.05) : "transparent"
+            HoverHandler { id: entryHover }
+
+            Column {
+                id: entryColumn
+                x: 8
+                y: 5
+                width: parent.width - 16
+                spacing: 1
+                Row {
+                    width: parent.width
+                    spacing: 6
+                    Text {
+                        id: entryMark
+                        width: 14
+                        // The robot on the turn it works on.
+                        readonly property bool busy: entry.newest && overview.working
+                        y: busy && overview.beat ? -2 : 0
+                        text: busy ? overview.robot : "·"
+                        color: busy ? theme.accent : overview.dim
+                    }
+                    Text {
+                        id: entryTime
+                        text: entry.time ? Qt.formatTime(entry.time, "HH:mm") : ""
+                        color: overview.dim
+                    }
+                    Text {
+                        width: parent.width - entryMark.width - entryTime.implicitWidth - 12
+                        text: entry.prompt !== "" ? entry.prompt : qsTr("Earlier")
+                        textFormat: Text.PlainText
+                        color: entry.current ? theme.foreground : Qt.alpha(theme.foreground, 0.85)
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
+                    }
+                }
+                Text {
+                    visible: entry.headline !== ""
+                    x: 20
+                    width: parent.width - 20
+                    text: entry.headline
+                    textFormat: Text.PlainText
+                    color: overview.dim
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 2
+                    elide: Text.ElideRight
+                }
+            }
+            TapHandler {
+                cursorShape: Qt.PointingHandCursor
+                onTapped: {
+                    // The newest goes back to following the end.
+                    list.follow = entry.newest
+                    if (entry.newest)
+                        list.positionViewAtEnd()
+                    else
+                        list.positionViewAtIndex(entry.index, ListView.Beginning)
+                }
+            }
+        }
+    }
+
     // A message to the agent: Enter sends it, Shift+Enter starts a new line.
     // Always the same height, so nothing above it moves as you type.
     Item {
@@ -710,8 +819,8 @@ Rectangle {
         Rectangle { width: parent.width; height: 1; color: overview.line }
         Rectangle {
             id: field
-            width: Math.min(parent.width - 32, overview.readable)
-            x: (parent.width - width) / 2
+            width: overview.textWidth
+            x: overview.textX
             y: 12
             height: parent.height - 24
             radius: theme.radius

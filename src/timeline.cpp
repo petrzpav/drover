@@ -695,6 +695,7 @@ Timeline::Timeline(QObject *parent)
     m_settle.setInterval(150);
     connect(&m_settle, &QTimer::timeout, this, &Timeline::poll);
     m_cache = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/drover/summaries";
+    m_sessions = QDir::homePath() + "/.claude/sessions";
     m_childTimeout.setSingleShot(true);
     m_childTimeout.setInterval(120 * 1000);
     connect(&m_childTimeout, &QTimer::timeout, this, [this] {
@@ -737,6 +738,28 @@ QVariant Timeline::data(const QModelIndex &index, int role) const {
         return {};
     const auto names = roleNames();
     return m_rows.at(index.row()).value(QString::fromLatin1(names.value(role)));
+}
+
+QString Timeline::followSession(const QString &sessions, const QString &session) {
+    if (sessions.isEmpty() || session.isEmpty())
+        return session;
+    QHash<QString, QString> parked, jobs;  // session -> parked job; job -> session
+    const QDir dir(sessions);
+    for (const QString &name : dir.entryList({"*.json"}, QDir::Files)) {
+        QFile file(dir.filePath(name));
+        if (!file.open(QIODevice::ReadOnly))
+            continue;
+        const QJsonObject object = QJsonDocument::fromJson(file.readAll()).object();
+        const QString id = object.value("sessionId").toString();
+        if (const QString job = object.value("parkedJobId").toString(); !job.isEmpty())
+            parked.insert(id, job);
+        if (const QString job = object.value("jobId").toString(); !job.isEmpty())
+            jobs.insert(job, id);
+    }
+    QString followed = session;
+    for (int hop = 0; hop < 5 && parked.contains(followed) && jobs.contains(parked.value(followed)); ++hop)
+        followed = jobs.value(parked.value(followed));
+    return followed;
 }
 
 QString Timeline::findTranscript(const QString &projects, const QString &session) {
@@ -838,8 +861,14 @@ Timeline::Loaded Timeline::loadTail(const QString &path, qint64 tailBytes, int g
 void Timeline::poll() {
     if (m_session.isEmpty() || m_loading || m_settle.isActive())
         return;
+    // Now and then: has the conversation moved on to another session?
+    if (!m_path.isEmpty() && ++m_ticks % 6 == 0 && followSession(m_sessions, m_session) != m_followed) {
+        restart();
+        return;
+    }
     if (m_path.isEmpty()) {
-        m_path = findTranscript(m_projects, m_session);
+        m_followed = followSession(m_sessions, m_session);
+        m_path = findTranscript(m_projects, m_followed);
         if (m_path.isEmpty()) {
             setState(QStringLiteral("missing"));
             return;

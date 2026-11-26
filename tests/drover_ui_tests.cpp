@@ -146,6 +146,7 @@ esac
         asker.reset(new Asker);
         timeline.reset(new Timeline);
         timeline->setProjectsDirectory(dir.filePath("projects"));
+        timeline->setSessionsDirectory(dir.filePath("sessions"));
         timeline->setInterval(30);
         QVERIFY(asker->listen(askServer));
         QObject::connect(backend.get(), &Backend::listed, asker.get(), &Asker::agentsListed);
@@ -1141,6 +1142,23 @@ private slots:
         QVERIFY(drawn.startsWith("a&nbsp;&nbsp;<font color=\""));
         QVERIFY(drawn.endsWith("b</font>&nbsp;&lt;c&gt;"));
         QFile::remove(rig.dir.filePath("reply.json"));
+        QMetaObject::invokeMethod(list, "positionViewAtBeginning");
+        QTRY_VERIFY(rig.find("summary1_0_0"));
+
+        // The outline on the left: a turn per entry, the one in view marked;
+        // a click goes to a turn.
+        auto *outline = rig.find("outline");
+        QVERIFY(outline->isVisible());
+        QTRY_COMPARE(outline->property("count").toInt(), 22);
+        QVERIFY(outline->mapRectToScene(outline->boundingRect()).right()
+                < rig.find("prompt1")->mapRectToScene(rig.find("prompt1")->boundingRect()).left());
+        QTRY_VERIFY(rig.find("outline0") && rig.find("outline0")->property("current").toBool());
+        QMetaObject::invokeMethod(outline, "positionViewAtEnd");
+        QTRY_VERIFY(rig.find("outline12"));
+        auto *outlined = rig.find("outline12");
+        QTest::qWait(50);
+        QTest::mouseClick(rig.window, Qt::LeftButton, {}, outlined->mapToScene(QPointF(60, 8)).toPoint());
+        QTRY_VERIFY(rig.find("prompt13") && outlined->property("current").toBool());
         QMetaObject::invokeMethod(list, "positionViewAtBeginning");
         QTRY_VERIFY(rig.find("summary1_0_0"));
 

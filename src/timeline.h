@@ -164,6 +164,13 @@ public:
 
     // Where Claude keeps its transcripts, ~/.claude/projects; tests use their own.
     void setProjectsDirectory(const QString &directory) { m_projects = directory; }
+    // Where Claude notes its running sessions, ~/.claude/sessions.
+    void setSessionsDirectory(const QString &directory) { m_sessions = directory; }
+    // The session a conversation goes on in: Claude may park an interactive
+    // session as a job in the background (parkedJobId), which then writes
+    // its own transcript (the session with that jobId), while herdr still
+    // knows the first.
+    static QString followSession(const QString &sessions, const QString &session);
     // How often the transcript is checked for more, in milliseconds.
     void setInterval(int milliseconds) { m_poll.setInterval(milliseconds); }
     // How much of a transcript's end is read at first.
@@ -221,7 +228,8 @@ private:
     QVariantMap rowOf(const TimelineParser::Turn &turn) const;
 
     QString m_session, m_path, m_state = QStringLiteral("none");
-    QString m_projects;
+    QString m_projects, m_sessions, m_followed;
+    int m_ticks = 0;
     bool m_active = false;
     int m_generation = 0;
     bool m_loading = false;

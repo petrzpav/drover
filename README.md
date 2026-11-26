@@ -157,6 +157,12 @@ attached beneath. It is read from the transcript in `~/.claude/projects`, only
 its end at first, then what is appended, and only while it shows; drover
 remembers the view, and `Alt+E` comes back to it from the editor.
 
+On the left, where the panel has room, an outline lists the turns like a
+document's: each one's time, prompt and headline, the one in view marked and
+the one at work with a bobbing robot; a click goes to a turn. When Claude
+parks a conversation as a job in the background, the overview follows it to
+its new transcript.
+
 Each of your prompts shows what came of it. A model sums up each turn as it
 goes on: `claude -p` with Sonnet, one call at a time, on your Claude account
 (about 5 seconds and 4,000 tokens a call). The summary is one to three short
