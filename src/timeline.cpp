@@ -986,6 +986,27 @@ QString Timeline::readSummaryModel(const QString &configFile) {
     return QStringLiteral("sonnet");
 }
 
+// The icons, as the model is to draw them.
+QString Timeline::iconInstructions() {
+    return QStringLiteral(
+        "Icons, as \"icon\":[\"..ffff..\",\".f....f.\",\"f.a..a.f\",\"f......f\",\"f.g..g.f\",\"f..gg..f\",\".f....f.\",\"..ffff..\"] and "
+        "\"motifs\":[[8 such strings],[8 such strings]].\n"
+        "Icon: a tiny 8 by 8 pixel picture of what the turn was about, for its station on a timeline: a "
+        "rocket for a release, a magnifier for a review, a bug for a fix, a gear, a page, a chart, a sheep, "
+        "whatever fits; simple and readable at 16 pixels. Each character is a pixel: . empty, f the text "
+        "color, a the accent, g green, r red, d quiet grey.\n"
+        "Motifs: one or two more such tiny pictures of other things the turn touched or met (a key, an "
+        "envelope, a window, ice for a freeze, a package, a test tube), shown beside the timeline after "
+        "the station; an array of icons, each an array of 8 strings; [] when nothing fits.\n");
+}
+
+QString Timeline::iconsOnlyInstructions() {
+    return QStringLiteral("You draw the tiny pixel icons for one turn of a coding agent's conversation, shown on a "
+                          "timeline, from the user's prompt and the turn's summary.\n")
+        + iconInstructions()
+        + QStringLiteral("Reply with JSON only: {\"icon\":[...],\"motifs\":[...]}");
+}
+
 QString Timeline::summaryInstructions(bool more) {
     return QStringLiteral(
         "You summarize what a coding agent did during one turn, for its user who was not watching. "
@@ -1004,16 +1025,9 @@ QString Timeline::summaryInstructions(bool more) {
               "what is open or waits for the user. Leave out routine steps such as reading files or tests that passed.\n"
               "Reply with JSON only: {\"points\":[{\"text\":\"...\",\"kind\":\"done|change|ship|fail|ask|open|note\","
               "\"step\":N,\"visual\":\"...\"}]} where step is the number of the step the point is mostly about "
-              "and visual is optional (below), and add \"icon\" and \"motifs\" (below), like "
-              "\"icon\":[\"..ffff..\",\".f....f.\",\"f.a..a.f\",\"f......f\",\"f.g..g.f\",\"f..gg..f\",\".f....f.\",\"..ffff..\"],"
-              "\"motifs\":[[8 such strings],[8 such strings]].\n"
-              "Icon: a tiny 8 by 8 pixel picture of what the turn was about, for its station on a timeline: a "
-              "rocket for a release, a magnifier for a review, a bug for a fix, a gear, a page, a chart, a sheep, "
-              "whatever fits; simple and readable at 16 pixels. Each character is a pixel: . empty, f the text "
-              "color, a the accent, g green, r red, d quiet grey.\n"
-              "Motifs: one or two more such tiny pictures of other things the turn touched or met (a key, an "
-              "envelope, a window, ice for a freeze, a package, a test tube), shown beside the timeline after "
-              "the station; an array of icons, each an array of 8 strings; [] when nothing fits.\n"
+              "and visual is optional (below); add \"icon\" and \"motifs\" as below.\n")
+        + iconInstructions()
+        + QStringLiteral(
               "Pictures: the user takes in a picture faster than sentences. When the turn went through stages "
               "(where it stands now), tried several cases (a checklist of what works and what's left), touched "
               "several files or parts (a tree), changed numbers (before and after) or compared things (a chart), add \"visual\" to the point it belongs to: a small drawing in plain "
@@ -1197,7 +1211,7 @@ QHash<QString, QList<Timeline::Batch>> Timeline::readCache(const QString &cache,
             if (const QStringList rows = fitIcon(motif); !rows.isEmpty() && motifs.size() < 2)
                 motifs << QVariant(rows);
         summaries.insert(it.key(), {{object.value("to").toInt(), object.value("points").toArray().toVariantList(),
-                                     fitIcon(object.value("icon")), motifs}});
+                                     fitIcon(object.value("icon")), motifs, object.value("iconStyle").toInt(1)}});
     }
     return summaries;
 }
@@ -1212,7 +1226,8 @@ void Timeline::saveSummaries(const QString &session, const QHash<QString, QList<
         for (const Batch &batch : it.value())
             batches.append(QJsonObject{{"to", batch.to}, {"points", QJsonArray::fromVariantList(batch.points)},
                                        {"icon", QJsonArray::fromStringList(batch.icon)},
-                                       {"motifs", QJsonArray::fromVariantList(batch.motifs)}});
+                                       {"motifs", QJsonArray::fromVariantList(batch.motifs)},
+                                       {"iconStyle", batch.iconStyle}});
         turns.insert(it.key(), batches);
     }
     QDir().mkpath(m_cache);
@@ -1260,7 +1275,7 @@ void Timeline::summarizeNext() {
             if (target - covered < m_batchPoints || since < qint64(m_batchSeconds) * 1000)
                 continue;
         }
-        m_job = {m_session, turn.uuid, turn.serial, covered, target, m_generation};
+        m_job = {m_session, turn.uuid, turn.serial, covered, target, m_generation, false};
         m_batchStarted.insert(turn.uuid, QDateTime::currentMSecsSinceEpoch());
 
         QString input = QStringLiteral("The user's prompt: ") + turn.prompt.left(1500) + QStringLiteral("\n\n");
@@ -1273,37 +1288,59 @@ void Timeline::summarizeNext() {
             input += QStringLiteral("Steps:\n");
         }
         input += m_parser.digest(turn.serial, covered, target);
-
-        m_child = new QProcess(this);
-        // Not one of the agents: none of their panes' or sessions' variables,
-        // but the same provider and settings as theirs.
-        static const QStringList session{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID",
-                                         "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_CHILD_NOTES_DIR",
-                                         "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_MESSAGING_SOCKET",
-                                         "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_EXECPATH", "CLAUDE_PID",
-                                         "CLAUDE_EFFORT"};
-        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
-        for (const QString &name : environment.keys())
-            if (name.startsWith(QLatin1String("HERDR_")) || session.contains(name))
-                environment.remove(name);
-        m_child->setProcessEnvironment(environment);
-        QDir().mkpath(m_cache);
-        m_child->setWorkingDirectory(m_cache);
-        connect(m_child, &QProcess::finished, this, [this](int code) { summaryDone(code); });
-        connect(m_child, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-            if (error == QProcess::FailedToStart)
-                summaryDone(-1);
-        });
-        m_child->start(m_program, {"-p", "--model", m_model, "--no-session-persistence", "--tools", "",
-                                   "--setting-sources", "", "--output-format", "json",
-                                   "--system-prompt", summaryInstructions(covered > 0)});
-        m_child->write(input.toUtf8());
-        m_child->closeWriteChannel();
-        m_childTimeout.start();
-        emit summarizingChanged();
-        publish();
+        runModel(summaryInstructions(covered > 0), input);
         return;
     }
+
+    // Nothing to sum up: summaries whose icons are of an older style get
+    // new ones, the newest first, from their own words.
+    considered = 0;
+    for (int i = int(turns.size()) - 1; i >= 0; --i) {
+        const auto &turn = turns[i];
+        if (turn.uuid.isEmpty() || turn.prompt.isEmpty())
+            continue;
+        if (++considered > 8 && !m_wanted.contains(turn.uuid))
+            continue;
+        const QList<Batch> batches = m_summaries.value(turn.uuid);
+        if (batches.isEmpty() || batches.last().iconStyle >= IconStyle || m_failures.value(turn.uuid) >= 2)
+            continue;
+        m_job = {m_session, turn.uuid, turn.serial, 0, batches.last().to, m_generation, true};
+        QString input = QStringLiteral("The user's prompt: ") + turn.prompt.left(1500) + QStringLiteral("\n\nIts summary:\n");
+        for (const QVariant &point : batches.last().points)
+            input += QStringLiteral("- ") + point.toMap().value("text").toString() + '\n';
+        runModel(iconsOnlyInstructions(), input);
+        return;
+    }
+}
+
+void Timeline::runModel(const QString &instructions, const QString &input) {
+    m_child = new QProcess(this);
+    // Not one of the agents: none of their panes' or sessions' variables,
+    // but the same provider and settings as theirs.
+    static const QStringList session{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID",
+                                     "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_CHILD_NOTES_DIR",
+                                     "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_MESSAGING_SOCKET",
+                                     "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_EXECPATH", "CLAUDE_PID",
+                                     "CLAUDE_EFFORT"};
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    for (const QString &name : environment.keys())
+        if (name.startsWith(QLatin1String("HERDR_")) || session.contains(name))
+            environment.remove(name);
+    m_child->setProcessEnvironment(environment);
+    QDir().mkpath(m_cache);
+    m_child->setWorkingDirectory(m_cache);
+    connect(m_child, &QProcess::finished, this, [this](int code) { summaryDone(code); });
+    connect(m_child, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart)
+            summaryDone(-1);
+    });
+    m_child->start(m_program, {"-p", "--model", m_model, "--no-session-persistence", "--tools", "",
+                               "--setting-sources", "", "--output-format", "json", "--system-prompt", instructions});
+    m_child->write(input.toUtf8());
+    m_child->closeWriteChannel();
+    m_childTimeout.start();
+    emit summarizingChanged();
+    publish();
 }
 
 void Timeline::want(qint64 serial) {
@@ -1353,6 +1390,34 @@ void Timeline::summaryDone(int code) {
             publish();
         return;
     }
+    // New icons alone, for a summary drawn in an older style.
+    if (job.iconsOnly) {
+        if (open < 0) {
+            if (job.session == m_session)
+                ++m_failures[job.uuid];
+            m_backoffUntil = QDateTime::currentMSecsSinceEpoch() + 60 * 1000;
+            return;
+        }
+        auto summaries = job.session == m_session ? m_summaries : readCache(m_cache, job.session);
+        if (!summaries.value(job.uuid).isEmpty()) {
+            Batch &kept = summaries[job.uuid].last();
+            if (const QStringList icon = fitIcon(answer.value("icon")); !icon.isEmpty())
+                kept.icon = icon;
+            QVariantList motifs;
+            for (const QJsonValue &motif : answer.value("motifs").toArray())
+                if (const QStringList rows = fitIcon(motif); !rows.isEmpty() && motifs.size() < 2)
+                    motifs << QVariant(rows);
+            kept.motifs = motifs;
+            kept.iconStyle = IconStyle;
+            saveSummaries(job.session, summaries);
+            if (job.session == m_session) {
+                m_summaries = summaries;
+                publish();
+            }
+        }
+        QTimer::singleShot(0, this, &Timeline::summarizeNext);
+        return;
+    }
     if (open < 0 || points.isEmpty()) {
         // A reply that makes no sense: once more later, then that turn keeps
         // its points.
@@ -1366,6 +1431,7 @@ void Timeline::summaryDone(int code) {
     static const QStringList kinds{"done", "change", "ship", "fail", "ask", "open", "note"};
     Batch batch;
     batch.to = job.to;
+    batch.iconStyle = IconStyle;
     // Its icon, or the one it had while the model drew none this time.
     batch.icon = fitIcon(answer.value("icon"));
     if (batch.icon.isEmpty() && job.session == m_session && !m_summaries.value(job.uuid).isEmpty())

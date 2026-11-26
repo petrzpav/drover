@@ -210,6 +210,11 @@ public:
     // A summary point may come with a drawing in plain text: its limits,
     // and the drawing cut to them.
     static constexpr int VisualLines = 10, VisualColumns = 64;
+    // The icons' style: a summary whose icons are of an older one gets new
+    // icons, drawn alone from its summary.
+    static constexpr int IconStyle = 2;
+    static QString iconInstructions();
+    static QString iconsOnlyInstructions();
     static QString fitVisual(const QString &visual);
     // A turn's icon as the model drew it, 8 rows of 8 keys (. f a g r d),
     // or none when it isn't one.
@@ -258,6 +263,8 @@ private:
         // two more of what else it touched, for the line after its station.
         QStringList icon;
         QVariantList motifs;
+        // The style its icons were drawn in (IconStyle when current).
+        int iconStyle = 0;
     };
     void loadSummaries();
     static QHash<QString, QList<Batch>> readCache(const QString &cache, const QString &session);
@@ -275,7 +282,10 @@ private:
         qint64 serial = 0;
         int from = 0, to = 0;
         int generation = 0;
+        // Only the icons again, for a summary drawn in an older style.
+        bool iconsOnly = false;
     } m_job;
+    void runModel(const QString &instructions, const QString &input);
     QPointer<QProcess> m_child;
     QTimer m_childTimeout;
     qint64 m_backoffUntil = 0;

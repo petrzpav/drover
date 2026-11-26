@@ -527,6 +527,48 @@ private slots:
         QVERIFY(Timeline::summaryInstructions(false).contains("\"icon\""));
     }
 
+    void iconsOfAnOlderStyleAreDrawnAgain()
+    {
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("projects/-a");
+        QDir(dir.path()).mkpath("cache");
+        QByteArray first = prompt("Plant the beds");
+        first.replace("\"type\":\"user\"", "\"type\":\"user\",\"uuid\":\"u1\"");
+        write(dir.filePath("projects/-a/s-1.jsonl"), first + said("Digging.") + said("Planted.") + said("Done.")
+              + line({{"type", "system"}, {"subtype", "turn_duration"}, {"durationMs", 9000}}));
+        // A summary from before: its icon in the old style.
+        write(dir.filePath("cache/s-1.json"), R"({"u1":[{"to":3,"points":[{"text":"Beds planted","kind":"done","index":0}],
+            "icon":["..ffff..",".f....f.","f......f","f......f","f......f","f......f",".f....f.","..ffff.."]}]})");
+        write(dir.filePath("reply.json"), QJsonDocument(QJsonObject{{"type", "result"}, {"is_error", false},
+            {"result", R"({"icon":["...gg...","..gggg..",".gggggg.","...ff...","...ff...","..ffff..","........","........"],"motifs":[]})"}})
+            .toJson(QJsonDocument::Compact));
+        qputenv("DROVER_TEST_DIR", dir.path().toUtf8());
+        Timeline timeline;
+        timeline.setProjectsDirectory(dir.filePath("projects"));
+        timeline.setCacheDirectory(dir.filePath("cache"));
+        timeline.setSummaryProgram(TESTS_DIR "/fake_claude.sh");
+        timeline.setSummaryModel("sonnet");
+        timeline.setInterval(20);
+        timeline.setSession("s-1");
+        timeline.setActive(true);
+        // New icons from its own words; its summary stays.
+        const auto firstRow = [&] {
+            const QVariantList batches = timeline.index(0).data(Timeline::BatchesRole).toList();
+            const QStringList icon = batches.isEmpty() ? QStringList() : batches.first().toMap().value("icon").toStringList();
+            return icon.isEmpty() ? QString() : icon.first();
+        };
+        QTRY_COMPARE(firstRow(), QString("...gg..."));
+        QCOMPARE(timeline.index(0).data(Timeline::PointsRole).toList().first().toMap().value("text").toString(),
+                 QString("Beds planted"));
+        QFile input(dir.filePath("input"));
+        QVERIFY(input.open(QIODevice::ReadOnly));
+        QVERIFY(QString::fromUtf8(input.readAll()).contains("Its summary:\n- Beds planted"));
+        QFile cache(dir.filePath("cache/s-1.json"));
+        QVERIFY(cache.open(QIODevice::ReadOnly));
+        QCOMPARE(QJsonDocument::fromJson(cache.readAll()).object().value("u1").toArray().first().toObject()
+                     .value("iconStyle").toInt(), Timeline::IconStyle);
+    }
+
     void theTimelineKnowsWhatChangesTheWorld()
     {
         QVERIFY(TimelineParser::isMilestone("git commit -m x"));
