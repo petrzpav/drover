@@ -188,11 +188,15 @@ show as those commands' descriptions. The agent's questions with your
 answers, what you typed while it worked, what it said and Claude's recaps are
 there as well. Reading and searching are left out.
 
+While the agent works, its robot bobs on the point it is at, or on
+"Thinking…" when no tool runs, so you see at a glance whether it is at work.
+
 Click a summary point to open the points it sums up, and a point to open it
 where it is: the agent's words in full (as Markdown, its pictures as links,
 nothing fetched), the error, every command of a run. Never all at once: a long
 turn shows its newest points, and "… N earlier points" twenty more a click.
-The list stays at the bottom as the agent goes on, unless you scrolled up.
+The list stays at the bottom as the agent goes on, unless you scrolled up;
+while the pointer is over it, it waits, so nothing moves under the pointer.
 
 The field below sends the agent a message (`herdr agent prompt`): `Enter`
 sends it, `Shift+Enter` starts a new line. A picture pasted with `Ctrl+V` is

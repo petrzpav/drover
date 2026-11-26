@@ -306,6 +306,19 @@ void TimelineParser::toolResult(const QString &id, bool error, const QString &co
     const Pending pending = m_pending.take(id);
     m_pendingOrder.removeAll(id);
     Turn *owner = turn(pending.serial);
+    if (pending.index < 0 && error && owner) {
+        // A tool that only looks around failed (a read refused): that shows.
+        Item failed;
+        failed.kind = QStringLiteral("tool");
+        failed.text = pending.activity.isEmpty() ? tr("A tool") : pending.activity;
+        failed.state = content.startsWith(QLatin1String("Permission for this action was denied"))
+                           || content.contains(QLatin1String("doesn't want to proceed"))
+                       ? QStringLiteral("denied") : QStringLiteral("failed");
+        failed.detail = errorLine(content);
+        failed.alone = true;
+        addItem(failed, QString(), QString());
+        return;
+    }
     if (pending.index < 0 || !owner || pending.index >= owner->items.size())
         return;
     Item &item = owner->items[pending.index];
@@ -325,6 +338,7 @@ void TimelineParser::toolResult(const QString &id, bool error, const QString &co
                            || content.contains(QLatin1String("running in the background"))
                            || content.startsWith(QLatin1String("Resuming agent")))) {
             item.state = QStringLiteral("background");
+            item.background = true;
             item.detail = tr("Runs in the background");
             m_background.insert(id, {pending.serial, item.id});
             return;
@@ -396,7 +410,7 @@ void TimelineParser::feed(const QByteArray &raw) {
                 if (!text.isEmpty()) {
                     Item said;
                     said.kind = QStringLiteral("said");
-                    said.text = shortened(text, 4000);
+                    said.text = shortened(text, 20000);
                     said.time = time;
                     addItem(said, QString(), QString());
                 }
@@ -529,9 +543,12 @@ void TimelineParser::queueOperation(const QJsonObject &object, const QDateTime &
     const QString operation = object.value("operation").toString();
     const QString text = shortened(object.value("content").toString(), 4000);
     if (operation == QLatin1String("enqueue")) {
-        // Notifications and commands queue up too; only words count.
-        if (text.isEmpty() || text.startsWith('<'))
+        // Notifications and commands queue up too: they hold their place in
+        // the queue, but only words show.
+        if (text.isEmpty() || text.startsWith('<')) {
+            m_queue.append({0, 0, text});
             return;
+        }
         Item nudge;
         nudge.kind = QStringLiteral("nudge");
         nudge.text = text;
@@ -546,6 +563,8 @@ void TimelineParser::queueOperation(const QJsonObject &object, const QDateTime &
             if (m_queue[i].text != text)
                 continue;
             const Queued queued = m_queue.takeAt(i);
+            if (queued.id == 0)
+                break;
             if (Turn *owner = turn(queued.serial))
                 for (Item &item : owner->items)
                     if (item.id == queued.id) {
@@ -558,11 +577,13 @@ void TimelineParser::queueOperation(const QJsonObject &object, const QDateTime &
     } else if (operation == QLatin1String("dequeue")) {
         if (!m_queue.isEmpty()) {
             const Queued queued = m_queue.takeFirst();
-            dropItem(queued.serial, queued.id);
+            if (queued.id != 0)
+                dropItem(queued.serial, queued.id);
         }
     } else if (operation == QLatin1String("popAll")) {
         for (const Queued &queued : std::as_const(m_queue))
-            dropItem(queued.serial, queued.id);
+            if (queued.id != 0)
+                dropItem(queued.serial, queued.id);
         m_queue.clear();
     }
 }
@@ -857,7 +878,7 @@ QVariantMap Timeline::rowOf(const TimelineParser::Turn &turn) const {
     QVariantList items;
     for (const auto &item : turn.items)
         items << QVariantMap{{"id", item.id}, {"kind", item.kind}, {"text", item.text}, {"detail", item.detail},
-                             {"state", item.state}, {"steps", item.steps}};
+                             {"state", item.state}, {"steps", item.steps}, {"background", item.background}};
     // The summary's points stand in for the points they cover.
     QVariantList points, batches;
     int covered = 0;
@@ -929,6 +950,9 @@ namespace {
 // How many cells a character takes in a monospace font: two for wide East
 // Asian characters and emoji, one for the rest.
 int cellsOf(char32_t c) {
+    const auto category = QChar::category(c);
+    if (category == QChar::Mark_NonSpacing || category == QChar::Mark_Enclosing)
+        return 0;
     static const char32_t wide[][2] = {
         {0x1100, 0x115F}, {0x231A, 0x231B}, {0x23E9, 0x23EC}, {0x23F0, 0x23F0}, {0x23F3, 0x23F3},
         {0x25FD, 0x25FE}, {0x2614, 0x2615}, {0x2648, 0x2653}, {0x267F, 0x267F}, {0x2693, 0x2693},
@@ -1136,10 +1160,16 @@ void Timeline::summarizeNext() {
         input += m_parser.digest(turn.serial, covered, target);
 
         m_child = new QProcess(this);
-        // Not one of the agents: none of their panes' or sessions' variables.
+        // Not one of the agents: none of their panes' or sessions' variables,
+        // but the same provider and settings as theirs.
+        static const QStringList session{"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID",
+                                         "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_CHILD_NOTES_DIR",
+                                         "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_MESSAGING_SOCKET",
+                                         "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_EXECPATH", "CLAUDE_PID",
+                                         "CLAUDE_EFFORT"};
         QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
         for (const QString &name : environment.keys())
-            if (name.startsWith(QLatin1String("HERDR_")) || name.startsWith(QLatin1String("CLAUDE")))
+            if (name.startsWith(QLatin1String("HERDR_")) || session.contains(name))
                 environment.remove(name);
         m_child->setProcessEnvironment(environment);
         QDir().mkpath(m_cache);

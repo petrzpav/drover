@@ -152,6 +152,12 @@ private slots:
         parser.feed(result("b1", "ok"));
         QCOMPARE(parser.activity(), QString());
         QCOMPARE(parser.turns().last().items.last().state, QString());
+        // A tool that only looks around and fails shows.
+        for (const QByteArray &l : (use("r9", "Read", {{"file_path", "/a/secret"}})
+                                    + result("r9", "Permission for this action was denied.", true)).split('\n'))
+            parser.feed(l);
+        QCOMPARE(parser.turns().last().items.last().text, QString("Reads secret"));
+        QCOMPARE(parser.turns().last().items.last().state, QString("denied"));
         // A denied command says so.
         for (const QByteArray &l : (bash("b2", "rm -rf /", "Clean up")
                                     + result("b2", "Permission for this action was denied by the classifier.", true)).split('\n'))
@@ -375,6 +381,8 @@ private slots:
         QCOMPARE(Timeline::fitVisual("┌──────┐\n│ ✅ ok │\n└──────┘"), QString("┌──────┐\n│ ✅ ok │\n└──────┘"));
         const QString wide = Timeline::fitVisual(QString("x").repeated(Timeline::VisualColumns - 1) + "😀z");
         QCOMPARE(wide, QString("x").repeated(Timeline::VisualColumns - 1));
+        // A letter and its accent written apart take one cell.
+        QCOMPARE(Timeline::fitVisual("┌──┐\n│ e\u0301│\n└──┘"), QString("┌──┐\n│ e\u0301│\n└──┘"));
         // The model is told the limits.
         QVERIFY(Timeline::summaryInstructions(false).contains(QString("at most %1 lines of at most %2 characters")
                                                                   .arg(Timeline::VisualLines).arg(Timeline::VisualColumns)));
@@ -410,6 +418,12 @@ private slots:
         QCOMPARE(parser.turns().size(), 2);
         QCOMPARE(parser.turns().first().items.size(), 2);
         QCOMPARE(parser.turns().last().prompt, QString("then the gate"));
+        // A notification ahead in the queue: your message waits behind it.
+        feed(queue("enqueue", "<task-notification>done") + queue("enqueue", "next please") + queue("dequeue"));
+        QCOMPARE(parser.turns().last().items.last().text, QString("next please"));
+        QCOMPARE(parser.turns().last().items.last().state, QString("queued"));
+        feed(queue("dequeue") + prompt("next please"));
+
         // Taken back by the user: gone.
         feed(queue("enqueue", "oops") + queue("popAll", "oops"));
         QCOMPARE(parser.turns().last().items.size(), 0);

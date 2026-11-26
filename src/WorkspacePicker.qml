@@ -359,6 +359,7 @@ Rectangle {
                             Text {
                                 id: rowText
                                 Layout.fillWidth: true
+                                textFormat: Text.PlainText
                                 text: row.modelData.create ? qsTr("Create “%1”").arg(row.modelData.label) : row.modelData.label
                                 color: row.marked ? theme.urgent : theme.foreground
                                 elide: Text.ElideRight
@@ -368,6 +369,7 @@ Rectangle {
                             // so the title never re-elides when the state changes.
                             Text {
                                 visible: row.modelData.agent || row.modelData.create || row.modelData.agents > 0
+                                textFormat: Text.PlainText
                                 text: row.modelData.agent ? picker.statusLabel(row.modelData.status) + " · " + row.modelData.workspace
                                     : !row.modelData.create ? qsTr("%n agents", "", row.modelData.agents)
                                     : row.modelData.found ? row.modelData.folder

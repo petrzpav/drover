@@ -927,6 +927,9 @@ private slots:
         QTRY_COMPARE(rig.timeline->state(), QString("ready"));
         QTRY_VERIFY(rig.find("pointText2"));
         QVERIFY(rig.find("pointText2")->property("text").toString().startsWith("Water the beds"));
+        // The robot at work on what runs now; nothing else to think about.
+        QCOMPARE(rig.find("point2")->childItems().at(0)->property("text").toString(), QString::fromUtf8("\xf3\xb0\x9a\xa9"));
+        QVERIFY(!rig.find("thinking1")->isVisible());
         QVERIFY(!rig.log().contains("key 02"));
 
         // What the agent does next comes in while you look.
@@ -938,6 +941,8 @@ private slots:
             QJsonObject{{"type", "text"}, {"text", "Both beds are **watered**.\n\n- south\n- " + QString("and more ").repeated(60)}}}}}}}));
         file.close();
         QTRY_VERIFY(rig.find("pointText3"));
+        // At work with nothing running: it thinks.
+        QTRY_VERIFY(rig.find("thinking1")->isVisible());
         // Two lines at most, plain; a click opens it where it is, as Markdown.
         auto *said = rig.find("pointText3");
         QTRY_COMPARE(said->property("lineCount").toInt(), 2);

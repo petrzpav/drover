@@ -18,8 +18,8 @@ Rectangle {
     // What you were writing to each agent, by pane, while you look at another.
     property var drafts: ({})
     property string draftPane: ""
-    // What went out last, so only that is cleared once it went.
-    property string sending: ""
+    // What went out to each agent, so only that is cleared once it went.
+    property var sending: ({})
     readonly property bool asking: backend.selectedStatus === "blocked"
     // The agent asks something: its terminal is where to answer.
     signal answerWanted()
@@ -45,8 +45,10 @@ Rectangle {
     }
     function send() {
         if (input.text.trim() !== "" && backend.busy === "" && !asking) {
-            sending = input.text.trim()
-            backend.sendPrompt(backend.selected, sending)
+            const next = Object.assign({}, sending)
+            next[backend.selected] = input.text.trim()
+            sending = next
+            backend.sendPrompt(backend.selected, next[backend.selected])
         }
     }
     // The agent's words as Markdown, safely: a zero-width space after every
@@ -59,6 +61,19 @@ Rectangle {
         if (/^https?:\/\//i.test(link))
             Qt.openUrlExternally(link)
     }
+    // While the agent works, its robot bobs on what it does now: a step a
+    // third of a second, not an animation redrawing every frame.
+    readonly property bool working: backend.selectedStatus === "working"
+    readonly property string robot: "\udb81\udea9"
+    property bool beat: false
+    Timer {
+        interval: 330
+        repeat: true
+        running: overview.visible && overview.working
+        onTriggered: overview.beat = !overview.beat
+        onRunningChanged: overview.beat = false
+    }
+
     // Commands a reply gives you to run: its code blocks of one to three lines.
     function commandsIn(point) {
         if (!point || point.kind !== "said")
@@ -67,9 +82,9 @@ Rectangle {
         const block = /```[^\n]*\n([\s\S]*?)```/g
         let match
         while ((match = block.exec(point.text)) !== null) {
-            const lines = match[1].split("\n").map(l => l.replace(/\s+$/, "")).filter(l => l.trim() !== "")
+            const lines = match[1].split("\n").filter(l => l.trim() !== "")
             if (lines.length > 0 && lines.length <= 3)
-                found.push(lines.join("\n"))
+                found.push(match[1].replace(/\n$/, ""))
         }
         return found
     }
@@ -155,17 +170,20 @@ Rectangle {
     }
     Connections {
         target: backend
-        function onPromptSent(pane, sent) {
-            if (!sent)
+        function onPromptSent(pane, went) {
+            if (!went)
                 return
-            // What was sent goes; what you typed on since stays.
-            if (pane === overview.draftPane && input.text.trim().startsWith(overview.sending)) {
-                input.text = input.text.trim().slice(overview.sending.length).trim()
+            // What was sent goes; what you typed on since stays, here or kept.
+            const sent = overview.sending[pane] || ""
+            const rest = (text) => text.trim().startsWith(sent) ? text.trim().slice(sent.length).trim() : text
+            if (pane === overview.draftPane) {
+                input.text = rest(input.text)
                 input.cursorPosition = input.length
+            } else if (overview.drafts[pane] !== undefined) {
+                const next = Object.assign({}, overview.drafts)
+                next[pane] = rest(next[pane])
+                overview.drafts = next
             }
-            const next = Object.assign({}, overview.drafts)
-            delete next[pane]
-            overview.drafts = next
         }
         // Each agent keeps its own draft.
         function onSelectedChanged() {
@@ -209,10 +227,11 @@ Rectangle {
         HoverHandler { id: hoverRow }
 
         Text {
+            readonly property bool busy: row.point.state === "running" && overview.working
             x: 8
-            y: 3
+            y: 3 - (busy && overview.beat ? 2 : 0)
             width: 18
-            text: overview.glyph(row.point.kind)
+            text: busy ? overview.robot : overview.glyph(row.point.kind)
             color: overview.tint(row.point)
         }
         Column {
@@ -302,13 +321,17 @@ Rectangle {
             policy: ScrollBar.AsNeeded
             onPressedChanged: if (!pressed) list.follow = list.atYEnd
         }
-        HoverHandler { id: listHover }
+        HoverHandler {
+            id: listHover
+            onHoveredChanged: if (!hovered) Qt.callLater(list.settle)
+        }
 
         // At the end, the list stays there as points come; scrolled up, it
         // stays where you are.
         property bool follow: true
+        // Not while the pointer is over it: nothing moves under the pointer.
         function settle() {
-            if (follow)
+            if (follow && !listHover.hovered)
                 positionViewAtEnd()
         }
         onMovementEnded: follow = atYEnd
@@ -351,7 +374,13 @@ Rectangle {
             // The newest turn: what it asks or gives you to run stays in sight.
             readonly property bool newest: index === list.count - 1
             required property bool ended
-            readonly property var lastPoint: items.length > 0 ? items[items.length - 1] : null
+            // Its last point, Claude's own notes (a recap) aside.
+            readonly property var lastPoint: {
+                for (let i = items.length - 1; i >= 0; --i)
+                    if (items[i].kind !== "recap" && items[i].kind !== "compact")
+                        return items[i]
+                return null
+            }
             // The agent's last words once it stops, in full: what it found,
             // asks or offers is usually there, question mark or not.
             readonly property bool finalReply: newest && lastPoint !== null && lastPoint.kind === "said"
@@ -545,6 +574,7 @@ Rectangle {
                 Repeater {
                     model: turn.items.slice(0, column.shownFrom).filter(point =>
                         point.state === "queued" || point.state === "background"
+                        || (point.background && point.state === "failed")
                         || (point.kind === "question" && point.state === "running"))
                     delegate: PointRow {
                         required property var modelData
@@ -553,7 +583,8 @@ Rectangle {
                     }
                 }
                 Repeater {
-                    model: turn.items.slice(turn.finalReply ? Math.min(column.shownFrom, turn.items.length - 1) : column.shownFrom)
+                    model: turn.items.slice(turn.finalReply ? Math.min(column.shownFrom, turn.items.indexOf(turn.lastPoint))
+                                                            : column.shownFrom)
                     delegate: PointRow {
                         required property var modelData
                         required property int index
@@ -563,6 +594,30 @@ Rectangle {
                         width: column.width - x
                     }
                 }
+                // At work with nothing running: it thinks.
+                Rectangle {
+                    objectName: "thinking" + turn.serial
+                    visible: turn.newest && overview.working
+                             && !turn.items.slice(column.shownFrom).some(point => point.state === "running")
+                    width: column.width
+                    height: thinkingText.implicitHeight + 6
+                    color: "transparent"
+                    Text {
+                        x: 8
+                        y: 3 - (overview.beat ? 2 : 0)
+                        width: 18
+                        text: overview.robot
+                        color: theme.accent
+                    }
+                    Text {
+                        id: thinkingText
+                        x: 32
+                        y: 3
+                        text: qsTr("Thinking…")
+                        color: overview.dim
+                    }
+                }
+
                 // What it gives you to run: copied with a click.
                 Repeater {
                     model: turn.compact ? [] : turn.commands
@@ -603,7 +658,7 @@ Rectangle {
                             anchors.verticalCenter: parent.verticalCenter
                             icon: command.copied ? "\uf00c" : "\uf0c5"
                             tint: command.copied ? theme.success : theme.foreground
-                            hint: qsTr("Copy it, to run it yourself")
+                            hint: qsTr("Copy")
                             onClicked: {
                                 backend.copyText(command.modelData)
                                 command.copied = true

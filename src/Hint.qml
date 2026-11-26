@@ -8,6 +8,7 @@ ToolTip {
     delay: 600
     padding: 8
     contentItem: Text {
+        textFormat: Text.PlainText
         text: tip.text
         color: theme.foreground
     }

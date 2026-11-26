@@ -42,6 +42,8 @@ public:
         // A point of its own, never part of a run (it may go on in the
         // background: a subagent, a command left running).
         bool alone = false;
+        // It went on in the background (it stays in sight when it fails).
+        bool background = false;
     };
     struct Turn {
         qint64 serial = 0;

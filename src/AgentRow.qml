@@ -52,12 +52,14 @@ Rectangle {
             spacing: 3
             Text {
                 Layout.fillWidth: true
+                textFormat: Text.PlainText
                 text: row.title
                 color: theme.foreground
                 elide: Text.ElideRight
             }
             Text {
                 Layout.fillWidth: true
+                textFormat: Text.PlainText
                 text: row.statusText + " · " + row.place
                 color: Qt.alpha(theme.foreground, 0.55)
                 elide: Text.ElideMiddle

@@ -345,6 +345,7 @@ Rectangle {
                     visible: list.count === 0
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
+                    textFormat: Text.PlainText
                     text: backend.error !== "" ? backend.error : qsTr("No agents are running in herdr.")
                     color: backend.error !== "" ? theme.urgent : panel.dim
                 }
@@ -396,6 +397,7 @@ Rectangle {
                 Text {
                     Layout.fillWidth: true
                     Layout.maximumWidth: implicitWidth
+                    textFormat: Text.PlainText
                     text: backend.selectedTitle
                     color: theme.foreground
                     elide: Text.ElideRight
@@ -702,6 +704,7 @@ Rectangle {
                         id: noticeText
                         anchors.centerIn: parent
                         width: parent.width - 20
+                        textFormat: Text.PlainText
                         text: backend.notice
                         color: backend.noticeIsError ? theme.urgent : theme.foreground
                         elide: Text.ElideRight
