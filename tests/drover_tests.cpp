@@ -460,6 +460,17 @@ private slots:
         QCOMPARE(items[0].detail, QString("Agent \"Review the beds\" finished"));
         QCOMPARE(items[2].state, QString("failed"));
         QCOMPARE(parser.turns().size(), 1);
+
+        // An agent that hands its report back names only its task.
+        feed(use("a2", "Agent", {{"description", "Draw the icons"}})
+             + result("a2", "Async agent launched successfully. (internal)\nagentId: a2be8af (internal ID)"));
+        QCOMPARE(parser.turns().last().items.last().state, QString("background"));
+        feed(line({{"type", "attachment"}, {"attachment", QJsonObject{{"type", "queued_command"},
+                   {"commandMode", "task-notification"},
+                   {"prompt", "<task-notification>\n<task-id>a2be8af</task-id>\n<status>completed</status>\n"
+                              "<summary>Agent \"Draw the icons\" finished</summary>\n</task-notification>"}}}}));
+        QCOMPARE(parser.turns().last().items.last().state, QString());
+        QCOMPARE(parser.turns().last().items.last().detail, QString("Agent \"Draw the icons\" finished"));
     }
 
     void aParkedConversationIsFollowed()

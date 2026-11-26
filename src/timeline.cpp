@@ -361,6 +361,11 @@ void TimelineParser::toolResult(const QString &id, bool error, const QString &co
             item.background = true;
             item.detail = tr("Runs in the background");
             m_background.insert(id, {pending.serial, item.id});
+            // Its notification may name only the task: the agent's or the
+            // command's own id.
+            static const QRegularExpression task("(?:agentId: |with ID: )([A-Za-z0-9_-]+)");
+            if (const QString taskId = task.match(content).captured(1); !taskId.isEmpty())
+                m_background.insert(taskId, {pending.serial, item.id});
             return;
         }
         if (item.pending == 0 && item.state == QLatin1String("running"))
@@ -611,12 +616,17 @@ void TimelineParser::queueOperation(const QJsonObject &object, const QDateTime &
 // A subagent or a command in the background ended: its point says how.
 void TimelineParser::taskNotification(const QString &text) {
     static const QRegularExpression tool("<tool-use-id>([^<]*)</tool-use-id>");
+    static const QRegularExpression task("<task-id>([^<]*)</task-id>");
     static const QRegularExpression status("<status>([^<]*)</status>");
     static const QRegularExpression summary("<summary>([\\s\\S]*?)</summary>");
-    const QString id = tool.match(text).captured(1).trimmed();
+    QString id = tool.match(text).captured(1).trimmed();
     if (!m_background.contains(id))
+        id = task.match(text).captured(1).trimmed();
+    if (id.isEmpty() || !m_background.contains(id))
         return;
     const auto [serial, itemId] = m_background.take(id);
+    // Known by both ids: neither waits any longer.
+    m_background.removeIf([&](const auto &entry) { return entry.value().second == itemId && entry.value().first == serial; });
     Turn *owner = turn(serial);
     if (!owner)
         return;
