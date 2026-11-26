@@ -166,7 +166,8 @@ a minute later, or the turn's end), never added to, and kept in
 `~/.cache/drover/summaries`. Under it shows only the newest point, what goes on
 now. Older turns show just their prompt and headline; a click on the prompt
 opens one. A short turn needs no summary, and an older one gets it when you
-scroll to it. A question the agent ends with, one it waits for, and your own
+scroll to it. A question the agent ends with, one it waits for, a command its
+last words give you to run (with a button that copies it), and your own
 messages still waiting in its queue are always in sight. A new summary waits
 while the pointer is over the list and its turn in view, so nothing moves
 under the pointer. When a picture explains a turn better than words (a

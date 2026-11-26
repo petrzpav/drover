@@ -3,6 +3,7 @@
 // where the panel opens.
 
 #include <QQmlApplicationEngine>
+#include <QClipboard>
 #include <QQmlContext>
 #include <QQuickItem>
 #include <QQuickStyle>
@@ -1181,11 +1182,25 @@ private slots:
         QTRY_VERIFY(rig.find("question1") && rig.find("question1")->isVisible());
         QCOMPARE(rig.find("question1")->childItems().at(1)->property("text").toString(), QString("Shall I water them now?"));
 
+        // A command it gives you to run: in sight, copied with a click.
+        QFile gives(rig.dir.filePath("projects/-a/s-1.jsonl"));
+        QVERIFY(gives.open(QIODevice::Append));
+        gives.write(entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
+            QJsonObject{{"type", "text"}, {"text", "Ready. Install it:\n\n```\n! sudo pacman -U drover.pkg.tar.zst\n```\n\n"
+                                                     + QString("Notes ").repeated(80) + "\n\n```\n" + QString("a\n").repeated(10) + "```"}}}}}}}));
+        gives.close();
+        QTRY_VERIFY(rig.find("command1_0") && rig.find("command1_0")->isVisible());
+        QVERIFY(!rig.find("command1_1"));
+        auto *copy = rig.find("copy1_0");
+        QTest::qWait(50);
+        QTest::mouseClick(rig.window, Qt::LeftButton, {}, copy->mapToScene(QPointF(copy->width() / 2, copy->height() / 2)).toPoint());
+        QTRY_COMPARE(QGuiApplication::clipboard()->text(), QString("! sudo pacman -U drover.pkg.tar.zst"));
+
         // A click shows twenty more, never all at once.
         QTest::qWait(50);
         QTest::mouseClick(rig.window, Qt::LeftButton, {}, earlier->mapToScene(QPointF(60, earlier->height() / 2)).toPoint());
-        QTRY_VERIFY(rig.find("point177"));
-        QVERIFY(!rig.find("point176"));
+        QTRY_VERIFY(rig.find("point178"));
+        QVERIFY(!rig.find("point177"));
     }
 
     void perfRealTranscript()

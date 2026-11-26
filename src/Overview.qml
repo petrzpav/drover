@@ -59,6 +59,20 @@ Rectangle {
         if (/^https?:\/\//i.test(link))
             Qt.openUrlExternally(link)
     }
+    // Commands a reply gives you to run: its code blocks of one to three lines.
+    function commandsIn(point) {
+        if (!point || point.kind !== "said")
+            return []
+        const found = []
+        const block = /```[^\n]*\n([\s\S]*?)```/g
+        let match
+        while ((match = block.exec(point.text)) !== null) {
+            const lines = match[1].split("\n").map(l => l.replace(/\s+$/, "")).filter(l => l.trim() !== "")
+            if (lines.length > 0 && lines.length <= 3)
+                found.push(lines.join("\n"))
+        }
+        return found
+    }
     // The question a reply ends with: its last paragraph, as plain words.
     function endQuestion(point) {
         if (!point || point.kind !== "said" || !/\?\s*$/.test(point.text))
@@ -341,6 +355,13 @@ Rectangle {
             readonly property bool detailed: overview.opened["details" + serial] === true
             // A reply ending with a question for you: always in sight.
             readonly property string question: overview.endQuestion(items.length > 0 ? items[items.length - 1] : null)
+            // Commands its last words give you to run: always in sight too.
+            readonly property var commands: {
+                for (let i = items.length - 1; i >= 0; --i)
+                    if (items[i].kind === "said")
+                        return overview.commandsIn(items[i])
+                return []
+            }
 
             Column {
                 id: column
@@ -535,6 +556,56 @@ Rectangle {
                         point: modelData
                         x: turn.detailed ? 24 : 0
                         width: column.width - x
+                    }
+                }
+                // What it gives you to run: copied with a click.
+                Repeater {
+                    model: turn.compact ? [] : turn.commands
+                    delegate: Rectangle {
+                        id: command
+                        required property string modelData
+                        required property int index
+                        objectName: "command" + turn.serial + "_" + index
+                        property bool copied: false
+                        width: column.width
+                        height: Math.max(commandText.implicitHeight, copyButton.height) + 12
+                        radius: theme.radius
+                        color: Qt.alpha(theme.foreground, 0.04)
+                        border.width: 1
+                        border.color: overview.line
+                        Text {
+                            x: 8
+                            y: 6
+                            width: 18
+                            text: "\uf120"
+                            color: theme.accent
+                        }
+                        Text {
+                            id: commandText
+                            x: 32
+                            y: 6
+                            width: parent.width - 32 - copyButton.width - 12
+                            text: command.modelData
+                            textFormat: Text.PlainText
+                            color: theme.foreground
+                            wrapMode: Text.WrapAnywhere
+                        }
+                        IconButton {
+                            id: copyButton
+                            objectName: "copy" + turn.serial + "_" + command.index
+                            anchors.right: parent.right
+                            anchors.rightMargin: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            icon: command.copied ? "\uf00c" : "\uf0c5"
+                            tint: command.copied ? theme.success : theme.foreground
+                            hint: qsTr("Copy it, to run it yourself")
+                            onClicked: {
+                                backend.copyText(command.modelData)
+                                command.copied = true
+                                copiedFade.restart()
+                            }
+                        }
+                        Timer { id: copiedFade; interval: 1500; onTriggered: command.copied = false }
                     }
                 }
                 // The question the turn ends with.

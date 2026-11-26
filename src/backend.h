@@ -141,6 +141,8 @@ public:
     // empty when the clipboard holds none. Prompts are text, so a picture
     // goes as a path the agent opens.
     Q_INVOKABLE QString saveClipboardImage(const QString &folder = QString());
+    // Puts text on the clipboard (a command the agent gave you to run).
+    Q_INVOKABLE void copyText(const QString &text);
     // Whether the input line on a Claude screen is empty.
     static bool promptIsEmpty(const QByteArray &screen);
     // Whether a Claude screen has a draft in its input line (no input line,

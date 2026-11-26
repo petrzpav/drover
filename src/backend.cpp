@@ -245,6 +245,10 @@ QString Backend::saveClipboardImage(const QString &folder) {
     return image.save(path, "PNG") ? path : QString();
 }
 
+void Backend::copyText(const QString &text) {
+    QGuiApplication::clipboard()->setText(text);
+}
+
 bool Backend::promptHasDraft(const QByteArray &screen) {
     static const QRegularExpression escape(R"(\x1b\[[0-9;?]*[A-Za-z])");
     bool input = false;
