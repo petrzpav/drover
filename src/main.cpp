@@ -192,6 +192,7 @@ int main(int argc, char *argv[]) {
 
     // The selected agent's conversation, in points, for the overview.
     Timeline timeline;
+    timeline.setSummaryModel(Timeline::readSummaryModel(QDir::homePath() + "/.config/drover/config"));
     QObject::connect(&translator, &Translator::changed, &timeline, &Timeline::reload);
 
     QQmlApplicationEngine engine;

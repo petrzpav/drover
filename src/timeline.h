@@ -3,6 +3,9 @@
 #include <QAbstractListModel>
 #include <QDateTime>
 #include <QFutureWatcher>
+#include <QPointer>
+#include <QSet>
+#include <QProcess>
 #include <QHash>
 #include <QJsonObject>
 #include <QList>
@@ -44,6 +47,10 @@ public:
         QDateTime time;
         QList<Item> items;
         qint64 durationMs = 0;
+        // The prompt line's own id, which stays when the transcript is read again.
+        QString uuid;
+        // The agent finished it (it may still add a point or two after).
+        bool ended = false;
     };
 
     // Turns kept; older ones drop off the front.
@@ -64,6 +71,10 @@ public:
     // The start of a Markdown text as the terminal shows it: its first 40
     // characters, without emphasis, code marks, list marks or link targets.
     static QString shownStart(const QString &markdown);
+    // A turn's points from `from` up to `to`, numbered from 1, as plain text
+    // for a model to summarize.
+    QString digest(qint64 serial, int from, int to) const;
+    const Turn *find(qint64 serial) const;
 
     // The words a Bash command stands for: its description, or its first line.
     static QString commandText(const QJsonObject &input);
@@ -85,7 +96,7 @@ private:
         int step = -1;
     };
     Turn &current(const QDateTime &time);
-    void startTurn(const QString &prompt, const QDateTime &time);
+    void startTurn(const QString &prompt, const QDateTime &time, const QString &uuid = QString());
     void addItem(Item item, const QString &toolId, const QString &activity);
     void toolUse(const QJsonObject &block, const QDateTime &time);
     void toolResult(const QString &id, bool error, const QString &content, const QJsonValue &result);
@@ -114,7 +125,8 @@ class Timeline : public QAbstractListModel {
     Q_PROPERTY(int count READ count NOTIFY countChanged)
 
 public:
-    enum Role { SerialRole = Qt::UserRole + 1, PromptRole, TimeRole, ItemsRole, DurationRole };
+    enum Role { SerialRole = Qt::UserRole + 1, PromptRole, TimeRole, ItemsRole, DurationRole, PointsRole,
+                CoveredRole, SummarizingRole };
 
     explicit Timeline(QObject *parent = nullptr);
     ~Timeline() override;
@@ -147,6 +159,23 @@ public:
     // The transcript of a session: <projects>/<any project>/<session>.jsonl.
     static QString findTranscript(const QString &projects, const QString &session);
 
+    // Summaries: a model (claude -p) sums up each turn in a few points, in
+    // batches as it goes on, each batch once (kept in the cache folder).
+    // The model, "" for none; summary = ... in the config, sonnet when unset.
+    void setSummaryModel(const QString &model) { m_model = model; }
+    QString summaryModel() const { return m_model; }
+    static QString readSummaryModel(const QString &configFile);
+    // The claude program, and where summaries are kept; tests use their own.
+    void setSummaryProgram(const QString &program) { m_program = program; }
+    void setCacheDirectory(const QString &directory) { m_cache = directory; }
+    // How many new points and seconds a turn still going on waits for its
+    // next summary.
+    void setBatching(int points, int seconds) { m_batchPoints = points; m_batchSeconds = seconds; }
+    // A turn came into view: it is summed up too, not only the newest ones.
+    Q_INVOKABLE void want(qint64 serial);
+    // The instructions the model gets.
+    static QString summaryInstructions(bool more);
+
 signals:
     void sessionChanged();
     void activeChanged();
@@ -168,7 +197,7 @@ private:
     void poll();
     void publish();
     void setState(const QString &state);
-    static QVariantMap rowOf(const TimelineParser::Turn &turn);
+    QVariantMap rowOf(const TimelineParser::Turn &turn) const;
 
     QString m_session, m_path, m_state = QStringLiteral("none");
     QString m_projects;
@@ -180,6 +209,31 @@ private:
     TimelineParser m_parser;
     QList<QVariantMap> m_rows;
     QString m_activity, m_lastSaid;
+    // Summaries.
+    struct Batch {
+        int to = 0;
+        QVariantList points;
+    };
+    void loadSummaries();
+    void saveSummaries(const QString &session, const QHash<QString, QList<Batch>> &summaries) const;
+    void summarizeNext();
+    void summaryDone(int code);
+    void stopSummary();
+    QString m_model, m_program = QStringLiteral("claude"), m_cache;
+    QHash<QString, QList<Batch>> m_summaries;  // by prompt uuid, this session's
+    QHash<QString, qint64> m_batchStarted;     // by prompt uuid
+    QSet<QString> m_wanted;                    // prompt uuids of turns seen
+    struct Job {
+        QString session, uuid;
+        qint64 serial = 0;
+        int from = 0, to = 0;
+        int generation = 0;
+    } m_job;
+    QPointer<QProcess> m_child;
+    QTimer m_childTimeout;
+    qint64 m_backoffUntil = 0;
+    int m_batchPoints = 4, m_batchSeconds = 60;
+
     QTimer m_poll;
     // Agents passed by quickly aren't read: only where the selection settles.
     QTimer m_settle;

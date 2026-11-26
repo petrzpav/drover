@@ -7,6 +7,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QRegularExpression>
+#include <QSaveFile>
+#include <QStandardPaths>
 #include <QtConcurrent/QtConcurrentRun>
 
 namespace {
@@ -146,8 +148,11 @@ TimelineParser::Turn &TimelineParser::current(const QDateTime &time) {
     return m_turns.last();
 }
 
-void TimelineParser::startTurn(const QString &prompt, const QDateTime &time) {
+void TimelineParser::startTurn(const QString &prompt, const QDateTime &time, const QString &uuid) {
+    if (!m_turns.isEmpty())
+        m_turns.last().ended = true;
     Turn turn;
+    turn.uuid = uuid;
     turn.serial = m_nextSerial++;
     turn.prompt = prompt;
     turn.time = time;
@@ -416,6 +421,7 @@ void TimelineParser::feed(const QByteArray &raw) {
             addItem(compact, QString(), QString());
         } else if (subtype == QLatin1String("turn_duration") && !m_turns.isEmpty()) {
             m_turns.last().durationMs = qint64(object.value("durationMs").toDouble());
+            m_turns.last().ended = true;
         }
         return;
     }
@@ -440,6 +446,7 @@ void TimelineParser::feed(const QByteArray &raw) {
     const QString text = textOf(content).trimmed();
     if (text.isEmpty())
         return;
+    const QString uuid = object.value("uuid").toString();
     const QJsonObject origin = object.value("origin").toObject();
     const QString from = origin.value("kind").toString();
     if (!from.isEmpty() && from != QLatin1String("human"))
@@ -458,18 +465,18 @@ void TimelineParser::feed(const QByteArray &raw) {
                                             QRegularExpression::DotMatchesEverythingOption);
     static const QRegularExpression shell("^<bash-input>(.*?)</bash-input>", QRegularExpression::DotMatchesEverythingOption);
     if (const auto match = command.match(text); match.hasMatch()) {
-        startTurn((match.captured(1).trimmed() + ' ' + match.captured(2).trimmed()).trimmed(), time);
+        startTurn((match.captured(1).trimmed() + ' ' + match.captured(2).trimmed()).trimmed(), time, uuid);
         return;
     }
     if (const auto match = shell.match(text); match.hasMatch()) {
-        startTurn(QStringLiteral("! ") + match.captured(1).trimmed(), time);
+        startTurn(QStringLiteral("! ") + match.captured(1).trimmed(), time, uuid);
         return;
     }
     // Everything else in angle brackets is Claude's own (command output,
     // reminders), unless the user typed it.
     if (text.startsWith('<') && from != QLatin1String("human"))
         return;
-    startTurn(shortened(text, 4000), time);
+    startTurn(shortened(text, 4000), time, uuid);
 }
 
 QString TimelineParser::activity() const {
@@ -528,6 +535,56 @@ QString TimelineParser::needle(qint64 serial, int index) const {
     return prompt;
 }
 
+const TimelineParser::Turn *TimelineParser::find(qint64 serial) const {
+    for (const Turn &turn : m_turns)
+        if (turn.serial == serial)
+            return &turn;
+    return nullptr;
+}
+
+QString TimelineParser::digest(qint64 serial, int from, int to) const {
+    const Turn *turn = find(serial);
+    if (!turn)
+        return {};
+    QStringList lines;
+    to = qMin(to, int(turn->items.size()));
+    for (int i = qMax(0, from); i < to; ++i) {
+        const Item &item = turn->items[i];
+        QString line;
+        if (item.kind == QLatin1String("command") || item.kind == QLatin1String("web") || item.kind == QLatin1String("tool")) {
+            QStringList steps = item.steps;
+            if (steps.size() > 12)
+                steps = steps.mid(0, 4) + QStringList{QStringLiteral("…")} + steps.mid(steps.size() - 7);
+            line = QStringLiteral("%1: %2").arg(item.kind == QLatin1String("command") ? "ran" : item.kind == QLatin1String("web") ? "looked up" : "used",
+                                                steps.join(QStringLiteral("; ")));
+        } else if (item.kind == QLatin1String("milestone")) {
+            line = QStringLiteral("commit/push/release: ") + item.text;
+        } else if (item.kind == QLatin1String("edit")) {
+            QStringList names;
+            for (const QString &file : item.steps)
+                names << QFileInfo(file).fileName();
+            line = QStringLiteral("edited: ") + names.join(QStringLiteral(", "));
+        } else if (item.kind == QLatin1String("question")) {
+            line = QStringLiteral("asked the user: ") + shortened(item.text, 300)
+                   + (item.detail.isEmpty() ? QString() : QStringLiteral(" | answer: ") + shortened(item.detail, 200));
+        } else if (item.kind == QLatin1String("said")) {
+            line = QStringLiteral("said: ") + shortened(item.text, 700);
+        } else if (item.kind == QLatin1String("nudge")) {
+            line = QStringLiteral("the user added: ") + shortened(item.text, 300);
+        } else if (item.kind == QLatin1String("recap")) {
+            line = QStringLiteral("recap: ") + item.text;
+        } else if (item.kind == QLatin1String("agent")) {
+            line = QStringLiteral("started a subagent: ") + item.text;
+        } else {
+            line = item.kind + QStringLiteral(": ") + item.text;
+        }
+        if (item.state == QLatin1String("failed") || item.state == QLatin1String("denied"))
+            line += QStringLiteral(" [%1: %2]").arg(item.state, item.detail);
+        lines << QStringLiteral("%1. %2").arg(i - from + 1).arg(QString(line).replace('\n', ' '));
+    }
+    return lines.join('\n');
+}
+
 QString TimelineParser::lastSaid() const {
     if (m_turns.isEmpty())
         return {};
@@ -542,9 +599,18 @@ Timeline::Timeline(QObject *parent)
     : QAbstractListModel(parent), m_projects(QDir::homePath() + "/.claude/projects") {
     m_poll.setInterval(800);
     connect(&m_poll, &QTimer::timeout, this, &Timeline::poll);
+    // A turn going on may come due by time alone.
+    connect(&m_poll, &QTimer::timeout, this, &Timeline::summarizeNext);
     m_settle.setSingleShot(true);
     m_settle.setInterval(150);
     connect(&m_settle, &QTimer::timeout, this, &Timeline::poll);
+    m_cache = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/drover/summaries";
+    m_childTimeout.setSingleShot(true);
+    m_childTimeout.setInterval(120 * 1000);
+    connect(&m_childTimeout, &QTimer::timeout, this, [this] {
+        if (m_child)
+            m_child->kill();
+    });
     connect(&m_load, &QFutureWatcher<Loaded>::finished, this, [this] {
         if (!m_load.future().isValid() || m_load.future().resultCount() == 0)
             return;
@@ -563,6 +629,7 @@ Timeline::Timeline(QObject *parent)
 }
 
 Timeline::~Timeline() {
+    stopSummary();
     m_load.waitForFinished();
 }
 
@@ -570,7 +637,8 @@ int Timeline::rowCount(const QModelIndex &parent) const { return parent.isValid(
 
 QHash<int, QByteArray> Timeline::roleNames() const {
     return {{SerialRole, "serial"}, {PromptRole, "prompt"}, {TimeRole, "time"}, {ItemsRole, "items"},
-            {DurationRole, "duration"}};
+            {DurationRole, "duration"}, {PointsRole, "points"}, {CoveredRole, "covered"},
+            {SummarizingRole, "summarizing"}};
 }
 
 QVariant Timeline::data(const QModelIndex &index, int role) const {
@@ -630,6 +698,7 @@ void Timeline::restart() {
     m_offset = 0;
     m_partial.clear();
     m_parser = TimelineParser();
+    loadSummaries();
     if (!m_rows.isEmpty()) {
         beginResetModel();
         m_rows.clear();
@@ -715,13 +784,241 @@ void Timeline::poll() {
     publish();
 }
 
-QVariantMap Timeline::rowOf(const TimelineParser::Turn &turn) {
+QVariantMap Timeline::rowOf(const TimelineParser::Turn &turn) const {
     QVariantList items;
     for (const auto &item : turn.items)
         items << QVariantMap{{"id", item.id}, {"kind", item.kind}, {"text", item.text}, {"detail", item.detail},
                              {"state", item.state}, {"steps", item.steps}};
+    // The summary's points stand in for the points they cover.
+    QVariantList points;
+    int covered = 0;
+    for (const Batch &batch : m_summaries.value(turn.uuid)) {
+        points += batch.points;
+        covered = batch.to;
+    }
     return {{"serial", turn.serial}, {"prompt", turn.prompt}, {"time", turn.time}, {"items", items},
-            {"duration", turn.durationMs}};
+            {"duration", turn.durationMs}, {"points", points}, {"covered", qMin(covered, int(turn.items.size()))},
+            {"summarizing", m_child && m_job.uuid == turn.uuid && !turn.uuid.isEmpty()}};
+}
+
+QString Timeline::readSummaryModel(const QString &configFile) {
+    QFile file(configFile);
+    if (file.open(QIODevice::ReadOnly)) {
+        for (const QString &raw : QString::fromUtf8(file.readAll()).split('\n')) {
+            const QString line = raw.section('#', 0, 0).trimmed();
+            if (line.section('=', 0, 0).trimmed() != QLatin1String("summary"))
+                continue;
+            const QString value = line.section('=', 1).trimmed();
+            static const QRegularExpression model("^[A-Za-z0-9._-]+$");
+            if (value == QLatin1String("off") || value == QLatin1String("no"))
+                return {};
+            if (model.match(value).hasMatch())
+                return value;
+        }
+    }
+    return QStringLiteral("sonnet");
+}
+
+QString Timeline::summaryInstructions(bool more) {
+    return QStringLiteral(
+        "You summarize what a coding agent did during one turn, for its user who was not watching. "
+        "You get the user's prompt and the agent's steps, numbered.\n")
+        + (more ? QStringLiteral("You also get the points already written for the turn's earlier steps. Write 1 or 2 "
+                                 "points about the new steps only, without repeating those.\n")
+                : QStringLiteral("Write 2 to 4 key points.\n"))
+        + QStringLiteral("Merge related steps into one point; fewer, broader points are better than a detailed log.\n")
+        + QStringLiteral(
+              "Write in the language of the user's prompt. Each point is one plain sentence of at most 100 "
+              "characters, no Markdown. Lead with outcomes: what was decided, done, changed or shipped, what failed, "
+              "what is open or waits for the user. Leave out routine steps such as reading files or tests that passed.\n"
+              "Reply with JSON only: {\"points\":[{\"text\":\"...\",\"kind\":\"done|change|ship|fail|ask|open|note\","
+              "\"step\":N}]} where step is the number of the step the point is mostly about.");
+}
+
+void Timeline::loadSummaries() {
+    m_summaries.clear();
+    m_batchStarted.clear();
+    m_wanted.clear();
+    if (m_session.isEmpty() || m_cache.isEmpty())
+        return;
+    QFile file(m_cache + '/' + m_session + ".json");
+    if (!file.open(QIODevice::ReadOnly))
+        return;
+    const QJsonObject turns = QJsonDocument::fromJson(file.readAll()).object();
+    for (auto it = turns.begin(); it != turns.end(); ++it) {
+        QList<Batch> batches;
+        for (const QJsonValue &value : it.value().toArray()) {
+            const QJsonObject object = value.toObject();
+            batches.append({object.value("to").toInt(), object.value("points").toArray().toVariantList()});
+        }
+        m_summaries.insert(it.key(), batches);
+    }
+}
+
+void Timeline::saveSummaries(const QString &session, const QHash<QString, QList<Batch>> &summaries) const {
+    if (m_cache.isEmpty() || session.isEmpty())
+        return;
+    QJsonObject turns;
+    for (auto it = summaries.begin(); it != summaries.end(); ++it) {
+        QJsonArray batches;
+        for (const Batch &batch : it.value())
+            batches.append(QJsonObject{{"to", batch.to}, {"points", QJsonArray::fromVariantList(batch.points)}});
+        turns.insert(it.key(), batches);
+    }
+    QDir().mkpath(m_cache);
+    QSaveFile file(m_cache + '/' + session + ".json");
+    if (file.open(QIODevice::WriteOnly)) {
+        file.write(QJsonDocument(turns).toJson(QJsonDocument::Compact));
+        file.commit();
+    }
+}
+
+// The newest turn that has steps no summary covers yet, enough of them: all
+// of an ended turn's, or a batch of a turn still going on (its newest step
+// may still grow, so it waits). A short ended turn needs none: its points
+// say it already.
+void Timeline::summarizeNext() {
+    if (m_model.isEmpty() || !m_active || m_child || m_state != QLatin1String("ready")
+        || QDateTime::currentMSecsSinceEpoch() < m_backoffUntil)
+        return;
+    const auto &turns = m_parser.turns();
+    // The newest turns, and older ones once they come into view.
+    int considered = 0;
+    for (int i = int(turns.size()) - 1; i >= 0; --i) {
+        const auto &turn = turns[i];
+        if (turn.uuid.isEmpty() || turn.prompt.isEmpty())
+            continue;
+        if (++considered > 8 && !m_wanted.contains(turn.uuid))
+            continue;
+        const QList<Batch> batches = m_summaries.value(turn.uuid);
+        const int covered = batches.isEmpty() ? 0 : batches.last().to;
+        const int total = int(turn.items.size());
+        const int target = turn.ended ? total : total - 1;
+        if (target <= covered)
+            continue;
+        if (turn.ended) {
+            if (covered == 0 && total < 3)
+                continue;
+        } else {
+            const qint64 since = QDateTime::currentMSecsSinceEpoch() - m_batchStarted.value(turn.uuid, 0);
+            if (target - covered < m_batchPoints || since < qint64(m_batchSeconds) * 1000)
+                continue;
+        }
+        m_job = {m_session, turn.uuid, turn.serial, covered, target, m_generation};
+        m_batchStarted.insert(turn.uuid, QDateTime::currentMSecsSinceEpoch());
+
+        QString input = QStringLiteral("The user's prompt: ") + turn.prompt.left(1500) + QStringLiteral("\n\n");
+        if (covered > 0) {
+            input += QStringLiteral("Points already written:\n");
+            for (const Batch &batch : batches)
+                for (const QVariant &point : batch.points)
+                    input += QStringLiteral("- ") + point.toMap().value("text").toString() + '\n';
+            input += QStringLiteral("\nNew steps:\n");
+        } else {
+            input += QStringLiteral("Steps:\n");
+        }
+        input += m_parser.digest(turn.serial, covered, target);
+
+        m_child = new QProcess(this);
+        // Not one of the agents: none of their panes' or sessions' variables.
+        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        for (const QString &name : environment.keys())
+            if (name.startsWith(QLatin1String("HERDR_")) || name.startsWith(QLatin1String("CLAUDE")))
+                environment.remove(name);
+        m_child->setProcessEnvironment(environment);
+        QDir().mkpath(m_cache);
+        m_child->setWorkingDirectory(m_cache);
+        connect(m_child, &QProcess::finished, this, [this](int code) { summaryDone(code); });
+        connect(m_child, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+            if (error == QProcess::FailedToStart)
+                summaryDone(-1);
+        });
+        m_child->start(m_program, {"-p", "--model", m_model, "--no-session-persistence", "--tools", "",
+                                   "--setting-sources", "", "--output-format", "json",
+                                   "--system-prompt", summaryInstructions(covered > 0)});
+        m_child->write(input.toUtf8());
+        m_child->closeWriteChannel();
+        m_childTimeout.start();
+        publish();
+        return;
+    }
+}
+
+void Timeline::want(qint64 serial) {
+    const auto *turn = m_parser.find(serial);
+    if (!turn || turn->uuid.isEmpty() || m_wanted.contains(turn->uuid))
+        return;
+    m_wanted.insert(turn->uuid);
+    QTimer::singleShot(0, this, &Timeline::summarizeNext);
+}
+
+void Timeline::stopSummary() {
+    m_childTimeout.stop();
+    if (!m_child)
+        return;
+    QProcess *child = m_child;
+    m_child = nullptr;
+    child->disconnect(this);
+    child->kill();
+    child->waitForFinished(500);
+    child->deleteLater();
+}
+
+void Timeline::summaryDone(int code) {
+    if (!m_child)
+        return;
+    m_childTimeout.stop();
+    QProcess *child = m_child;
+    m_child = nullptr;
+    const QByteArray out = child->readAllStandardOutput();
+    child->disconnect(this);
+    child->deleteLater();
+    const Job job = m_job;
+    m_job = Job();
+
+    const QJsonObject reply = QJsonDocument::fromJson(out).object();
+    const QString result = reply.value("result").toString();
+    const int open = result.indexOf('{'), close = result.lastIndexOf('}');
+    const QJsonArray points = QJsonDocument::fromJson(result.mid(open, close - open + 1).toUtf8())
+                                  .object().value("points").toArray();
+    if (code != 0 || reply.value("is_error").toBool() || open < 0 || points.isEmpty()) {
+        // A usage limit, or anything else: summaries rest a while.
+        const bool limit = QString::fromUtf8(out).contains(QLatin1String("limit"), Qt::CaseInsensitive);
+        m_backoffUntil = QDateTime::currentMSecsSinceEpoch() + (limit ? 30 : 5) * 60 * 1000;
+        if (job.generation == m_generation)
+            publish();
+        return;
+    }
+    static const QStringList kinds{"done", "change", "ship", "fail", "ask", "open", "note"};
+    Batch batch;
+    batch.to = job.to;
+    for (const QJsonValue &value : points) {
+        const QJsonObject point = value.toObject();
+        const QString text = point.value("text").toString().simplified();
+        if (text.isEmpty())
+            continue;
+        const QString kind = point.value("kind").toString();
+        const int step = point.value("step").toInt(1);
+        // Where to find it in the terminal, while the points are as numbered.
+        const QString needle = job.generation == m_generation
+            ? m_parser.needle(job.serial, qBound(job.from, job.from + step - 1, job.to - 1)) : QString();
+        batch.points << QVariantMap{{"text", text}, {"kind", kinds.contains(kind) ? kind : QStringLiteral("note")},
+                                    {"needle", needle}};
+    }
+    if (job.session == m_session) {
+        m_summaries[job.uuid].append(batch);
+        saveSummaries(m_session, m_summaries);
+        publish();
+    } else {
+        // Another agent by now: its summary is kept for when it's back.
+        Timeline other;
+        other.m_cache = m_cache;
+        other.m_session = job.session;
+        other.loadSummaries();
+        other.m_summaries[job.uuid].append(batch);
+        saveSummaries(job.session, other.m_summaries);
+    }
+    QTimer::singleShot(0, this, &Timeline::summarizeNext);
 }
 
 // Row by row, so the list keeps its place: turns gone from the front are
@@ -768,4 +1065,6 @@ void Timeline::publish() {
         m_lastSaid = said;
         emit progressChanged();
     }
+    if (!m_child)
+        QTimer::singleShot(0, this, &Timeline::summarizeNext);
 }

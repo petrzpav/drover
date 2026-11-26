@@ -159,6 +159,15 @@ descriptions. The agent's questions with your answers, what you typed while
 it worked, what it said and Claude's recaps are there as well. Reading and
 searching are left out.
 
+A model sums up each turn in two to four points as it goes on: `claude -p`
+with Sonnet, one call at a time, on your Claude account. The summary takes
+the place of the points it covers; the newest points show as they come until
+the next batch (four more points and a minute later, or the turn's end). Each
+batch is summed up once and kept in `~/.cache/drover/summaries`. A short turn
+needs no summary, and an older one gets it when you scroll to it. After a
+failed call or a usage limit, summaries rest for a while; `summary = off` in
+the config turns them off.
+
 Click a point and the agent's terminal scrolls to it, with the keyboard.
 Claude folds commands and edits into lines like "Ran 3 shell commands", so
 for those it scrolls to the agent's words just before them. The list stays at
@@ -189,6 +198,8 @@ stage = fence
 ask_replies = yes
 # seconds before an unanswered question goes back to the terminal; 0 waits for good
 ask_hold = 180
+# the model that sums up turns in the overview: sonnet (the default), haiku, … or off
+summary = sonnet
 # close workspaces with a herdr plugin's action instead of herdr workspace close
 # close_action = petrzpav.persistent-spaces.delete
 ```

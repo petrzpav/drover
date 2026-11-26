@@ -1036,6 +1036,84 @@ private slots:
         QCOMPARE(ended.first().first().toString(), QString("missing"));
     }
 
+    void aSummaryStandsInForItsPoints()
+    {
+        Rig rig(R"({"result":{"agents":[
+          {"agent":"claude","agent_session":{"kind":"id","value":"s-1"},"agent_status":"idle","cwd":"/a","pane_id":"w1:p1","terminal_id":"term_1","terminal_title_stripped":"Plant the beds","workspace_id":"w1"},
+          {"agent":"claude","agent_status":"idle","cwd":"/b","pane_id":"w2:p1","terminal_id":"term_2","terminal_title_stripped":"Fix the gate","workspace_id":"w2"}]}})");
+        QFile script(rig.dir.filePath("herdr"));
+        QVERIFY(script.open(QIODevice::ReadOnly));
+        QString text = QString::fromUtf8(script.readAll());
+        script.close();
+        text.replace("  \"terminal attach\")\n", QString("  \"terminal attach\")\n    stty raw -echo; exec python3 -I '%1' ;;\n  \"terminal attach-old\")\n").arg(TESTS_DIR "/fake_agent.py"));
+        write(rig.dir.filePath("herdr"), text.toUtf8());
+
+        // A turn worth a summary, then many short ones after it.
+        QDir(rig.dir.path()).mkpath("projects/-a");
+        const auto entry = [](const QJsonObject &object) { return QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n'; };
+        const auto said = [&](const QString &words) {
+            return entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{QJsonObject{{"type", "text"}, {"text", words}}}}}}});
+        };
+        QByteArray transcript = entry({{"type", "user"}, {"uuid", "u1"}, {"origin", QJsonObject{{"kind", "human"}}},
+                                       {"message", QJsonObject{{"content", "Plant the beds"}}}})
+            + said("history line 40")
+            + entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{QJsonObject{{"type", "tool_use"},
+                {"id", "b1"}, {"name", "Bash"}, {"input", QJsonObject{{"command", "dig"}, {"description", "Dig the bed"}}}}}}}}})
+            + entry({{"type", "user"}, {"message", QJsonObject{{"content", QJsonArray{QJsonObject{{"type", "tool_result"},
+                {"tool_use_id", "b1"}, {"content", "ok"}}}}}}})
+            + said("The beds are planted.");
+        for (int i = 0; i < 20; ++i)
+            transcript += entry({{"type", "user"}, {"uuid", QString("n%1").arg(i)}, {"origin", QJsonObject{{"kind", "human"}}},
+                                 {"message", QJsonObject{{"content", QString("Note %1").arg(i)}}}}) + said(QString("Noted %1.").arg(i));
+        write(rig.dir.filePath("projects/-a/s-1.jsonl"), transcript);
+        rig.timeline->setCacheDirectory(rig.dir.filePath("cache"));
+        rig.timeline->setSummaryProgram(TESTS_DIR "/fake_claude.sh");
+        qputenv("DROVER_TEST_DIR", rig.dir.path().toUtf8());
+
+        rig.expand();
+        auto *list = rig.find("overviewList");
+        QTRY_COMPARE(list->property("count").toInt(), 21);
+        QTRY_VERIFY(list->property("atYEnd").toBool());
+
+        // Scrolled up, past the first turn (as the user would: the list
+        // stops following the end): a summary coming in above moves nothing
+        // in view.
+        const auto scrollTo = [&](qreal y) {
+            list->setProperty("follow", false);
+            list->setProperty("contentY", y);
+            QTest::qWait(100);
+        };
+        QMetaObject::invokeMethod(list, "positionViewAtBeginning");
+        list->setProperty("follow", false);
+        QTRY_VERIFY(rig.find("prompt1"));
+        scrollTo(list->property("contentY").toReal() + 300);
+        QTRY_VERIFY(rig.find("prompt8"));
+        auto *anchor = rig.find("prompt8");
+        const qreal before = anchor->mapToScene(QPointF(0, 0)).y();
+        rig.timeline->setSummaryModel("sonnet");
+        QTRY_COMPARE(rig.timeline->index(0).data(Timeline::PointsRole).toList().size(), 1);
+        QTest::qWait(100);
+        QCOMPARE(anchor->mapToScene(QPointF(0, 0)).y(), before);
+
+        // At the top: the summary in place of the points it covers; a click
+        // on it scrolls the terminal to the agent's words.
+        QMetaObject::invokeMethod(list, "positionViewAtBeginning");
+        QTRY_VERIFY(rig.find("summary1_0") && rig.find("summary1_0")->isVisible());
+        QVERIFY(!rig.find("point2")->isVisible());
+        auto *view = rig.find("agentTerminal");
+        QTRY_VERIFY(view->property("ready").toBool());
+        auto *point = rig.find("summary1_0");
+        QTest::qWait(50);
+        QTest::mouseClick(rig.window, Qt::LeftButton, {},
+                          point->mapToScene(QPointF(point->width() / 2, point->height() / 2)).toPoint());
+        const auto screen = [&] {
+            QString shown;
+            QMetaObject::invokeMethod(view, "screenText", Q_RETURN_ARG(QString, shown));
+            return shown;
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(screen().contains("history line 40\n"), 10000);
+    }
+
     void aNarrowPanelHasTheOverviewOverTheTerminal()
     {
         Rig rig(agents("working", "idle"));

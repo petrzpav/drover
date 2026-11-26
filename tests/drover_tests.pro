@@ -4,6 +4,7 @@ TARGET = drover_tests
 TEMPLATE = app
 
 INCLUDEPATH += ../src
+DEFINES += TESTS_DIR=\\\"$$PWD\\\"
 LIBS += -lvterm -lutil
 
 HEADERS += ../src/asker.h ../src/hook.h ../src/agentmodel.h ../src/backend.h ../src/terminalview.h ../src/theme.h ../src/timeline.h ../src/freshtheme.h ../src/translator.h ../src/terminalfont.h

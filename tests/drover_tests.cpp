@@ -201,6 +201,108 @@ private slots:
         QCOMPARE(parser.needle(999, 0), QString());
     }
 
+    void aModelSumsUpEachTurnOnce()
+    {
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("projects/-a");
+        const QString path = dir.filePath("projects/-a/s-1.jsonl");
+        // An ended turn, and one still going on.
+        QByteArray first = prompt("Plant the beds");
+        first.replace("\"type\":\"user\"", "\"type\":\"user\",\"uuid\":\"u1\"");
+        QByteArray second = prompt("Fix the gate");
+        second.replace("\"type\":\"user\"", "\"type\":\"user\",\"uuid\":\"u2\"");
+        write(path, first + said("Digging the south bed first.") + bash("b1", "dig", "Dig the bed") + result("b1", "ok")
+                    + said("The bed is planted.")
+                    + line({{"type", "system"}, {"subtype", "turn_duration"}, {"durationMs", 9000}})
+                    + second + bash("b2", "oil", "Oil the hinge") + result("b2", "ok"));
+        // A claude that sums up every turn in one point, about step 2.
+        const QString claude = TESTS_DIR "/fake_claude.sh";
+        qputenv("DROVER_TEST_DIR", dir.path().toUtf8());
+        const auto calls = [&] {
+            QFile file(dir.filePath("calls"));
+            return file.open(QIODevice::ReadOnly) ? int(QString::fromUtf8(file.readAll()).count("--model")) : 0;
+        };
+
+        {
+            Timeline timeline;
+            timeline.setProjectsDirectory(dir.filePath("projects"));
+            timeline.setCacheDirectory(dir.filePath("cache"));
+            timeline.setSummaryProgram(claude);
+            timeline.setSummaryModel("sonnet");
+            timeline.setInterval(20);
+            timeline.setBatching(2, 0);
+            timeline.setSession("s-1");
+            timeline.setActive(true);
+            QTRY_COMPARE(timeline.index(0).data(Timeline::PointsRole).toList().size(), 1);
+            const QVariantMap point = timeline.index(0).data(Timeline::PointsRole).toList().first().toMap();
+            QCOMPARE(point.value("text").toString(), QString("Done it"));
+            QCOMPARE(point.value("kind").toString(), QString("done"));
+            // Step 2 is a command: found by the agent's words before it.
+            QCOMPARE(point.value("needle").toString(), QString("Digging the south bed first."));
+            QCOMPARE(timeline.index(0).data(Timeline::CoveredRole).toInt(), 3);
+            QFile input(dir.filePath("input"));
+            QVERIFY(input.open(QIODevice::ReadOnly));
+            const QString asked = QString::fromUtf8(input.readAll());
+            QVERIFY(asked.contains("The user's prompt: Plant the beds"));
+            QVERIFY(asked.contains("2. ran: Dig the bed"));
+            input.close();
+            // The turn going on has one finished point only: not yet a batch.
+            QTest::qWait(200);
+            QCOMPARE(calls(), 1);
+            QFile more(path);
+            QVERIFY(more.open(QIODevice::Append));
+            more.write(said("The hinge is oiled.") + bash("b3", "paint", "Paint the gate") + result("b3", "ok")
+                       + said("Painting is next."));
+            more.close();
+            QTRY_COMPARE(timeline.index(1).data(Timeline::PointsRole).toList().size(), 1);
+            QCOMPARE(calls(), 2);
+            QCOMPARE(timeline.index(1).data(Timeline::CoveredRole).toInt(), 3);
+            const QString args = [&] { QFile f(dir.filePath("calls")); f.open(QIODevice::ReadOnly); return QString::fromUtf8(f.readAll()); }();
+            QVERIFY(args.contains("--model sonnet"));
+            QVERIFY(args.contains("--no-session-persistence"));
+        }
+
+        // Read again: the summaries come from the cache, no call.
+        {
+            Timeline again;
+            again.setProjectsDirectory(dir.filePath("projects"));
+            again.setCacheDirectory(dir.filePath("cache"));
+            again.setSummaryProgram(claude);
+            again.setSummaryModel("sonnet");
+            again.setInterval(20);
+            again.setSession("s-1");
+            again.setActive(true);
+            QTRY_COMPARE(again.state(), QString("ready"));
+            QCOMPARE(again.index(0).data(Timeline::PointsRole).toList().size(), 1);
+            QTest::qWait(200);
+            QCOMPARE(calls(), 2);
+        }
+
+        // A failure (a usage limit): summaries rest, no call after call.
+        write(dir.filePath("fail"), "");
+        {
+            Timeline resting;
+            resting.setProjectsDirectory(dir.filePath("projects"));
+            resting.setCacheDirectory(dir.filePath("cache-2"));
+            resting.setSummaryProgram(claude);
+            resting.setSummaryModel("sonnet");
+            resting.setInterval(20);
+            resting.setSession("s-1");
+            resting.setActive(true);
+            QTRY_COMPARE(calls(), 3);
+            QTest::qWait(300);
+            QCOMPARE(calls(), 3);
+            QCOMPARE(resting.index(0).data(Timeline::PointsRole).toList().size(), 0);
+        }
+
+        // Off in the config, or another model.
+        write(dir.filePath("config"), "summary = off\n");
+        QCOMPARE(Timeline::readSummaryModel(dir.filePath("config")), QString());
+        write(dir.filePath("config"), "summary = haiku  # quick\n");
+        QCOMPARE(Timeline::readSummaryModel(dir.filePath("config")), QString("haiku"));
+        QCOMPARE(Timeline::readSummaryModel(dir.filePath("none")), QString("sonnet"));
+    }
+
     void theTimelineKnowsWhatChangesTheWorld()
     {
         QVERIFY(TimelineParser::isMilestone("git commit -m x"));
