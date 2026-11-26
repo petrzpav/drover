@@ -380,6 +380,41 @@ private slots:
                                                                   .arg(Timeline::VisualLines).arg(Timeline::VisualColumns)));
     }
 
+    void aQueuedMessageShowsAtOnce()
+    {
+        const auto queue = [](const char *operation, const QString &content = {}) {
+            QJsonObject object{{"type", "queue-operation"}, {"operation", operation}};
+            if (!content.isEmpty())
+                object.insert("content", content);
+            return QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n';
+        };
+        TimelineParser parser;
+        const auto feed = [&](const QByteArray &lines) {
+            for (const QByteArray &l : lines.split('\n'))
+                parser.feed(l);
+        };
+        feed(prompt("Plant the beds") + bash("b1", "dig", "Dig") + queue("enqueue", "and water them"));
+        // At once, as waiting.
+        QCOMPARE(parser.turns().last().items.last().kind, QString("nudge"));
+        QCOMPARE(parser.turns().last().items.last().state, QString("queued"));
+        // Taken in mid-turn: no longer waiting, and not twice.
+        feed(queue("remove", "and water them")
+             + line({{"type", "attachment"}, {"attachment", QJsonObject{{"type", "queued_command"}, {"commandMode", "prompt"},
+                     {"prompt", "and water them"}, {"origin", QJsonObject{{"kind", "human"}}}}}}));
+        QCOMPARE(parser.turns().last().items.size(), 2);
+        QCOMPARE(parser.turns().last().items.last().state, QString());
+        // Its next prompt: gone from here, there as the prompt.
+        feed(queue("enqueue", "then the gate") + queue("enqueue", "<task-notification>x"));
+        QCOMPARE(parser.turns().last().items.size(), 3);
+        feed(result("b1", "ok") + queue("dequeue") + prompt("then the gate"));
+        QCOMPARE(parser.turns().size(), 2);
+        QCOMPARE(parser.turns().first().items.size(), 2);
+        QCOMPARE(parser.turns().last().prompt, QString("then the gate"));
+        // Taken back by the user: gone.
+        feed(queue("enqueue", "oops") + queue("popAll", "oops"));
+        QCOMPARE(parser.turns().last().items.size(), 0);
+    }
+
     void theTimelineKnowsWhatChangesTheWorld()
     {
         QVERIFY(TimelineParser::isMilestone("git commit -m x"));

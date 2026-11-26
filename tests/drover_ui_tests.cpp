@@ -1083,8 +1083,13 @@ private slots:
         QFile::remove(rig.dir.filePath("cache/s-1.json"));
         rig.timeline->reload();
         QTRY_COMPARE(list->property("count").toInt(), 21);
+        QTRY_COMPARE(rig.timeline->state(), QString("ready"));
         QMetaObject::invokeMethod(list, "positionViewAtBeginning");
         list->setProperty("follow", false);
+        // An older turn shows its headline only: opened, all of it.
+        QTRY_VERIFY(rig.find("prompt1"));
+        QVERIFY(!rig.find("point2"));
+        QMetaObject::invokeMethod(rig.find("overview"), "toggle", Q_ARG(QVariant, "turn1"));
         QTRY_VERIFY(rig.find("point2"));
         QTest::mouseMove(rig.window, rig.find("point2")->mapToScene(QPointF(40, 5)).toPoint());
         QTest::qWait(100);
@@ -1166,10 +1171,21 @@ private slots:
         more.close();
         QTRY_VERIFY(rig.find("point201"));
         QTRY_VERIFY(!rig.find("point195"));
-        // A click shows them all.
+        // A reply that ends with a question: the question, always in sight.
+        QFile asks(rig.dir.filePath("projects/-a/s-1.jsonl"));
+        QVERIFY(asks.open(QIODevice::Append));
+        asks.write(entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
+            QJsonObject{{"type", "text"}, {"text", "All beds are planted.\n\nLong notes " + QString("and more ").repeated(80)
+                                                     + "\n\nShall I **water** them now?"}}}}}}}));
+        asks.close();
+        QTRY_VERIFY(rig.find("question1") && rig.find("question1")->isVisible());
+        QCOMPARE(rig.find("question1")->childItems().at(1)->property("text").toString(), QString("Shall I water them now?"));
+
+        // A click shows twenty more, never all at once.
         QTest::qWait(50);
         QTest::mouseClick(rig.window, Qt::LeftButton, {}, earlier->mapToScene(QPointF(60, earlier->height() / 2)).toPoint());
-        QTRY_VERIFY(rig.find("point1"));
+        QTRY_VERIFY(rig.find("point177"));
+        QVERIFY(!rig.find("point176"));
     }
 
     void perfRealTranscript()

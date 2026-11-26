@@ -157,20 +157,24 @@ attached beneath. It is read from the transcript in `~/.claude/projects`, only
 its end at first, then what is appended, and only while it shows; drover
 remembers the view, and `Alt+E` comes back to it from the editor.
 
-Each of your prompts lists what came of it, a point in two lines at most. A
-model sums up each turn in two to four points as it goes on: `claude -p` with
-Sonnet, one call at a time, on your Claude account (about 5 seconds and 4,000
-tokens a call). The summary takes the place of the points it covers once the
-pointer is off the overview, so nothing moves under it; the newest points
-show as they come until the next batch (four more points and a minute later,
-or the turn's end). Each batch is made once and kept in
-`~/.cache/drover/summaries`. A short turn needs no summary, and an older one
-gets it when you scroll to it. When a picture explains a turn better than
-words (a flow of steps, a tree of files, numbers before and after, a little
-chart), the model draws one under a point, in plain text of at most 10 lines
-of 64 characters, colored where it matters. After a failed call or a usage
-limit, summaries rest for a while; `summary = off` in the config turns them
-off.
+Each of your prompts shows what came of it. A model sums up each turn as it
+goes on: `claude -p` with Sonnet, one call at a time, on your Claude account
+(about 5 seconds and 4,000 tokens a call). The summary is one to three short
+points: a headline, where the turn stands, in bold, then only what else you
+must know, quieter. It is rewritten as the turn goes on (four more points and
+a minute later, or the turn's end), never added to, and kept in
+`~/.cache/drover/summaries`. Under it shows only the newest point, what goes on
+now. Older turns show just their prompt and headline; a click on the prompt
+opens one. A short turn needs no summary, and an older one gets it when you
+scroll to it. A question the agent ends with, one it waits for, and your own
+messages still waiting in its queue are always in sight. A new summary waits
+while the pointer is over the list and its turn in view, so nothing moves
+under the pointer. When a picture explains a turn better than words (a
+checklist of what works, a flow of stages, a tree of files, numbers before and
+after, a little chart), the model draws one under a point, in plain text of at
+most 10 lines of 64 characters, colored where it matters. After a failed call
+or a usage limit, summaries rest for a while; `summary = off` in the config
+turns them off.
 
 The points themselves: commands in a row become one line, with the number of
 the others after it. A failed or refused command gets a red line of its own,
@@ -180,13 +184,15 @@ show as those commands' descriptions. The agent's questions with your
 answers, what you typed while it worked, what it said and Claude's recaps are
 there as well. Reading and searching are left out.
 
-Click a point to open it where it is: the agent's words in full (as
-Markdown, its pictures as links, nothing fetched), the error, every command
-of a run, or under a summary point the points it sums up. The list stays at the bottom as the agent goes on, unless
-you scrolled up.
+Click a summary point to open the points it sums up, and a point to open it
+where it is: the agent's words in full (as Markdown, its pictures as links,
+nothing fetched), the error, every command of a run. Never all at once: a long
+turn shows its newest points, and "… N earlier points" twenty more a click.
+The list stays at the bottom as the agent goes on, unless you scrolled up.
 
 The field below sends the agent a message (`herdr agent prompt`): `Enter`
-sends it, `Shift+Enter` starts a new line. An agent at work takes it as it
+sends it, `Shift+Enter` starts a new line. A picture pasted with `Ctrl+V` is
+saved to `~/.cache/drover/pasted` and goes as its path, which the agent opens. An agent at work takes it as it
 goes on, as when typed; not over a draft in its own prompt, and not while it
 asks you something: then the field says so, and a click on it takes you to the
 terminal. Each agent keeps its own draft.

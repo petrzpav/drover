@@ -59,6 +59,13 @@ Rectangle {
         if (/^https?:\/\//i.test(link))
             Qt.openUrlExternally(link)
     }
+    // The question a reply ends with: its last paragraph, as plain words.
+    function endQuestion(point) {
+        if (!point || point.kind !== "said" || !/\?\s*$/.test(point.text))
+            return ""
+        const paragraphs = point.text.split(/\n\s*\n/).filter(p => p.trim() !== "")
+        return paragraphs[paragraphs.length - 1].replace(/[*`]/g, "").replace(/\s+/g, " ").trim()
+    }
     function escaped(text) {
         return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     }
@@ -102,7 +109,7 @@ Rectangle {
     function tint(point) {
         if (point.state === "failed" || point.state === "denied")
             return theme.urgent
-        if (point.state === "running")
+        if (point.state === "running" || point.state === "queued")
             return theme.accent
         if (point.kind === "milestone")
             return theme.success
@@ -302,6 +309,7 @@ Rectangle {
 
         delegate: Item {
             id: turn
+            required property int index
             required property var serial
             required property string prompt
             required property var time
@@ -324,6 +332,15 @@ Rectangle {
                 shownCovered = covered
                 timeline.want(turn.serial)
             }
+            // The latest summary of the turn, if any.
+            readonly property var summary: shownBatches.length > 0 ? shownBatches[shownBatches.length - 1].points : []
+            // Older turns show their headline only, until opened.
+            readonly property bool open: overview.opened["turn" + serial] === true
+            readonly property bool compact: index < list.count - 2 && !open
+            // The points under the summary, opened from it.
+            readonly property bool detailed: overview.opened["details" + serial] === true
+            // A reply ending with a question for you: always in sight.
+            readonly property string question: overview.endQuestion(items.length > 0 ? items[items.length - 1] : null)
 
             Column {
                 id: column
@@ -336,12 +353,11 @@ Rectangle {
                     id: promptBox
                     objectName: "prompt" + turn.serial
                     visible: turn.prompt !== ""
-                    readonly property string key: "prompt" + turn.serial
-                    readonly property bool open: overview.opened[key] === true
                     width: parent.width
                     height: promptText.implicitHeight + 14
                     radius: theme.radius
-                    color: Qt.alpha(theme.foreground, 0.07)
+                    color: Qt.alpha(theme.foreground, promptHover.hovered ? 0.1 : 0.07)
+                    HoverHandler { id: promptHover }
 
                     Text {
                         id: promptText
@@ -352,7 +368,7 @@ Rectangle {
                         textFormat: Text.PlainText
                         color: theme.foreground
                         wrapMode: Text.Wrap
-                        maximumLineCount: promptBox.open ? 100000 : 2
+                        maximumLineCount: turn.open ? 100000 : turn.compact ? 1 : 2
                         elide: Text.ElideRight
                     }
                     Text {
@@ -376,127 +392,109 @@ Rectangle {
                         enabled: false
                         opacity: 1
                     }
+                    // Opens the turn: the whole prompt, all of its summary.
                     TapHandler {
-                        enabled: promptText.truncated || promptBox.open
                         cursorShape: Qt.PointingHandCursor
-                        onTapped: overview.toggle(promptBox.key)
+                        onTapped: overview.toggle("turn" + turn.serial)
                     }
                 }
 
                 Item { width: 1; height: 4; visible: turn.prompt !== "" }
 
-                // The summary, batch by batch; a click on a point opens the
-                // points it sums up.
+                // The summary: its headline, then what else matters, quieter.
+                // A click opens the points it sums up.
                 Repeater {
-                    model: turn.shownBatches
-                    delegate: Column {
-                        id: batch
+                    model: turn.compact ? turn.summary.slice(0, 1) : turn.summary
+                    delegate: Rectangle {
+                        id: summaryRow
                         required property var modelData
                         required property int index
-                        readonly property string key: "batch" + turn.serial + "_" + index
-                        readonly property bool open: overview.opened[key] === true
+                        readonly property bool headline: index === 0
+                        readonly property string visual: modelData.visual || ""
+                        objectName: "summary" + turn.serial + "_0_" + index
                         width: column.width
-                        spacing: 2
-                        Repeater {
-                            model: batch.modelData.points
-                            delegate: Rectangle {
-                                id: summary
-                                required property var modelData
-                                required property int index
-                                objectName: "summary" + turn.serial + "_" + batch.index + "_" + index
-                                width: batch.width
-                                height: summaryBody.implicitHeight + 6
+                        height: summaryBody.implicitHeight + 6
+                        radius: theme.radius
+                        color: turn.detailed || summaryHover.hovered ? Qt.alpha(theme.foreground, 0.05) : "transparent"
+                        HoverHandler { id: summaryHover }
+                        Text {
+                            x: 8
+                            y: 3
+                            width: 18
+                            text: overview.summaryGlyph(summaryRow.modelData.kind)
+                            color: overview.summaryTint(summaryRow.modelData.kind)
+                            opacity: summaryRow.headline ? 1 : 0.7
+                        }
+                        Column {
+                            id: summaryBody
+                            x: 32
+                            y: 3
+                            width: parent.width - 32 - 8
+                            spacing: 6
+                            Text {
+                                width: parent.width
+                                text: summaryRow.modelData.text
+                                textFormat: Text.PlainText
+                                color: summaryRow.modelData.kind === "fail" ? theme.urgent
+                                     : summaryRow.headline ? theme.foreground : overview.dim
+                                font.bold: summaryRow.headline
+                                wrapMode: Text.Wrap
+                                maximumLineCount: 2
+                                elide: Text.ElideRight
+                            }
+                            // The model's drawing, when it made one: as drawn,
+                            // sideways scrolling when wider than the overview.
+                            Rectangle {
+                                objectName: "visual" + turn.serial + "_0_" + summaryRow.index
+                                visible: summaryRow.visual !== "" && !turn.compact
+                                width: parent.width
+                                height: visualText.implicitHeight + 16
                                 radius: theme.radius
-                                readonly property string visual: modelData.visual || ""
-                                color: batch.open || summaryHover.hovered ? Qt.alpha(theme.foreground, 0.05) : "transparent"
-                                HoverHandler { id: summaryHover }
-                                Text {
-                                    x: 8
-                                    y: 3
-                                    width: 18
-                                    text: overview.summaryGlyph(summary.modelData.kind)
-                                    color: overview.summaryTint(summary.modelData.kind)
-                                }
-                                Column {
-                                    id: summaryBody
-                                    x: 32
-                                    y: 3
-                                    width: parent.width - 32 - 8
-                                    spacing: 6
+                                color: Qt.alpha(theme.foreground, 0.04)
+                                border.width: 1
+                                border.color: overview.line
+                                Flickable {
+                                    anchors.fill: parent
+                                    anchors.margins: 8
+                                    clip: true
+                                    contentWidth: visualText.implicitWidth
+                                    contentHeight: visualText.implicitHeight
+                                    flickableDirection: Flickable.HorizontalFlick
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    interactive: contentWidth > width
                                     Text {
-                                        id: summaryText
-                                        width: parent.width
-                                        text: summary.modelData.text
-                                        textFormat: Text.PlainText
-                                        color: summary.modelData.kind === "fail" ? theme.urgent : theme.foreground
-                                        wrapMode: Text.Wrap
-                                        maximumLineCount: 2
-                                        elide: Text.ElideRight
+                                        id: visualText
+                                        objectName: "visualText" + turn.serial + "_0_" + summaryRow.index
+                                        text: summaryRow.visual !== "" ? overview.drawing(summaryRow.visual) : ""
+                                        textFormat: Text.StyledText
+                                        color: theme.foreground
+                                        wrapMode: Text.NoWrap
                                     }
-                                    // The model's drawing, when it made one: as drawn,
-                                    // sideways scrolling when wider than the overview.
-                                    Rectangle {
-                                        objectName: "visual" + turn.serial + "_" + batch.index + "_" + summary.index
-                                        visible: summary.visual !== ""
-                                        width: parent.width
-                                        height: visualText.implicitHeight + 16
-                                        radius: theme.radius
-                                        color: Qt.alpha(theme.foreground, 0.04)
-                                        border.width: 1
-                                        border.color: overview.line
-                                        Flickable {
-                                            anchors.fill: parent
-                                            anchors.margins: 8
-                                            clip: true
-                                            contentWidth: visualText.implicitWidth
-                                            contentHeight: visualText.implicitHeight
-                                            flickableDirection: Flickable.HorizontalFlick
-                                            boundsBehavior: Flickable.StopAtBounds
-                                            interactive: contentWidth > width
-                                            Text {
-                                                id: visualText
-                                                objectName: "visualText" + turn.serial + "_" + batch.index + "_" + summary.index
-                                                text: summary.visual !== "" ? overview.drawing(summary.visual) : ""
-                                                textFormat: Text.StyledText
-                                                color: theme.foreground
-                                                wrapMode: Text.NoWrap
-                                            }
-                                        }
-                                    }
-                                }
-                                TapHandler {
-                                    cursorShape: Qt.PointingHandCursor
-                                    onTapped: overview.toggle(batch.key)
                                 }
                             }
                         }
-                        // Its points, set in under it.
-                        Column {
-                            visible: batch.open
-                            x: 24
-                            width: batch.width - 24
-                            spacing: 2
-                            Repeater {
-                                model: batch.open ? turn.items.slice(batch.modelData.from, batch.modelData.to) : []
-                                delegate: PointRow {
-                                    required property var modelData
-                                    point: modelData
-                                    width: batch.width - 24
-                                }
-                            }
+                        TapHandler {
+                            cursorShape: Qt.PointingHandCursor
+                            onTapped: overview.toggle("details" + turn.serial)
                         }
                     }
                 }
 
-                // The points no summary covers yet: the newest few, the
-                // earlier ones behind a line that shows them all.
-                readonly property bool allShown: overview.opened["all" + turn.serial] === true
-                readonly property int shownFrom: allShown ? turn.shownCovered
-                                                          : Math.max(turn.shownCovered, turn.items.length - overview.newest)
+                // The points: those the summary covers once opened from it,
+                // and those it doesn't cover yet (with a summary only the
+                // newest, as what goes on now; without, the newest few).
+                // Never all at once: "… N earlier points" shows 20 more a click.
+                readonly property int pointsFrom: turn.detailed ? 0 : turn.shownCovered
+                readonly property int pointsShown: (turn.detailed ? 12
+                                                    : turn.compact ? (turn.summary.length > 0 ? 0 : 1)
+                                                    : turn.summary.length > 0 ? 1 : overview.newest)
+                                                   + 20 * (overview.opened["more" + turn.serial] || 0)
+                readonly property int shownFrom: Math.max(pointsFrom, turn.items.length - pointsShown)
                 Rectangle {
                     objectName: "earlier" + turn.serial
-                    visible: column.shownFrom > turn.shownCovered
-                    width: column.width
+                    visible: column.shownFrom > column.pointsFrom && !turn.compact
+                    x: turn.detailed ? 24 : 0
+                    width: column.width - x
                     height: earlierText.implicitHeight + 6
                     radius: theme.radius
                     color: earlierHover.hovered ? Qt.alpha(theme.foreground, 0.05) : "transparent"
@@ -505,20 +503,66 @@ Rectangle {
                         id: earlierText
                         x: 32
                         y: 3
-                        text: "… " + qsTr("%n earlier points", "", column.shownFrom - turn.shownCovered)
+                        text: "… " + qsTr("%n earlier points", "", column.shownFrom - column.pointsFrom)
                         color: overview.dim
                     }
                     TapHandler {
                         cursorShape: Qt.PointingHandCursor
-                        onTapped: overview.toggle("all" + turn.serial)
+                        onTapped: {
+                            const next = Object.assign({}, overview.opened)
+                            next["more" + turn.serial] = (next["more" + turn.serial] || 0) + 1
+                            list.follow = false
+                            overview.opened = next
+                        }
                     }
                 }
+                // Your messages still waiting in the agent's queue, and its
+                // questions waiting for you, wherever they are.
                 Repeater {
-                    model: turn.items.slice(column.shownFrom)
+                    model: turn.items.slice(column.pointsFrom, column.shownFrom).filter(point =>
+                        point.state === "queued" || (point.kind === "question" && point.state === "running"))
                     delegate: PointRow {
                         required property var modelData
                         point: modelData
                         width: column.width
+                    }
+                }
+                Repeater {
+                    // The reply that asks shows as its question, below.
+                    model: turn.items.slice(column.shownFrom, turn.question !== "" ? turn.items.length - 1 : turn.items.length)
+                    delegate: PointRow {
+                        required property var modelData
+                        point: modelData
+                        x: turn.detailed ? 24 : 0
+                        width: column.width - x
+                    }
+                }
+                // The question the turn ends with.
+                Rectangle {
+                    objectName: "question" + turn.serial
+                    visible: turn.question !== ""
+                    width: column.width
+                    height: questionText.implicitHeight + 6
+                    radius: theme.radius
+                    color: "transparent"
+                    Text {
+                        x: 8
+                        y: 3
+                        width: 18
+                        text: "\uf059"
+                        color: theme.accent
+                    }
+                    Text {
+                        id: questionText
+                        x: 32
+                        y: 3
+                        width: parent.width - 32 - 8
+                        text: turn.question
+                        textFormat: Text.PlainText
+                        color: theme.foreground
+                        wrapMode: Text.Wrap
+                        maximumLineCount: 3
+                        elide: Text.ElideRight
                     }
                 }
             }
@@ -582,6 +626,38 @@ Rectangle {
                     topPadding: 4
                     bottomPadding: 4
                     enabled: backend.selected !== "" && !overview.asking
+                    // The cursor in the text's color, blinking as in a terminal.
+                    cursorDelegate: Rectangle {
+                        width: 2
+                        color: theme.foreground
+                        visible: input.activeFocus && blink.shown
+                        Timer {
+                            id: blink
+                            property bool shown: true
+                            interval: 530
+                            repeat: true
+                            running: input.activeFocus
+                            onRunningChanged: shown = true
+                            onTriggered: shown = !shown
+                        }
+                        Connections {
+                            target: input
+                            function onCursorPositionChanged() {
+                                blink.shown = true
+                                blink.restart()
+                            }
+                        }
+                    }
+                    // A picture pasted goes as a file the agent can open.
+                    Keys.onPressed: (event) => {
+                        if (event.matches(StandardKey.Paste)) {
+                            const path = backend.saveClipboardImage()
+                            if (path !== "") {
+                                input.insert(input.cursorPosition, path + " ")
+                                event.accepted = true
+                            }
+                        }
+                    }
                     Keys.onReturnPressed: (event) => {
                         if (event.modifiers & Qt.ShiftModifier)
                             event.accepted = false

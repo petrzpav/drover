@@ -1,4 +1,8 @@
 #include "backend.h"
+#include <QMimeData>
+#include <QImage>
+#include <QGuiApplication>
+#include <QClipboard>
 
 
 #include <QDateTime>
@@ -225,6 +229,20 @@ bool Backend::promptIsEmpty(const QByteArray &screen) {
         return line.trimmed().isEmpty();
     }
     return false;
+}
+
+QString Backend::saveClipboardImage(const QString &folder) {
+    const QMimeData *data = QGuiApplication::clipboard()->mimeData();
+    if (!data || !data->hasImage())
+        return {};
+    const QImage image = qvariant_cast<QImage>(data->imageData());
+    if (image.isNull())
+        return {};
+    const QString directory = folder.isEmpty()
+        ? QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/drover/pasted" : folder;
+    QDir().mkpath(directory);
+    const QString path = directory + '/' + QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz") + ".png";
+    return image.save(path, "PNG") ? path : QString();
 }
 
 bool Backend::promptHasDraft(const QByteArray &screen) {

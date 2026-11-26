@@ -137,6 +137,10 @@ public:
     // as it goes on, as when typed. Not over a draft in its prompt, and not
     // while it asks something; promptSent tells whether it went.
     Q_INVOKABLE void sendPrompt(const QString &pane, const QString &text);
+    // A picture on the clipboard, saved for an agent to read: its path, or
+    // empty when the clipboard holds none. Prompts are text, so a picture
+    // goes as a path the agent opens.
+    Q_INVOKABLE QString saveClipboardImage(const QString &folder = QString());
     // Whether the input line on a Claude screen is empty.
     static bool promptIsEmpty(const QByteArray &screen);
     // Whether a Claude screen has a draft in its input line (no input line,

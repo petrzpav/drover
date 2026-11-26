@@ -145,6 +145,7 @@
   "unexpected answer from herdr agent list.": "nečekaná odpověď z herdr agent list.",
   "unknown": "neznámý",
   "Waits": "Čeká",
+  "Waits until the agent reads it": "Čeká, až si ji agent přečte",
   "wants to use %1": "chce použít %1",
   "working": "pracuje",
   "Workspace": "Workspace",

@@ -97,6 +97,18 @@ private:
     QList<Turn> m_turns;
     qint64 m_nextSerial = 1, m_nextItem = 1;
     QHash<QString, Pending> m_pending;
+    // Messages the user sent while the agent worked, waiting in Claude's
+    // queue, oldest first (their turn and point), and those it took in
+    // mid-turn, whose own line is still to come.
+    struct Queued {
+        qint64 serial;
+        qint64 id;
+        QString text;
+    };
+    QList<Queued> m_queue;
+    QStringList m_absorbed;
+    void queueOperation(const QJsonObject &object, const QDateTime &time);
+    void dropItem(qint64 serial, qint64 id);
     QStringList m_pendingOrder;
 };
 

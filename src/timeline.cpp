@@ -361,7 +361,7 @@ void TimelineParser::feed(const QByteArray &raw) {
     if (line.startsWith("{\"type\":\"")) {
         const QByteArray type = line.mid(9, 10);
         if (!type.startsWith("user\"") && !type.startsWith("assistant\"") && !type.startsWith("system\"")
-            && !type.startsWith("attachment"))
+            && !type.startsWith("attachment") && !type.startsWith("queue-oper"))
             return;
     }
     const QJsonObject object = QJsonDocument::fromJson(line).object();
@@ -391,6 +391,11 @@ void TimelineParser::feed(const QByteArray &raw) {
         return;
     }
 
+    if (type == QLatin1String("queue-operation")) {
+        queueOperation(object, time);
+        return;
+    }
+
     // What the user typed while the agent worked: it reads it mid-turn.
     if (type == QLatin1String("attachment")) {
         const QJsonObject attachment = object.value("attachment").toObject();
@@ -401,7 +406,10 @@ void TimelineParser::feed(const QByteArray &raw) {
             nudge.kind = QStringLiteral("nudge");
             nudge.text = shortened(textOf(attachment.value("prompt")), 4000);
             nudge.time = time;
-            if (!nudge.text.isEmpty())
+            // Shown already, from the queue.
+            if (const int at = m_absorbed.indexOf(nudge.text); at >= 0)
+                m_absorbed.removeAt(at);
+            else if (!nudge.text.isEmpty())
                 addItem(nudge, QString(), QString());
         }
         return;
@@ -490,6 +498,67 @@ QString TimelineParser::activity() const {
             return text;
     }
     return {};
+}
+
+// Claude's queue of messages sent while it works: shown as they are sent,
+// "queued" until it takes them in mid-turn (remove), as its next prompt
+// (dequeue: the prompt's own line follows) or they go back to the user's
+// input (popAll).
+void TimelineParser::queueOperation(const QJsonObject &object, const QDateTime &time) {
+    const QString operation = object.value("operation").toString();
+    const QString text = shortened(object.value("content").toString(), 4000);
+    if (operation == QLatin1String("enqueue")) {
+        // Notifications and commands queue up too; only words count.
+        if (text.isEmpty() || text.startsWith('<'))
+            return;
+        Item nudge;
+        nudge.kind = QStringLiteral("nudge");
+        nudge.text = text;
+        nudge.state = QStringLiteral("queued");
+        nudge.detail = tr("Waits until the agent reads it");
+        nudge.time = time;
+        addItem(nudge, QString(), QString());
+        const Turn &turn = m_turns.last();
+        m_queue.append({turn.serial, turn.items.last().id, text});
+    } else if (operation == QLatin1String("remove")) {
+        for (int i = 0; i < m_queue.size(); ++i) {
+            if (m_queue[i].text != text)
+                continue;
+            const Queued queued = m_queue.takeAt(i);
+            if (Turn *owner = turn(queued.serial))
+                for (Item &item : owner->items)
+                    if (item.id == queued.id) {
+                        item.state.clear();
+                        item.detail.clear();
+                    }
+            m_absorbed << text;
+            break;
+        }
+    } else if (operation == QLatin1String("dequeue")) {
+        if (!m_queue.isEmpty()) {
+            const Queued queued = m_queue.takeFirst();
+            dropItem(queued.serial, queued.id);
+        }
+    } else if (operation == QLatin1String("popAll")) {
+        for (const Queued &queued : std::as_const(m_queue))
+            dropItem(queued.serial, queued.id);
+        m_queue.clear();
+    }
+}
+
+void TimelineParser::dropItem(qint64 serial, qint64 id) {
+    Turn *owner = turn(serial);
+    if (!owner)
+        return;
+    for (int i = 0; i < owner->items.size(); ++i) {
+        if (owner->items[i].id != id)
+            continue;
+        owner->items.removeAt(i);
+        for (auto &pending : m_pending)
+            if (pending.serial == serial && pending.index > i)
+                --pending.index;
+        return;
+    }
 }
 
 const TimelineParser::Turn *TimelineParser::find(qint64 serial) const {
@@ -749,10 +818,11 @@ QVariantMap Timeline::rowOf(const TimelineParser::Turn &turn) const {
     // The summary's points stand in for the points they cover.
     QVariantList points, batches;
     int covered = 0;
-    for (const Batch &batch : m_summaries.value(turn.uuid)) {
-        points += batch.points;
-        batches << QVariantMap{{"from", covered}, {"to", batch.to}, {"points", batch.points}};
-        covered = batch.to;
+    // The latest summary sums up the turn up to where it reaches.
+    if (const QList<Batch> kept = m_summaries.value(turn.uuid); !kept.isEmpty()) {
+        points = kept.last().points;
+        batches << QVariantMap{{"from", 0}, {"to", kept.last().to}, {"points", points}};
+        covered = kept.last().to;
     }
     return {{"serial", turn.serial}, {"prompt", turn.prompt}, {"time", turn.time}, {"items", items},
             {"duration", turn.durationMs}, {"points", points}, {"batches", batches},
@@ -783,20 +853,24 @@ QString Timeline::summaryInstructions(bool more) {
     return QStringLiteral(
         "You summarize what a coding agent did during one turn, for its user who was not watching. "
         "You get the user's prompt and the agent's steps, numbered.\n")
-        + (more ? QStringLiteral("You also get the points already written for the turn's earlier steps. Write 1 or 2 "
-                                 "points about the new steps only, without repeating those.\n")
-                : QStringLiteral("Write 2 to 4 key points.\n"))
-        + QStringLiteral("Merge related steps into one point; fewer, broader points are better than a detailed log.\n")
+        + (more ? QStringLiteral("You also get the turn's summary so far and the steps since. Rewrite the summary so "
+                                 "it covers the whole turn as it stands now; don't add to it.\n")
+                : QString())
+        + QStringLiteral("Write 1 to 3 points. The first is the headline: where the turn stands now, what it "
+                         "achieved or what it is doing or waiting for. Any others add only what the user must know "
+                         "(a failure, a decision, something waiting for them). Fewer is better; merge, don't list. "
+                         "When the agent ends by asking the user something, that question is a point of kind ask, "
+                         "in its own words when short.\n")
         + QStringLiteral(
-              "Write in the language of the user's prompt. Each point is one plain sentence of at most 100 "
-              "characters, no Markdown. Lead with outcomes: what was decided, done, changed or shipped, what failed, "
+              "Write in the language of the user's prompt. Each point is one short plain sentence of at most 80 "
+              "characters, telegraphic, no Markdown. Lead with outcomes: what was decided, done, changed or shipped, what failed, "
               "what is open or waits for the user. Leave out routine steps such as reading files or tests that passed.\n"
               "Reply with JSON only: {\"points\":[{\"text\":\"...\",\"kind\":\"done|change|ship|fail|ask|open|note\","
               "\"step\":N,\"visual\":\"...\"}]} where step is the number of the step the point is mostly about "
               "and visual is optional (below).\n"
               "Pictures: the user takes in a picture faster than sentences. When the turn went through stages "
-              "(where it stands now), touched several files or parts (a tree), changed numbers (before and after) "
-              "or compared things (a chart), add \"visual\" to the point it belongs to: a small drawing in plain "
+              "(where it stands now), tried several cases (a checklist of what works and what's left), touched "
+              "several files or parts (a tree), changed numbers (before and after) or compared things (a chart), add \"visual\" to the point it belongs to: a small drawing in plain "
               "text, shown in a monospace font under the point. Draw whatever explains it best; be creative, but "
               "it must be understood at a glance and add to the points, not repeat them. Leave it out for a turn "
               "of a few plain steps. "
@@ -1008,11 +1082,10 @@ void Timeline::summarizeNext() {
 
         QString input = QStringLiteral("The user's prompt: ") + turn.prompt.left(1500) + QStringLiteral("\n\n");
         if (covered > 0) {
-            input += QStringLiteral("Points already written:\n");
-            for (const Batch &batch : batches)
-                for (const QVariant &point : batch.points)
-                    input += QStringLiteral("- ") + point.toMap().value("text").toString() + '\n';
-            input += QStringLiteral("\nNew steps:\n");
+            input += QStringLiteral("The summary so far:\n");
+            for (const QVariant &point : batches.last().points)
+                input += QStringLiteral("- ") + point.toMap().value("text").toString() + '\n';
+            input += QStringLiteral("\nThe steps since:\n");
         } else {
             input += QStringLiteral("Steps:\n");
         }
@@ -1121,13 +1194,14 @@ void Timeline::summaryDone(int code) {
         return;
     }
     if (job.session == m_session) {
-        m_summaries[job.uuid].append(batch);
+        // The summary of the whole turn so far, in place of the last one.
+        m_summaries[job.uuid] = {batch};
         saveSummaries(m_session, m_summaries);
         publish();
     } else {
         // Another agent by now: its summary is kept for when it's back.
         auto other = readCache(m_cache, job.session);
-        other[job.uuid].append(batch);
+        other[job.uuid] = {batch};
         saveSummaries(job.session, other);
     }
     QTimer::singleShot(0, this, &Timeline::summarizeNext);
