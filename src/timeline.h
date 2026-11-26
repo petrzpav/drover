@@ -44,6 +44,8 @@ public:
         bool alone = false;
         // It went on in the background (it stays in sight when it fails).
         bool background = false;
+        // The version a release, a tag or a "Release x.y" commit made.
+        QString release;
     };
     struct Turn {
         qint64 serial = 0;
@@ -80,6 +82,8 @@ public:
     // Such a command in words: its description, or what it commits, pushes
     // or releases.
     static QString milestoneText(const QJsonObject &input);
+    // The version a command releases, tags or commits as "Release x.y".
+    static QString releaseOf(const QString &command);
     // An MCP tool's name for people: "Linear: save issue".
     static QString toolLabel(const QString &name, const QJsonObject &input);
 

@@ -113,6 +113,17 @@ QString TimelineParser::milestoneText(const QJsonObject &input) {
     return shortened(parts.isEmpty() ? firstLine(command) : parts.join(QStringLiteral(" · ")), 160);
 }
 
+QString TimelineParser::releaseOf(const QString &command) {
+    static const QRegularExpression patterns[] = {
+        QRegularExpression("\\bgh\\s+release\\s+create\\s+v?(\\d+(?:\\.\\d+)+)"),
+        QRegularExpression("\\bgit(?:\\s+-C\\s+\\S+)?\\s+tag\\s+(?:-[a-z]\\s+)*v?(\\d+(?:\\.\\d+)+)"),
+        QRegularExpression("\\bcommit\\b[^\\n]*-[a-zA-Z]*m\\s+[\"']?Release\\s+v?(\\d+(?:\\.\\d+)+)")};
+    for (const auto &pattern : patterns)
+        if (const auto found = pattern.match(command); found.hasMatch())
+            return QStringLiteral("v") + found.captured(1);
+    return {};
+}
+
 QString TimelineParser::toolLabel(const QString &name, const QJsonObject &input) {
     if (name.startsWith(QLatin1String("mcp__"))) {
         const QStringList parts = name.mid(5).split(QStringLiteral("__"));
@@ -259,6 +270,7 @@ void TimelineParser::toolUse(const QJsonObject &block, const QDateTime &time) {
     if (name == QLatin1String("Bash")) {
         const bool milestone = isMilestone(input.value("command").toString());
         item.text = milestone ? milestoneText(input) : commandText(input);
+        item.release = milestone ? releaseOf(input.value("command").toString()) : QString();
         item.kind = milestone ? QStringLiteral("milestone") : QStringLiteral("command");
         activity = item.text;
     } else if (name == QLatin1String("Edit") || name == QLatin1String("Write") || name == QLatin1String("MultiEdit")
@@ -908,7 +920,8 @@ QVariantMap Timeline::rowOf(const TimelineParser::Turn &turn) const {
     QVariantList items;
     for (const auto &item : turn.items)
         items << QVariantMap{{"id", item.id}, {"kind", item.kind}, {"text", item.text}, {"detail", item.detail},
-                             {"state", item.state}, {"steps", item.steps}, {"background", item.background}};
+                             {"state", item.state}, {"steps", item.steps}, {"background", item.background},
+                             {"release", item.release}};
     // The summary's points stand in for the points they cover.
     QVariantList points, batches;
     int covered = 0;

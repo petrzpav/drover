@@ -740,8 +740,33 @@ Rectangle {
         color: overview.dim
     }
 
-    // The outline: each turn's time, prompt and headline, the one in view
-    // marked; a click goes to it.
+    // The outline as a metro line: a station per turn (its time and
+    // headline), a release an interchange, a review a branch that comes
+    // back, a failure a station out of service; at its end, now. The station
+    // in view is marked; a click goes to it.
+    FontMetrics { id: metroMetrics }
+    readonly property real metroIndent: metroMetrics.advanceWidth("00:00 ")
+    function metroOf(items, batches) {
+        let version = "", failed = false
+        const reviews = []
+        for (const point of items) {
+            // The version a release, a tag or a "Release x.y" commit made.
+            if (point.release && version === "")
+                version = point.release
+            if (point.kind === "interrupted")
+                failed = true
+            const reviewing = point.kind === "agent" || (point.kind === "tool" && /^Skill: .*review/i.test(point.text))
+                              || /review/i.test(point.text)
+            if (reviewing && (point.kind === "agent" || point.kind === "tool" || point.kind === "command")
+                    && reviews.indexOf(point.text) < 0)
+                reviews.push(point.text)
+        }
+        const summary = batches.length > 0 ? batches[batches.length - 1].points : []
+        failed = failed || (summary.length > 0 && summary[0].kind === "fail")
+        return { version: version, failed: failed, reviews: reviews.slice(-2),
+                 headline: summary.length > 0 ? summary[0].text : "" }
+    }
+
     ListView {
         id: outline
         objectName: "outline"
@@ -754,7 +779,7 @@ Rectangle {
         anchors.bottomMargin: 8
         clip: true
         model: overview.claude ? timeline : null
-        spacing: 2
+        spacing: 0
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
         // The turn in view stays in the outline's view.
@@ -763,77 +788,111 @@ Rectangle {
             function onTopTurnChanged() { outline.positionViewAtIndex(overview.topTurn, ListView.Contain) }
         }
 
-        delegate: Rectangle {
+        delegate: Item {
             id: entry
             required property int index
             required property string prompt
             required property var time
+            required property var items
             required property var batches
             readonly property bool current: index === overview.topTurn
             readonly property bool newest: index === outline.count - 1
-            readonly property string headline: batches.length > 0 && batches[batches.length - 1].points.length > 0
-                                                ? batches[batches.length - 1].points[0].text : ""
+            readonly property var metro: overview.metroOf(items, batches)
+            // The station in words: a release by its version, else the
+            // headline, else the prompt.
+            readonly property string headline: metro.headline
             objectName: "outline" + index
             width: outline.width - 8
-            height: entryColumn.implicitHeight + 10
-            radius: theme.radius
-            color: current ? Qt.alpha(theme.foreground, 0.08)
-                 : entryHover.hovered ? Qt.alpha(theme.foreground, 0.05) : "transparent"
-            HoverHandler { id: entryHover }
+            height: stops.implicitHeight
 
             Column {
-                id: entryColumn
-                x: 8
-                y: 5
-                width: parent.width - 16
-                spacing: 1
-                Row {
+                id: stops
+                width: parent.width
+                Item {
+                    id: station
+                    objectName: "station" + entry.index
                     width: parent.width
-                    spacing: 6
-                    Text {
-                        id: entryMark
-                        width: 14
-                        // The robot on the turn it works on.
-                        readonly property bool busy: entry.newest && overview.working
-                        y: busy && overview.beat ? -2 : 0
-                        text: busy ? overview.robot : "·"
-                        color: busy ? theme.accent : overview.dim
+                    height: stationText.implicitHeight + 4
+                    HoverHandler { id: stationHover }
+                    // The station in view, marked.
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.leftMargin: -4
+                        anchors.rightMargin: -4
+                        radius: theme.radius
+                        color: entry.current ? Qt.alpha(theme.foreground, 0.08)
+                             : stationHover.hovered ? Qt.alpha(theme.foreground, 0.05) : "transparent"
                     }
                     Text {
-                        id: entryTime
-                        text: entry.time ? Qt.formatTime(entry.time, "HH:mm") : ""
+                        y: 2
+                        text: entry.time ? Qt.formatTime(entry.time, "HH:mm") : "     "
                         color: overview.dim
                     }
                     Text {
-                        width: parent.width - entryMark.width - entryTime.implicitWidth - 12
-                        text: entry.prompt !== "" ? entry.prompt : qsTr("Earlier")
+                        id: stationMark
+                        objectName: "stationMark" + entry.index
+                        x: overview.metroIndent
+                        // The robot on the station it works at.
+                        readonly property bool busy: entry.newest && overview.working
+                        y: 2 - (busy && overview.beat ? 2 : 0)
+                        text: busy ? overview.robot : entry.metro.failed ? "✗" : entry.metro.version !== "" ? "◉" : "●"
+                        color: busy ? theme.accent : entry.metro.failed ? theme.urgent
+                             : entry.metro.version !== "" ? theme.success : (entry.current ? theme.foreground : overview.dim)
+                    }
+                    Text {
+                        id: stationText
+                        objectName: "stationText" + entry.index
+                        x: overview.metroIndent + metroMetrics.advanceWidth("● ")
+                        y: 2
+                        width: parent.width - x
+                        text: entry.metro.version !== "" ? "═══ " + entry.metro.version
+                            : entry.headline !== "" ? entry.headline
+                            : entry.prompt !== "" ? entry.prompt : qsTr("Earlier")
                         textFormat: Text.PlainText
-                        color: entry.current ? theme.foreground : Qt.alpha(theme.foreground, 0.85)
+                        font.bold: entry.metro.version !== "" || entry.current
+                        color: entry.metro.version !== "" ? theme.success
+                             : entry.metro.failed ? theme.urgent
+                             : entry.current ? theme.foreground : Qt.alpha(theme.foreground, 0.8)
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
+                    }
+                    TapHandler {
+                        cursorShape: Qt.PointingHandCursor
+                        onTapped: {
+                            // The newest goes back to following the end.
+                            list.follow = entry.newest
+                            if (entry.newest)
+                                list.positionViewAtEnd()
+                            else
+                                list.positionViewAtIndex(entry.index, ListView.Beginning)
+                        }
+                    }
+                }
+                // Its reviews, branches that come back.
+                Repeater {
+                    model: entry.metro.reviews
+                    delegate: Text {
+                        required property string modelData
+                        x: overview.metroIndent
+                        width: stops.width - x
+                        text: "│ └◇ " + modelData
+                        textFormat: Text.PlainText
+                        color: theme.accent
                         elide: Text.ElideRight
                         maximumLineCount: 1
                     }
                 }
+                // The line on to the next station, or on to now.
                 Text {
-                    visible: entry.headline !== ""
-                    x: 20
-                    width: parent.width - 20
-                    text: entry.headline
-                    textFormat: Text.PlainText
+                    x: overview.metroIndent
+                    text: entry.newest ? "┆" : "│"
                     color: overview.dim
-                    wrapMode: Text.Wrap
-                    maximumLineCount: 2
-                    elide: Text.ElideRight
                 }
-            }
-            TapHandler {
-                cursorShape: Qt.PointingHandCursor
-                onTapped: {
-                    // The newest goes back to following the end.
-                    list.follow = entry.newest
-                    if (entry.newest)
-                        list.positionViewAtEnd()
-                    else
-                        list.positionViewAtIndex(entry.index, ListView.Beginning)
+                Text {
+                    visible: entry.newest
+                    x: overview.metroIndent
+                    text: "▼ " + qsTr("now")
+                    color: theme.accent
                 }
             }
         }

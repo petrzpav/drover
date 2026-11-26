@@ -1178,6 +1178,23 @@ private slots:
         QTest::qWait(50);
         QTest::mouseClick(rig.window, Qt::LeftButton, {}, outlined->mapToScene(QPointF(60, 8)).toPoint());
         QTRY_VERIFY(rig.find("prompt13") && outlined->property("current").toBool());
+        // A metro line: a release an interchange, a subagent or review a
+        // branch, an interrupted turn out of service.
+        {
+            QVariant metro;
+            const QVariantList stops{
+                QVariantMap{{"kind", "milestone"}, {"text", "Bump to 0.9.0"}, {"steps", QStringList{}}, {"release", "v0.9.0"}},
+                QVariantMap{{"kind", "agent"}, {"text", "Fable review of it"}, {"steps", QStringList{}}},
+                QVariantMap{{"kind", "command"}, {"text", "Run the tests"}, {"steps", QStringList{}}},
+                QVariantMap{{"kind", "interrupted"}, {"text", "You interrupted it"}, {"steps", QStringList{}}}};
+            QMetaObject::invokeMethod(rig.find("overview"), "metroOf", Q_RETURN_ARG(QVariant, metro),
+                                      Q_ARG(QVariant, stops), Q_ARG(QVariant, QVariantList{}));
+            const QVariantMap stop = metro.toMap();
+            QCOMPARE(stop.value("version").toString(), QString("v0.9.0"));
+            QCOMPARE(stop.value("reviews").toStringList(), QStringList{"Fable review of it"});
+            QVERIFY(stop.value("failed").toBool());
+        }
+
         // At the end, the newest is marked.
         QMetaObject::invokeMethod(list, "positionViewAtEnd");
         QTRY_VERIFY(list->property("atYEnd").toBool());

@@ -504,6 +504,11 @@ private slots:
         QCOMPARE(TimelineParser::milestoneText({{"command", "git push"}, {"description", "Push the fix"}}),
                  QString("Push the fix"));
         QCOMPARE(TimelineParser::toolLabel("mcp__claude_ai_Linear__save_issue", {}), QString("Linear: save issue"));
+        // A release's version, for the metro line's interchange.
+        QCOMPARE(TimelineParser::releaseOf("gh release create v0.9.0 --target main drover.pkg"), QString("v0.9.0"));
+        QCOMPARE(TimelineParser::releaseOf("git tag -a v1.2 -m x && git push --tags"), QString("v1.2"));
+        QCOMPARE(TimelineParser::releaseOf("git commit -qam \"Release 0.9.0\n\nCo-Authored-By: x\" && git push"), QString("v0.9.0"));
+        QCOMPARE(TimelineParser::releaseOf("git commit -m \"Fix the gate\" && git push"), QString());
         QCOMPARE(TimelineParser::toolLabel("mcp__claude-in-chrome__computer", {}), QString("Chrome"));
     }
 
