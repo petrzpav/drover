@@ -166,8 +166,10 @@ a minute later, or the turn's end), never added to, and kept in
 `~/.cache/drover/summaries`. Under it shows only the newest point, what goes on
 now. Older turns show just their prompt and headline; a click on the prompt
 opens one. A short turn needs no summary, and an older one gets it when you
-scroll to it. A question the agent ends with, one it waits for, a command its
-last words give you to run (with a button that copies it), and your own
+scroll to it. Once the agent stops, the newest turn's last reply shows in
+full, as what it found, asks or offers is usually there. A question it waits
+for, a command its last words give you to run (with a button that copies it),
+and your own
 messages still waiting in its queue are always in sight, and so are its
 subagents and commands running in the background, until they end. A new summary waits
 while the pointer is over the list and its turn in view, so nothing moves

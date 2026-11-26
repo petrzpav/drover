@@ -707,7 +707,7 @@ int Timeline::rowCount(const QModelIndex &parent) const { return parent.isValid(
 QHash<int, QByteArray> Timeline::roleNames() const {
     return {{SerialRole, "serial"}, {PromptRole, "prompt"}, {TimeRole, "time"}, {ItemsRole, "items"},
             {DurationRole, "duration"}, {PointsRole, "points"}, {CoveredRole, "covered"},
-            {SummarizingRole, "summarizing"}, {BatchesRole, "batches"}};
+            {SummarizingRole, "summarizing"}, {BatchesRole, "batches"}, {EndedRole, "ended"}};
 }
 
 QVariant Timeline::data(const QModelIndex &index, int role) const {
@@ -869,7 +869,7 @@ QVariantMap Timeline::rowOf(const TimelineParser::Turn &turn) const {
     }
     return {{"serial", turn.serial}, {"prompt", turn.prompt}, {"time", turn.time}, {"items", items},
             {"duration", turn.durationMs}, {"points", points}, {"batches", batches},
-            {"covered", qMin(covered, int(turn.items.size()))},
+            {"covered", qMin(covered, int(turn.items.size()))}, {"ended", turn.ended},
             {"summarizing", m_child && m_job.uuid == turn.uuid && !turn.uuid.isEmpty()}};
 }
 

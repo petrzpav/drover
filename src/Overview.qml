@@ -73,13 +73,6 @@ Rectangle {
         }
         return found
     }
-    // The question a reply ends with: its last paragraph, as plain words.
-    function endQuestion(point) {
-        if (!point || point.kind !== "said" || !/\?\s*$/.test(point.text))
-            return ""
-        const paragraphs = point.text.split(/\n\s*\n/).filter(p => p.trim() !== "")
-        return paragraphs[paragraphs.length - 1].replace(/[*`]/g, "").replace(/\s+/g, " ").trim()
-    }
     function escaped(text) {
         return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     }
@@ -202,11 +195,13 @@ Rectangle {
     component PointRow: Rectangle {
         id: row
         required property var point
+        // Open whatever was clicked (the newest turn's last reply is).
+        property bool forceOpen: false
         readonly property string key: "point" + point.id
-        readonly property bool open: overview.opened[key] === true
+        readonly property bool open: forceOpen || overview.opened[key] === true
         readonly property bool failed: point.state === "failed" || point.state === "denied"
         readonly property int more: point.steps.length - 1
-        readonly property bool opens: open || more > 0 || pointText.truncated || detailText.truncated
+        readonly property bool opens: !forceOpen && (open || more > 0 || pointText.truncated || detailText.truncated)
         objectName: key
         height: body.implicitHeight + 6
         radius: theme.radius
@@ -355,10 +350,12 @@ Rectangle {
             readonly property bool detailed: overview.opened["details" + serial] === true
             // The newest turn: what it asks or gives you to run stays in sight.
             readonly property bool newest: index === list.count - 1
+            required property bool ended
             readonly property var lastPoint: items.length > 0 ? items[items.length - 1] : null
-            // A reply ending with a question for you, until opened in full.
-            readonly property bool replyOpen: lastPoint !== null && overview.opened["point" + lastPoint.id] === true
-            readonly property string question: newest && !replyOpen ? overview.endQuestion(lastPoint) : ""
+            // The agent's last words once it stops, in full: what it found,
+            // asks or offers is usually there, question mark or not.
+            readonly property bool finalReply: newest && lastPoint !== null && lastPoint.kind === "said"
+                                               && (ended || backend.selectedStatus !== "working")
             // Commands its last words give you to run: always in sight too.
             readonly property var commands: {
                 if (!newest)
@@ -556,12 +553,12 @@ Rectangle {
                     }
                 }
                 Repeater {
-                    // The reply that asks shows as its question, below.
-                    model: turn.items.slice(turn.replyOpen ? Math.min(column.shownFrom, turn.items.length - 1) : column.shownFrom,
-                                            turn.question !== "" ? turn.items.length - 1 : turn.items.length)
+                    model: turn.items.slice(turn.finalReply ? Math.min(column.shownFrom, turn.items.length - 1) : column.shownFrom)
                     delegate: PointRow {
                         required property var modelData
+                        required property int index
                         point: modelData
+                        forceOpen: turn.finalReply && modelData.id === turn.lastPoint.id
                         x: turn.detailed ? 24 : 0
                         width: column.width - x
                     }
@@ -614,42 +611,6 @@ Rectangle {
                             }
                         }
                         Timer { id: copiedFade; interval: 1500; onTriggered: command.copied = false }
-                    }
-                }
-                // The question the turn ends with.
-                Rectangle {
-                    objectName: "question" + turn.serial
-                    visible: turn.question !== ""
-                    width: column.width
-                    height: questionText.implicitHeight + 6
-                    radius: theme.radius
-                    color: "transparent"
-                    Text {
-                        x: 8
-                        y: 3
-                        width: 18
-                        text: "\uf059"
-                        color: theme.accent
-                    }
-                    Text {
-                        id: questionText
-                        x: 32
-                        y: 3
-                        width: parent.width - 32 - 8
-                        text: turn.question
-                        textFormat: Text.PlainText
-                        color: theme.foreground
-                        wrapMode: Text.Wrap
-                        maximumLineCount: 3
-                        elide: Text.ElideRight
-                    }
-                    // Opens the whole reply it ends.
-                    TapHandler {
-                        cursorShape: Qt.PointingHandCursor
-                        onTapped: {
-                            list.follow = false
-                            overview.toggle("point" + turn.lastPoint.id)
-                        }
                     }
                 }
             }

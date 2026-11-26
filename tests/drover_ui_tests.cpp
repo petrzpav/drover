@@ -1172,23 +1172,21 @@ private slots:
         more.close();
         QTRY_VERIFY(rig.find("point201"));
         QTRY_VERIFY(!rig.find("point195"));
-        // A reply that ends with a question: the question, always in sight.
+        // Once the turn ends, its last reply shows in full: what it asks or
+        // offers, question mark or not.
         QFile asks(rig.dir.filePath("projects/-a/s-1.jsonl"));
         QVERIFY(asks.open(QIODevice::Append));
         asks.write(entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
             QJsonObject{{"type", "text"}, {"text", "All beds are planted.\n\nLong notes " + QString("and more ").repeated(80)
-                                                     + "\n\nShall I **water** them now?"}}}}}}}));
+                                                     + "\n\n1. **Water** them\n2. Leave them\n\nTell me which."}}}}}}}));
         asks.close();
-        QTRY_VERIFY(rig.find("question1") && rig.find("question1")->isVisible());
-        QCOMPARE(rig.find("question1")->childItems().at(1)->property("text").toString(), QString("Shall I water them now?"));
-        // A click opens the whole reply.
-        auto *question = rig.find("question1");
-        QTest::qWait(50);
-        QTest::mouseClick(rig.window, Qt::LeftButton, {}, question->mapToScene(QPointF(60, question->height() / 2)).toPoint());
-        QTRY_VERIFY(rig.find("pointWords202"));
-        QVERIFY(!question->isVisible());
-        QMetaObject::invokeMethod(rig.find("overview"), "toggle", Q_ARG(QVariant, "point202"));
-        QTRY_VERIFY(question->isVisible());
+        QTRY_VERIFY(rig.find("pointText202"));
+        QVERIFY(!rig.find("pointWords202"));
+        QVERIFY(asks.open(QIODevice::Append));
+        asks.write(entry({{"type", "system"}, {"subtype", "turn_duration"}, {"durationMs", 1000}}));
+        asks.close();
+        QTRY_VERIFY(rig.find("pointWords202") && rig.find("pointWords202")->isVisible());
+        QVERIFY(rig.find("pointWords202")->property("text").toString().contains("Tell me which."));
 
         // A command it gives you to run: in sight, copied with a click.
         QFile gives(rig.dir.filePath("projects/-a/s-1.jsonl"));

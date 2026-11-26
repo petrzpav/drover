@@ -139,7 +139,7 @@ public:
     // points sum up the turn's points from..to), covered: the points the
     // batches sum up.
     enum Role { SerialRole = Qt::UserRole + 1, PromptRole, TimeRole, ItemsRole, DurationRole, PointsRole,
-                CoveredRole, SummarizingRole, BatchesRole };
+                CoveredRole, SummarizingRole, BatchesRole, EndedRole };
 
     explicit Timeline(QObject *parent = nullptr);
     ~Timeline() override;
