@@ -481,6 +481,53 @@ QString TimelineParser::activity() const {
     return {};
 }
 
+QString TimelineParser::shownStart(const QString &markdown) {
+    static const QRegularExpression link("\\[([^\\]]*)\\]\\([^)]*\\)");
+    static const QRegularExpression marks("[*`]|(?<!\\w)_|_(?!\\w)");
+    static const QRegularExpression lead("^\\s*(#+|>|[-*+]|\\d+\\.)\\s+");
+    // Lines as far as 40 characters, up to a code block or a table, which
+    // the terminal draws differently.
+    QString text;
+    for (QString line : markdown.split('\n')) {
+        const QString bare = line.trimmed();
+        if (bare.startsWith(QLatin1String("```")) || bare.startsWith('|'))
+            break;
+        line.replace(link, QStringLiteral("\\1"));
+        line.remove(lead);
+        line.remove(marks);
+        text = (text + ' ' + line).simplified();
+        if (text.size() >= 40)
+            break;
+    }
+    return text.left(40).trimmed();
+}
+
+QString TimelineParser::needle(qint64 serial, int index) const {
+    int at = -1;
+    for (int i = 0; i < m_turns.size(); ++i)
+        if (m_turns[i].serial == serial)
+            at = i;
+    if (at < 0)
+        return {};
+    const Turn &turn = m_turns[at];
+    const auto words = [](const Item &item) {
+        return item.kind == QLatin1String("said") || item.kind == QLatin1String("nudge");
+    };
+    for (int i = qMin(index, int(turn.items.size()) - 1); i >= 0; --i)
+        if (words(turn.items[i]))
+            return shownStart(turn.items[i].text);
+    const QString prompt = shownStart(turn.prompt);
+    bool again = false;
+    for (int i = at + 1; i < m_turns.size() && prompt.size() < 16; ++i)
+        again = again || shownStart(m_turns[i].prompt) == prompt;
+    if (prompt.isEmpty() || again) {
+        for (const Item &item : turn.items)
+            if (words(item))
+                return shownStart(item.text);
+    }
+    return prompt;
+}
+
 QString TimelineParser::lastSaid() const {
     if (m_turns.isEmpty())
         return {};

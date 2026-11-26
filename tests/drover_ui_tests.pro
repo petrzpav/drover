@@ -4,6 +4,7 @@ TARGET = drover_ui_tests
 TEMPLATE = app
 
 INCLUDEPATH += ../src
+DEFINES += TESTS_DIR=\\\"$$PWD\\\"
 LIBS += -lvterm -lutil
 LIBS += -lLayerShellQtInterface
 

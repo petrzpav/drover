@@ -72,7 +72,7 @@ Rectangle {
     readonly property color line: Qt.alpha(theme.foreground, 0.12)
     readonly property color dim: Qt.alpha(theme.foreground, 0.55)
     readonly property int sidebarWidth: 280
-    readonly property int overviewWidth: 360
+    readonly property int overviewWidth: 460
     // A narrow panel's header keeps to the dot and icons, so it never runs
     // past the panel's edge.
     readonly property bool compactHeader: width - (listShown ? sidebarWidth : 0) < 640
@@ -619,7 +619,22 @@ Rectangle {
                     width: panel.overviewWidth
                     height: conversationBody.height
                     visible: conversationBody.overviewShown
-                    statusLabel: panel.statusLabel
+                    // The agent's terminal scrolls to the point and takes the keyboard.
+                    onPointPicked: (needle) => {
+                        if (backend.editing)
+                            backend.toggleEditor()
+                        const terminal = panel.agentTerminal
+                        if (!terminal) {
+                            overview.revealEnded("missing")
+                            return
+                        }
+                        terminal.reveal(needle)
+                        terminal.focusTerminal()
+                    }
+                }
+                Connections {
+                    target: panel.agentTerminal
+                    function onRevealEnded(result) { overview.revealEnded(result) }
                 }
 
                 // Why there is no terminal, in the terminal's middle: on a card

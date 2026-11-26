@@ -181,6 +181,26 @@ private slots:
         QCOMPARE(other.activity(), QString("Count the seeds"));
     }
 
+    void aPointIsFoundByTheWordsTheTerminalShows()
+    {
+        QCOMPARE(TimelineParser::shownStart("## The **south** bed\n\n- gets `sun`, see [the plan](beds.md)"),
+                 QString("The south bed gets sun, see the plan"));
+        QCOMPARE(TimelineParser::shownStart("Done.\n```\ncode\n```"), QString("Done."));
+        const auto parser = parsed(prompt("ok") + said("Planting the **south** bed now.")
+                                   + bash("b1", "make", "Water the beds") + result("b1", "ok")
+                                   + prompt("Plant the tomatoes in the south bed please")
+                                   + bash("b2", "make", "Dig") + prompt("ok"));
+        const auto &turns = parser.turns();
+        // A command: the agent's words before it.
+        QCOMPARE(parser.needle(turns[0].serial, 1), QString("Planting the south bed now."));
+        // A prompt: its own words, unless it is short and said again later.
+        QCOMPARE(parser.needle(turns[1].serial, -1), QString("Plant the tomatoes in the south bed plea"));
+        QCOMPARE(parser.needle(turns[1].serial, 0), QString("Plant the tomatoes in the south bed plea"));
+        QCOMPARE(parser.needle(turns[0].serial, -1), QString("Planting the south bed now."));
+        QCOMPARE(parser.needle(turns[2].serial, -1), QString("ok"));
+        QCOMPARE(parser.needle(999, 0), QString());
+    }
+
     void theTimelineKnowsWhatChangesTheWorld()
     {
         QVERIFY(TimelineParser::isMilestone("git commit -m x"));

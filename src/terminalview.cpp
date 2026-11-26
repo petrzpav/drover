@@ -629,6 +629,7 @@ void TerminalView::sendText(const QString &text, VTermModifier modifiers) {
 }
 
 void TerminalView::keyPressEvent(QKeyEvent *event) {
+    stopRevealing();
     const auto mods = event->modifiers();
     const bool ctrlShift = (mods & Qt::ControlModifier) && (mods & Qt::ShiftModifier);
     if (ctrlShift && event->key() == Qt::Key_C) {
@@ -742,6 +743,87 @@ QString TerminalView::screenText() const {
     return lines.join('\n');
 }
 
+QString TerminalView::squeezed(const QString &text) {
+    return text.simplified();
+}
+
+void TerminalView::reveal(const QString &needle) {
+    stopRevealing();
+    m_needle = squeezed(needle);
+    if (m_needle.isEmpty()) {
+        emit revealEnded(QStringLiteral("missing"));
+        return;
+    }
+    m_revealDirection = 1;
+    m_revealSteps = m_revealWaits = 0;
+    m_revealScreen.clear();
+    if (!m_revealTimer.isSingleShot()) {
+        m_revealTimer.setSingleShot(true);
+        connect(&m_revealTimer, &QTimer::timeout, this, &TerminalView::revealStep);
+    }
+    revealStep();
+}
+
+QString TerminalView::visibleText(int rows) const {
+    QStringList lines;
+    for (int row = 0; row < qMin(rows, m_rows); ++row)
+        lines << lineText(firstVisibleLine() + row, 0, m_cols - 1);
+    return squeezed(lines.join('\n'));
+}
+
+void TerminalView::stopRevealing() {
+    if (m_revealDirection != 0)
+        endReveal(QStringLiteral("stopped"));
+}
+
+void TerminalView::endReveal(const QString &result) {
+    m_revealDirection = 0;
+    m_revealTimer.stop();
+    emit revealEnded(result);
+}
+
+void TerminalView::revealStep() {
+    if (m_revealDirection == 0)
+        return;
+    if (visibleText().contains(m_needle)) {
+        endReveal(QStringLiteral("found"));
+        return;
+    }
+    // Whether the history moved, by its upper rows: an agent at work redraws
+    // its spinner and status at the bottom all the time.
+    const QString screen = visibleText(qMax(1, m_rows * 2 / 3));
+    if (screen == m_revealScreen) {
+        // The program may take a moment to redraw; past that, this is an
+        // end of its history.
+        if (++m_revealWaits < 6) {
+            m_revealTimer.start(50);
+            return;
+        }
+        if (m_revealDirection < 0) {
+            endReveal(QStringLiteral("missing"));
+            return;
+        }
+        m_revealDirection = -1;
+    }
+    if (++m_revealSteps > 600) {
+        endReveal(QStringLiteral("missing"));
+        return;
+    }
+    m_revealWaits = 0;
+    m_revealScreen = screen;
+    // A fifth of the screen a step (three lines a wheel notch, as usual; a
+    // program scrolling more still shows every row on some step).
+    const int lines = qMax(1, m_rows / 5);
+    if (forwardsMouse(Qt::NoModifier)) {
+        vterm_mouse_move(m_vt, m_rows / 2, m_cols / 2, VTERM_MOD_NONE);
+        for (int i = 0; i < qMax(1, lines / 3); ++i)
+            vterm_mouse_button(m_vt, m_revealDirection > 0 ? 4 : 5, true, VTERM_MOD_NONE);
+    } else {
+        scrollBy(m_revealDirection > 0 ? lines : -lines);
+    }
+    m_revealTimer.start(40);
+}
+
 QColor TerminalView::textColorAt(int row, int column) const {
     VTermScreenCell cell;
     if (!cellAt(int(m_scrollback.size()) + row, column, &cell))
@@ -773,6 +855,7 @@ static int mouseButton(Qt::MouseButton button) {
 }
 
 void TerminalView::mousePressEvent(QMouseEvent *event) {
+    stopRevealing();
     forceActiveFocus(Qt::MouseFocusReason);
     m_hasSelection = false;
     m_forwardingPress = forwardsMouse(event->modifiers()) && mouseButton(event->button());
@@ -825,6 +908,7 @@ void TerminalView::scrollBy(int lines) {
 
 void TerminalView::wheelEvent(QWheelEvent *event) {
     event->accept();
+    stopRevealing();
     m_wheel += event->angleDelta().y();
     const int steps = m_wheel / 120;
     if (steps == 0)

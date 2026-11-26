@@ -47,7 +47,7 @@ ApplicationWindow {
     // aligned in the lower half of the screen, tops in the upper half); when
     // neither side has room, above or below it. Never over the indicator.
     function placePanel(w, h, px, py) {
-        const fullWidth = Math.min(1400, w - 2 * edge)
+        const fullWidth = Math.min(1600, w - 2 * edge)
         const fullHeight = Math.min(820, h - 2 * edge)
         const lower = py + pillHeight / 2 > h / 2
         const levelY = clamp(lower ? py + pillHeight - fullHeight : py, edge, h - fullHeight - edge)

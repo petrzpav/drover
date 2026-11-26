@@ -1,33 +1,44 @@
 import QtQuick
 import QtQuick.Controls
 
-// The selected agent's conversation in points, beside its terminal: what it
-// does now, and for each of your prompts what it did, said and asked. A
-// click on a point opens it: the whole text, the answer or the error, every
-// command of a run. It never takes the keyboard from the terminal.
+// The selected agent's conversation in points, beside its terminal: for each
+// of your prompts what the agent did, said and asked, each point in two lines
+// at most. A click on a point scrolls the terminal to it and gives the
+// terminal the keyboard.
 Rectangle {
     id: overview
-    property var statusLabel: function (status) { return status }
     readonly property color line: Qt.alpha(theme.foreground, 0.12)
     readonly property color dim: Qt.alpha(theme.foreground, 0.55)
-    readonly property string status: backend.selectedStatus
     readonly property bool claude: backend.selectedKind === "claude"
-    // Points opened by a click, by their id ("point12", or "3:prompt" for a turn's prompt).
-    property var opened: ({})
+    // The point last clicked ("prompt3", "point12"), and how finding it in
+    // the terminal went: "seeking", "found", "missing" or "stopped".
+    property string picked: ""
+    property string pickState: ""
+    // Words to find in the agent's terminal.
+    signal pointPicked(string needle)
 
     color: theme.background
 
-    function toggle(key) {
-        const next = Object.assign({}, opened)
-        if (next[key])
-            delete next[key]
-        else
-            next[key] = true
-        opened = next
+    function pick(key, serial, index) {
+        picked = key
+        pickState = "seeking"
+        pointPicked(timeline.needle(serial, index))
     }
-    // For styled text: the characters it would take for markup, and its lines.
+    // The terminal's answer.
+    function revealEnded(result) {
+        pickState = result
+        if (result === "missing")
+            missingFade.restart()
+    }
+    Timer { id: missingFade; interval: 1500; onTriggered: if (overview.pickState === "missing") overview.pickState = "" }
+    function pickColor(key) {
+        if (key !== picked)
+            return "transparent"
+        return pickState === "missing" ? Qt.alpha(theme.urgent, 0.18) : Qt.alpha(theme.foreground, 0.08)
+    }
+
     function escaped(text) {
-        return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")
+        return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     }
     function glyph(kind) {
         switch (kind) {
@@ -57,28 +68,17 @@ Rectangle {
         return dim
     }
 
-    // What it does now, or what it said last: always three lines high.
-    readonly property string nowText: {
-        if (backend.selected === "" || !claude)
-            return ""
-        if (status === "working")
-            return timeline.activity !== "" ? timeline.activity
-                 : timeline.lastSaid !== "" ? timeline.lastSaid : qsTr("Thinking")
-        if (status === "blocked")
-            return timeline.activity !== "" ? qsTr("Waits for you: %1").arg(timeline.activity) : qsTr("Waits for you")
-        return timeline.lastSaid
-    }
-
     Connections {
         target: timeline
         function onSessionChanged() {
-            overview.opened = ({})
+            overview.picked = ""
+            overview.pickState = ""
             list.follow = true
         }
         // Read again from the start: the points are new ones.
         function onStateChanged() {
             if (timeline.state === "loading")
-                overview.opened = ({})
+                overview.picked = ""
         }
     }
 
@@ -92,44 +92,12 @@ Rectangle {
     // The line between the terminal and the overview.
     Rectangle { width: 1; height: parent.height; color: overview.line }
 
-    Item {
-        id: now
-        objectName: "overviewNow"
-        x: 1
-        width: parent.width - 1
-        height: 22 + nowMetrics.lineSpacing * 3 + 14
-        FontMetrics { id: nowMetrics }
-
-        Row {
-            x: 14
-            y: 12
-            spacing: 8
-            visible: overview.claude
-            StatusDot { anchors.verticalCenter: parent.verticalCenter; status: overview.status }
-            Text { text: overview.statusLabel(overview.status); color: overview.dim }
-        }
-        Text {
-            objectName: "overviewNowText"
-            x: 14
-            y: 12 + nowMetrics.lineSpacing + 6
-            width: parent.width - 28
-            text: overview.nowText
-            textFormat: Text.PlainText
-            color: theme.foreground
-            wrapMode: Text.Wrap
-            maximumLineCount: 3
-            elide: Text.ElideRight
-        }
-    }
-    Rectangle { x: 1; y: now.height; width: parent.width - 1; height: 1; color: overview.line }
-
     ListView {
         id: list
         objectName: "overviewList"
         x: 1
-        y: now.height + 1
         width: parent.width - 1
-        height: parent.height - y
+        height: parent.height
         clip: true
         visible: overview.claude
         model: overview.claude ? timeline : null
@@ -163,16 +131,20 @@ Rectangle {
             required property var time
             required property var items
             width: ListView.view.width
-            spacing: 6
+            spacing: 2
 
             Rectangle {
+                id: promptBox
+                objectName: "prompt" + turn.serial
                 visible: turn.prompt !== ""
+                readonly property string key: "prompt" + turn.serial
                 x: 10
                 width: parent.width - 20
                 height: promptText.implicitHeight + 14
                 radius: theme.radius
-                color: Qt.alpha(theme.foreground, 0.07)
-                readonly property bool open: overview.opened[turn.serial + ":prompt"] === true
+                color: Qt.alpha(theme.foreground, key === overview.picked ? 0.13 : 0.07)
+                border.width: key === overview.picked && overview.pickState === "missing" ? 1 : 0
+                border.color: theme.urgent
 
                 Text {
                     id: promptText
@@ -183,7 +155,7 @@ Rectangle {
                     textFormat: Text.PlainText
                     color: theme.foreground
                     wrapMode: Text.Wrap
-                    maximumLineCount: parent.open ? 1000 : 3
+                    maximumLineCount: 2
                     elide: Text.ElideRight
                 }
                 Text {
@@ -196,52 +168,58 @@ Rectangle {
                 }
                 MouseArea {
                     anchors.fill: parent
-                    enabled: promptText.truncated || parent.open
-                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                    onClicked: overview.toggle(turn.serial + ":prompt")
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: overview.pick(promptBox.key, turn.serial, -1)
                 }
             }
 
+            Item { width: 1; height: 4; visible: turn.prompt !== "" }
+
             Repeater {
                 model: turn.items
-                delegate: Item {
+                delegate: Rectangle {
                     id: point
                     required property var modelData
                     required property int index
+                    objectName: "point" + modelData.id
                     readonly property string key: "point" + modelData.id
-                    readonly property bool open: overview.opened[key] === true
                     readonly property bool failed: modelData.state === "failed" || modelData.state === "denied"
                     readonly property int more: modelData.steps.length - 1
-                    // The agent's last words in a turn are its answer: more of them shows.
-                    readonly property bool answer: modelData.kind === "said" && index === turn.items.length - 1
-                    width: turn.width
-                    height: body.implicitHeight
+                    x: 6
+                    width: turn.width - 12
+                    height: body.implicitHeight + 6
+                    radius: theme.radius
+                    color: overview.pickColor(key)
 
                     Text {
-                        x: 14
+                        x: 8
+                        y: 3
                         width: 18
                         text: overview.glyph(point.modelData.kind)
                         color: overview.tint(point.modelData)
                     }
+                    // Two lines at most: the point, or the point and its
+                    // answer or error.
                     Column {
                         id: body
-                        x: 38
-                        width: parent.width - 38 - 14
-                        spacing: 2
+                        x: 32
+                        y: 3
+                        width: parent.width - 32 - 8
                         Text {
                             id: pointText
                             objectName: "pointText" + point.modelData.id
                             width: parent.width
+                            // Styled for the run's count; the text itself
+                            // flows on as one paragraph.
                             textFormat: Text.StyledText
                             text: overview.escaped(point.modelData.text)
-                                  + (point.more > 0 && point.modelData.kind !== "edit" && !point.open
+                                  + (point.more > 0 && point.modelData.kind !== "edit"
                                      ? "  <font color=\"" + Qt.tint(theme.background, overview.dim) + "\">+" + point.more + "</font>" : "")
                             color: point.failed ? theme.urgent
-                                 : point.modelData.kind === "said" && !point.answer ? Qt.alpha(theme.foreground, 0.7)
+                                 : point.modelData.kind === "said" ? Qt.alpha(theme.foreground, 0.8)
                                  : theme.foreground
                             wrapMode: Text.Wrap
-                            maximumLineCount: point.open ? 1000 : point.answer ? 5 : point.modelData.kind === "said" ? 2
-                                            : point.modelData.kind === "question" || point.modelData.kind === "recap" ? 3 : 1
+                            maximumLineCount: point.modelData.detail !== "" ? 1 : 2
                             elide: Text.ElideRight
                         }
                         Text {
@@ -250,27 +228,14 @@ Rectangle {
                             text: "→ " + point.modelData.detail
                             textFormat: Text.PlainText
                             color: point.failed ? theme.urgent : overview.dim
-                            wrapMode: Text.Wrap
-                            maximumLineCount: point.open ? 1000 : 2
+                            maximumLineCount: 1
                             elide: Text.ElideRight
-                        }
-                        Repeater {
-                            model: point.open && point.more > 0 ? point.modelData.steps : []
-                            delegate: Text {
-                                required property string modelData
-                                width: body.width
-                                text: "· " + modelData
-                                textFormat: Text.PlainText
-                                color: overview.dim
-                                wrapMode: Text.Wrap
-                            }
                         }
                     }
                     MouseArea {
                         anchors.fill: parent
-                        enabled: point.open || point.more > 0 || pointText.truncated || point.modelData.detail !== ""
-                        cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked: overview.toggle(point.key)
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: overview.pick(point.key, turn.serial, point.index)
                     }
                 }
             }
@@ -280,7 +245,7 @@ Rectangle {
     Text {
         x: 24
         width: parent.width - 48
-        y: now.height + 1 + (parent.height - now.height - 1 - height) / 2
+        anchors.verticalCenter: parent.verticalCenter
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.Wrap
         visible: text !== ""

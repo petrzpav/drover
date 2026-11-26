@@ -55,6 +55,15 @@ public:
     QString activity() const;
     // The last thing the agent said in the last turn.
     QString lastSaid() const;
+    // Words the agent's terminal shows for a point (index -1: the turn's
+    // prompt), to find it there. The terminal folds commands and edits into
+    // lines like "Ran 3 shell commands", so for those it is the nearest of
+    // the agent's words before them. A short prompt said again later ("ok")
+    // gives way to the agent's first words after it.
+    QString needle(qint64 serial, int index) const;
+    // The start of a Markdown text as the terminal shows it: its first 40
+    // characters, without emphasis, code marks, list marks or link targets.
+    static QString shownStart(const QString &markdown);
 
     // The words a Bash command stands for: its description, or its first line.
     static QString commandText(const QJsonObject &input);
@@ -132,6 +141,8 @@ public:
 
     // Reads the transcript again from its end (its texts in a new language).
     Q_INVOKABLE void reload() { restart(); }
+    // See TimelineParser::needle.
+    Q_INVOKABLE QString needle(qint64 serial, int index) const { return m_parser.needle(serial, index); }
 
     // The transcript of a session: <projects>/<any project>/<session>.jsonl.
     static QString findTranscript(const QString &projects, const QString &session);

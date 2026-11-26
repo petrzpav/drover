@@ -23,6 +23,11 @@ Item {
     function sendControl(letter) {
         terminal.sendControl(letter)
     }
+    // Scrolls the agent's history until it shows these words.
+    function reveal(needle) {
+        terminal.reveal(needle)
+    }
+    signal revealEnded(string result)
     readonly property bool terminalFocused: terminal.activeFocus
     // Something is on screen, or it took too long to wait for.
     readonly property bool ready: terminal.ready || patience.triggered
@@ -60,6 +65,7 @@ Item {
         extendedKeys: root.editor && backend.editor === "fresh"
         doubleCtrlB: true
         onFinished: root.detached()
+        onRevealEnded: (result) => root.revealEnded(result)
         Component.onCompleted: start()
     }
 }

@@ -897,7 +897,9 @@ private slots:
         QVERIFY(panel->property("terminalFocused").toBool());
         QCOMPARE(button->mapToScene(QPointF(0, 0)), place);
         QTRY_COMPARE(rig.timeline->state(), QString("ready"));
-        QTRY_COMPARE(rig.find("overviewNowText")->property("text").toString(), QString("Water the beds"));
+        // The command it runs, marked as running.
+        QTRY_VERIFY(rig.find("pointText2"));
+        QVERIFY(rig.find("pointText2")->property("text").toString().startsWith("Water the beds"));
         auto *list = rig.find("overviewList");
         QTRY_COMPARE(list->property("count").toInt(), 1);
         QTest::keyClick(rig.window, Qt::Key_X);
@@ -912,9 +914,10 @@ private slots:
         file.write(entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
             QJsonObject{{"type", "text"}, {"text", "Both beds are watered."}}}}}}}));
         file.close();
-        QTRY_COMPARE(rig.find("overviewNowText")->property("text").toString(), QString("Both beds are watered."));
+        QTRY_VERIFY(rig.find("pointText3"));
+        QCOMPARE(rig.find("pointText3")->property("text").toString(), QString("Both beds are watered."));
 
-        // Text is text, even when it looks like markup, and keeps its lines.
+        // Text is text, even when it looks like markup.
         {
             QFile more(rig.dir.filePath("projects/-a/s-1.jsonl"));
             QVERIFY(more.open(QIODevice::Append));
@@ -946,15 +949,17 @@ private slots:
         QTRY_COMPARE(list->property("count").toInt(), 32);
         QTest::qWait(100);
         QCOMPARE(list->property("contentY").toReal(), scrolled);
-        // The agent's words keep their lines.
+        // The agent's words in two lines at most, markup and all.
         {
             QFile more(rig.dir.filePath("projects/-a/s-1.jsonl"));
             QVERIFY(more.open(QIODevice::Append));
             more.write(entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
-                QJsonObject{{"type", "text"}, {"text", "Line <one>\nLine two"}}}}}}}));
+                QJsonObject{{"type", "text"}, {"text", "Line <one>\nLine two " + QString("and more ").repeated(60)}}}}}}}));
         }
         QTRY_VERIFY(rig.find("pointText4"));
+        QVERIFY(rig.find("pointText4")->property("text").toString().startsWith("Line &lt;one&gt;"));
         QTRY_COMPARE(rig.find("pointText4")->property("lineCount").toInt(), 2);
+        QVERIFY(rig.find("pointText4")->property("truncated").toBool());
 
         // Kept for the next start.
         QVERIFY(rig.surface->overviewShown());
@@ -973,6 +978,62 @@ private slots:
         QTRY_VERIFY(!overview->isVisible());
         QVERIFY(!rig.surface->overviewShown());
         QVERIFY(!rig.timeline->active());
+    }
+
+    void aClickOnAPointScrollsTheTerminalToIt()
+    {
+        Rig rig(R"({"result":{"agents":[
+          {"agent":"claude","agent_session":{"kind":"id","value":"s-1"},"agent_status":"working","cwd":"/a","pane_id":"w1:p1","terminal_id":"term_1","terminal_title_stripped":"Plant the beds","workspace_id":"w1"},
+          {"agent":"claude","agent_status":"idle","cwd":"/b","pane_id":"w2:p1","terminal_id":"term_2","terminal_title_stripped":"Fix the gate","workspace_id":"w2"}]}})");
+        // An agent screen like Claude's (tests/fake_agent.py).
+        QFile script(rig.dir.filePath("herdr"));
+        QVERIFY(script.open(QIODevice::ReadOnly));
+        QString text = QString::fromUtf8(script.readAll());
+        script.close();
+        text.replace("  \"terminal attach\")\n", QString("  \"terminal attach\")\n    stty raw -echo; exec python3 -I '%1' ;;\n  \"terminal attach-old\")\n").arg(TESTS_DIR "/fake_agent.py"));
+        write(rig.dir.filePath("herdr"), text.toUtf8());
+
+        // In the transcript, the agent's words are what the terminal shows.
+        QDir(rig.dir.path()).mkpath("projects/-a");
+        const auto entry = [](const QJsonObject &object) { return QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n'; };
+        write(rig.dir.filePath("projects/-a/s-1.jsonl"),
+              entry({{"type", "user"}, {"origin", QJsonObject{{"kind", "human"}}}, {"message", QJsonObject{{"content", "Plant the beds"}}}})
+              + entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
+                  QJsonObject{{"type", "text"}, {"text", "**history** line 40"}}}}}}})
+              + entry({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
+                  QJsonObject{{"type", "tool_use"}, {"id", "b1"}, {"name", "Bash"},
+                              {"input", QJsonObject{{"command", "make"}, {"description", "Water the beds"}}}}}}}}}));
+
+        rig.expand();
+        auto *panel = rig.find("panel");
+        QTRY_VERIFY(panel->property("agentTerminal").value<QQuickItem *>());
+        auto *view = rig.find("agentTerminal");
+        QTRY_VERIFY(view->property("ready").toBool());
+        const auto screen = [&] {
+            QString shown;
+            QMetaObject::invokeMethod(view, "screenText", Q_RETURN_ARG(QString, shown));
+            return shown;
+        };
+        QTRY_VERIFY(screen().contains("history line 299"));
+        QVERIFY(!screen().contains("history line 40\n"));
+
+        // The command's point: the terminal folds commands away, so it goes
+        // to the agent's words before it, and takes the keyboard.
+        QTRY_VERIFY(rig.find("point2"));
+        auto *point = rig.find("point2");
+        QTest::mouseClick(rig.window, Qt::LeftButton, {},
+                          point->mapToScene(QPointF(point->width() / 2, point->height() / 2)).toPoint());
+        QTRY_VERIFY_WITH_TIMEOUT(screen().contains("history line 40\n"), 10000);
+        QTRY_COMPARE(rig.find("overview")->property("pickState").toString(), QString("found"));
+        QVERIFY(panel->property("terminalFocused").toBool());
+
+        // Words nowhere in the terminal: up to the top, down to the end, and it says so.
+        QSignalSpy ended(view, SIGNAL(revealEnded(QString)));
+        QMetaObject::invokeMethod(view, "reveal", Q_ARG(QString, "the pond"));
+        QTRY_VERIFY_WITH_TIMEOUT(screen().contains("history line 0\n"), 10000);
+        QTRY_COMPARE_WITH_TIMEOUT(ended.count(), 1, 20000);
+        QVERIFY(screen().contains("history line 299"));
+        QCOMPARE(ended.first().first().toString(), QString("missing"));
     }
 
     void aNarrowPanelHasTheOverviewOverTheTerminal()
