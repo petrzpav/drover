@@ -123,7 +123,7 @@ Rectangle {
     function tint(point) {
         if (point.state === "failed" || point.state === "denied")
             return theme.urgent
-        if (point.state === "running" || point.state === "queued")
+        if (point.state === "running" || point.state === "queued" || point.state === "background")
             return theme.accent
         if (point.kind === "milestone")
             return theme.success
@@ -353,10 +353,16 @@ Rectangle {
             readonly property bool compact: index < list.count - 2 && !open
             // The points under the summary, opened from it.
             readonly property bool detailed: overview.opened["details" + serial] === true
-            // A reply ending with a question for you: always in sight.
-            readonly property string question: overview.endQuestion(items.length > 0 ? items[items.length - 1] : null)
+            // The newest turn: what it asks or gives you to run stays in sight.
+            readonly property bool newest: index === list.count - 1
+            readonly property var lastPoint: items.length > 0 ? items[items.length - 1] : null
+            // A reply ending with a question for you, until opened in full.
+            readonly property bool replyOpen: lastPoint !== null && overview.opened["point" + lastPoint.id] === true
+            readonly property string question: newest && !replyOpen ? overview.endQuestion(lastPoint) : ""
             // Commands its last words give you to run: always in sight too.
             readonly property var commands: {
+                if (!newest)
+                    return []
                 for (let i = items.length - 1; i >= 0; --i)
                     if (items[i].kind === "said")
                         return overview.commandsIn(items[i])
@@ -513,7 +519,7 @@ Rectangle {
                 readonly property int shownFrom: Math.max(pointsFrom, turn.items.length - pointsShown)
                 Rectangle {
                     objectName: "earlier" + turn.serial
-                    visible: column.shownFrom > column.pointsFrom && !turn.compact
+                    visible: column.shownFrom > column.pointsFrom && (!turn.compact || turn.detailed)
                     x: turn.detailed ? 24 : 0
                     width: column.width - x
                     height: earlierText.implicitHeight + 6
@@ -540,8 +546,9 @@ Rectangle {
                 // Your messages still waiting in the agent's queue, and its
                 // questions waiting for you, wherever they are.
                 Repeater {
-                    model: turn.items.slice(column.pointsFrom, column.shownFrom).filter(point =>
-                        point.state === "queued" || (point.kind === "question" && point.state === "running"))
+                    model: turn.items.slice(0, column.shownFrom).filter(point =>
+                        point.state === "queued" || point.state === "background"
+                        || (point.kind === "question" && point.state === "running"))
                     delegate: PointRow {
                         required property var modelData
                         point: modelData
@@ -550,7 +557,8 @@ Rectangle {
                 }
                 Repeater {
                     // The reply that asks shows as its question, below.
-                    model: turn.items.slice(column.shownFrom, turn.question !== "" ? turn.items.length - 1 : turn.items.length)
+                    model: turn.items.slice(turn.replyOpen ? Math.min(column.shownFrom, turn.items.length - 1) : column.shownFrom,
+                                            turn.question !== "" ? turn.items.length - 1 : turn.items.length)
                     delegate: PointRow {
                         required property var modelData
                         point: modelData
@@ -634,6 +642,14 @@ Rectangle {
                         wrapMode: Text.Wrap
                         maximumLineCount: 3
                         elide: Text.ElideRight
+                    }
+                    // Opens the whole reply it ends.
+                    TapHandler {
+                        cursorShape: Qt.PointingHandCursor
+                        onTapped: {
+                            list.follow = false
+                            overview.toggle("point" + turn.lastPoint.id)
+                        }
                     }
                 }
             }

@@ -199,7 +199,8 @@ void TimelineParser::addItem(Item item, const QString &toolId, const QString &ac
         const bool runs = item.kind == QLatin1String("command") || item.kind == QLatin1String("edit")
                           || item.kind == QLatin1String("web")
                           || (item.kind == QLatin1String("tool") && last.text == item.text);
-        if (runs && last.kind == item.kind && (last.state.isEmpty() || last.state == QLatin1String("running"))) {
+        if (runs && !item.alone && !last.alone && last.kind == item.kind
+            && (last.state.isEmpty() || last.state == QLatin1String("running"))) {
             if (item.kind == QLatin1String("edit")) {
                 for (const QString &file : item.steps)
                     if (!last.steps.contains(file))
@@ -252,6 +253,9 @@ void TimelineParser::toolUse(const QJsonObject &block, const QDateTime &time) {
     Item item;
     item.time = time;
     QString activity;
+    // What may go on in the background is a point of its own.
+    item.alone = input.value("run_in_background").toBool() || name == QLatin1String("Agent")
+                 || name == QLatin1String("Task") || name == QLatin1String("SendMessage") || name == QLatin1String("Skill");
     if (name == QLatin1String("Bash")) {
         const bool milestone = isMilestone(input.value("command").toString());
         item.text = milestone ? milestoneText(input) : commandText(input);
@@ -315,6 +319,16 @@ void TimelineParser::toolResult(const QString &id, bool error, const QString &co
         item.detail = shortened(!answers.isEmpty() ? answers.join(QStringLiteral("; ")) : firstLine(content), 2000);
     }
     if (!error) {
+        // Started in the background: it runs on until its notification.
+        if (item.alone && (content.startsWith(QLatin1String("Async agent launched"))
+                           || content.contains(QLatin1String("running in background"))
+                           || content.contains(QLatin1String("running in the background"))
+                           || content.startsWith(QLatin1String("Resuming agent")))) {
+            item.state = QStringLiteral("background");
+            item.detail = tr("Runs in the background");
+            m_background.insert(id, {pending.serial, item.id});
+            return;
+        }
         if (item.pending == 0 && item.state == QLatin1String("running"))
             item.state.clear();
         return;
@@ -400,6 +414,9 @@ void TimelineParser::feed(const QByteArray &raw) {
     if (type == QLatin1String("attachment")) {
         const QJsonObject attachment = object.value("attachment").toObject();
         if (attachment.value("type").toString() == QLatin1String("queued_command")
+            && attachment.value("commandMode").toString() == QLatin1String("task-notification")) {
+            taskNotification(textOf(attachment.value("prompt")));
+        } else if (attachment.value("type").toString() == QLatin1String("queued_command")
             && attachment.value("commandMode").toString() == QLatin1String("prompt")
             && attachment.value("origin").toObject().value("kind").toString() == QLatin1String("human")) {
             Item nudge;
@@ -461,6 +478,10 @@ void TimelineParser::feed(const QByteArray &raw) {
     const QString uuid = object.value("uuid").toString();
     const QJsonObject origin = object.value("origin").toObject();
     const QString from = origin.value("kind").toString();
+    if (text.startsWith(QLatin1String("<task-notification>"))) {
+        taskNotification(text);
+        return;
+    }
     if (!from.isEmpty() && from != QLatin1String("human"))
         return;
     if (text.startsWith(QLatin1String("[Request interrupted"))) {
@@ -543,6 +564,28 @@ void TimelineParser::queueOperation(const QJsonObject &object, const QDateTime &
         for (const Queued &queued : std::as_const(m_queue))
             dropItem(queued.serial, queued.id);
         m_queue.clear();
+    }
+}
+
+// A subagent or a command in the background ended: its point says how.
+void TimelineParser::taskNotification(const QString &text) {
+    static const QRegularExpression tool("<tool-use-id>([^<]*)</tool-use-id>");
+    static const QRegularExpression status("<status>([^<]*)</status>");
+    static const QRegularExpression summary("<summary>([\\s\\S]*?)</summary>");
+    const QString id = tool.match(text).captured(1).trimmed();
+    if (!m_background.contains(id))
+        return;
+    const auto [serial, itemId] = m_background.take(id);
+    Turn *owner = turn(serial);
+    if (!owner)
+        return;
+    const QString how = status.match(text).captured(1).trimmed();
+    for (Item &item : owner->items) {
+        if (item.id != itemId)
+            continue;
+        item.state = how == QLatin1String("completed") ? QString() : QStringLiteral("failed");
+        item.detail = shortened(summary.match(text).captured(1).simplified(), 300);
+        return;
     }
 }
 
@@ -1012,12 +1055,13 @@ QHash<QString, QList<Timeline::Batch>> Timeline::readCache(const QString &cache,
         return summaries;
     const QJsonObject turns = QJsonDocument::fromJson(file.readAll()).object();
     for (auto it = turns.begin(); it != turns.end(); ++it) {
-        QList<Batch> batches;
-        for (const QJsonValue &value : it.value().toArray()) {
-            const QJsonObject object = value.toObject();
-            batches.append({object.value("to").toInt(), object.value("points").toArray().toVariantList()});
-        }
-        summaries.insert(it.key(), batches);
+        // One summary a turn; several (added in batches, before summaries
+        // were rewritten whole) are made again.
+        const QJsonArray kept = it.value().toArray();
+        if (kept.size() != 1)
+            continue;
+        const QJsonObject object = kept.first().toObject();
+        summaries.insert(it.key(), {{object.value("to").toInt(), object.value("points").toArray().toVariantList()}});
     }
     return summaries;
 }

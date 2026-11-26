@@ -233,7 +233,8 @@ bool Backend::promptIsEmpty(const QByteArray &screen) {
 
 QString Backend::saveClipboardImage(const QString &folder) {
     const QMimeData *data = QGuiApplication::clipboard()->mimeData();
-    if (!data || !data->hasImage())
+    // Text first: apps that offer both mean the text.
+    if (!data || !data->hasImage() || data->hasText())
         return {};
     const QImage image = qvariant_cast<QImage>(data->imageData());
     if (image.isNull())
@@ -241,6 +242,11 @@ QString Backend::saveClipboardImage(const QString &folder) {
     const QString directory = folder.isEmpty()
         ? QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/drover/pasted" : folder;
     QDir().mkpath(directory);
+    // Pictures pasted a week ago have been read by now.
+    const QDateTime weekAgo = QDateTime::currentDateTime().addDays(-7);
+    for (const QFileInfo &old : QDir(directory).entryInfoList({"*.png"}, QDir::Files))
+        if (old.lastModified() < weekAgo)
+            QFile::remove(old.absoluteFilePath());
     const QString path = directory + '/' + QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss-zzz") + ".png";
     return image.save(path, "PNG") ? path : QString();
 }

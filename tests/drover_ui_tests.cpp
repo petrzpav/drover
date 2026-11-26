@@ -1181,6 +1181,14 @@ private slots:
         asks.close();
         QTRY_VERIFY(rig.find("question1") && rig.find("question1")->isVisible());
         QCOMPARE(rig.find("question1")->childItems().at(1)->property("text").toString(), QString("Shall I water them now?"));
+        // A click opens the whole reply.
+        auto *question = rig.find("question1");
+        QTest::qWait(50);
+        QTest::mouseClick(rig.window, Qt::LeftButton, {}, question->mapToScene(QPointF(60, question->height() / 2)).toPoint());
+        QTRY_VERIFY(rig.find("pointWords202"));
+        QVERIFY(!question->isVisible());
+        QMetaObject::invokeMethod(rig.find("overview"), "toggle", Q_ARG(QVariant, "point202"));
+        QTRY_VERIFY(question->isVisible());
 
         // A command it gives you to run: in sight, copied with a click.
         QFile gives(rig.dir.filePath("projects/-a/s-1.jsonl"));

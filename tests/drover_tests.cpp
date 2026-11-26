@@ -415,6 +415,39 @@ private slots:
         QCOMPARE(parser.turns().last().items.size(), 0);
     }
 
+    void whatRunsInTheBackgroundShowsUntilItEnds()
+    {
+        const auto notification = [](const QString &tool, const char *status, const QString &summary) {
+            return QString("<task-notification>\n<task-id>t</task-id>\n<tool-use-id>%1</tool-use-id>\n"
+                           "<status>%2</status>\n<summary>%3</summary>\n</task-notification>").arg(tool, status, summary);
+        };
+        TimelineParser parser;
+        const auto feed = [&](const QByteArray &lines) {
+            for (const QByteArray &l : lines.split('\n'))
+                parser.feed(l);
+        };
+        feed(prompt("Review it") + use("a1", "Agent", {{"description", "Review the beds"}})
+             + result("a1", "Async agent launched successfully.\nagentId: x")
+             + bash("b1", "make test", "Run the long tests") + result("b1", "ok")
+             + use("b2", "Bash", {{"command", "make all"}, {"description", "Build it all"}, {"run_in_background", true}})
+             + result("b2", "Command running in background with ID: q1. Output is being written to: /tmp/q1.output"));
+        auto items = parser.turns().last().items;
+        QCOMPARE(items.size(), 3);
+        QCOMPARE(items[0].state, QString("background"));
+        QCOMPARE(items[2].state, QString("background"));
+        QCOMPARE(items[2].text, QString("Build it all"));
+        // Their notifications end them: a later prompt's, or one taken in mid-turn.
+        feed(line({{"type", "user"}, {"origin", QJsonObject{{"kind", "task-notification"}}},
+                   {"message", QJsonObject{{"content", notification("a1", "completed", "Agent \"Review the beds\" finished")}}}})
+             + line({{"type", "attachment"}, {"attachment", QJsonObject{{"type", "queued_command"},
+                     {"commandMode", "task-notification"}, {"prompt", notification("b2", "failed", "Build failed")}}}}));
+        items = parser.turns().last().items;
+        QCOMPARE(items[0].state, QString());
+        QCOMPARE(items[0].detail, QString("Agent \"Review the beds\" finished"));
+        QCOMPARE(items[2].state, QString("failed"));
+        QCOMPARE(parser.turns().size(), 1);
+    }
+
     void theTimelineKnowsWhatChangesTheWorld()
     {
         QVERIFY(TimelineParser::isMilestone("git commit -m x"));

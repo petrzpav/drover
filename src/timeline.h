@@ -39,6 +39,9 @@ public:
         QDateTime time;
         // Stays with the point as points around it come and go.
         qint64 id = 0;
+        // A point of its own, never part of a run (it may go on in the
+        // background: a subagent, a command left running).
+        bool alone = false;
     };
     struct Turn {
         qint64 serial = 0;
@@ -106,6 +109,10 @@ private:
         QString text;
     };
     QList<Queued> m_queue;
+    // What runs in the background (subagents, commands), by the id of the
+    // tool call that started it, until its notification says it ended.
+    QHash<QString, std::pair<qint64, qint64>> m_background;
+    void taskNotification(const QString &text);
     QStringList m_absorbed;
     void queueOperation(const QJsonObject &object, const QDateTime &time);
     void dropItem(qint64 serial, qint64 id);
