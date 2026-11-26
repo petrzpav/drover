@@ -28,6 +28,8 @@ class Surface : public QObject {
     // The panel shows the agent's conversation in points rather than its
     // terminal (Ctrl+Alt+B).
     Q_PROPERTY(bool overviewShown READ overviewShown WRITE setOverviewShown NOTIFY panelStateChanged)
+    // The outline beside the conversation in points, hidden by its button.
+    Q_PROPERTY(bool outlineHidden READ outlineHidden WRITE setOutlineHidden NOTIFY panelStateChanged)
 
 public:
     explicit Surface(const QString &stateFile = {}, QObject *parent = nullptr);
@@ -45,6 +47,8 @@ public:
     void setListHidden(bool hidden);
     bool overviewShown() const { return m_overviewShown; }
     void setOverviewShown(bool shown);
+    bool outlineHidden() const { return m_outlineHidden; }
+    void setOutlineHidden(bool hidden);
 
     Q_INVOKABLE void setExpanded(bool expanded);
     // The stage wants the keyboard (the user clicked it, or pressed the
@@ -73,6 +77,7 @@ private:
     bool m_fullscreen = false;
     bool m_listHidden = false;
     bool m_overviewShown = false;
+    bool m_outlineHidden = false;
     bool m_expanded = false;
     bool m_stageFocus = false;
     QWindow *m_window = nullptr;

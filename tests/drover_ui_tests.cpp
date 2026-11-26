@@ -1145,13 +1145,13 @@ private slots:
         QMetaObject::invokeMethod(list, "positionViewAtBeginning");
         QTRY_VERIFY(rig.find("summary1_0_0"));
 
-        // The outline on the left: a turn per entry, the one in view marked;
+        // The outline on the right: a turn per entry, the one in view marked;
         // a click goes to a turn.
         auto *outline = rig.find("outline");
         QVERIFY(outline->isVisible());
         QTRY_COMPARE(outline->property("count").toInt(), 22);
-        QVERIFY(outline->mapRectToScene(outline->boundingRect()).right()
-                < rig.find("prompt1")->mapRectToScene(rig.find("prompt1")->boundingRect()).left());
+        QVERIFY(outline->mapRectToScene(outline->boundingRect()).left()
+                > rig.find("prompt1")->mapRectToScene(rig.find("prompt1")->boundingRect()).right());
         QTRY_VERIFY(rig.find("outline0") && rig.find("outline0")->property("current").toBool());
         QMetaObject::invokeMethod(outline, "positionViewAtEnd");
         QTRY_VERIFY(rig.find("outline12"));
@@ -1159,8 +1159,32 @@ private slots:
         QTest::qWait(50);
         QTest::mouseClick(rig.window, Qt::LeftButton, {}, outlined->mapToScene(QPointF(60, 8)).toPoint());
         QTRY_VERIFY(rig.find("prompt13") && outlined->property("current").toBool());
-        QMetaObject::invokeMethod(list, "positionViewAtBeginning");
-        QTRY_VERIFY(rig.find("summary1_0_0"));
+        // At the end, the newest is marked.
+        QMetaObject::invokeMethod(list, "positionViewAtEnd");
+        QTRY_VERIFY(list->property("atYEnd").toBool());
+        QMetaObject::invokeMethod(outline, "positionViewAtEnd");
+        QTRY_VERIFY(rig.find("outline21") && rig.find("outline21")->property("current").toBool());
+        // PgUp and PgDn page it from the message field; Ctrl+Home goes to the start.
+        rig.find("overviewInput")->forceActiveFocus();
+        const qreal end = list->property("contentY").toReal();
+        QTest::keyClick(rig.window, Qt::Key_PageUp);
+        QTRY_VERIFY(list->property("contentY").toReal() < end - 100);
+        QTest::keyClick(rig.window, Qt::Key_PageDown);
+        QTRY_VERIFY(list->property("atYEnd").toBool());
+        QTest::keyClick(rig.window, Qt::Key_Home, Qt::ControlModifier);
+        QTRY_VERIFY(rig.find("prompt1"));
+        QTRY_VERIFY(list->property("atYBeginning").toBool());
+        // Its button hides it, from the same place, and the text takes the room.
+        auto *outlineButton = rig.find("outlineButton");
+        const QPointF buttonAt = outlineButton->mapToScene(QPointF(0, 0));
+        const qreal textAt = rig.find("prompt1")->mapToScene(QPointF(0, 0)).x();
+        QTest::mouseClick(rig.window, Qt::LeftButton, {}, outlineButton->mapToScene(QPointF(10, 10)).toPoint());
+        QTRY_VERIFY(!outline->isVisible());
+        QVERIFY(rig.surface->outlineHidden());
+        QTRY_VERIFY(rig.find("prompt1")->mapToScene(QPointF(0, 0)).x() > textAt);
+        QCOMPARE(outlineButton->mapToScene(QPointF(0, 0)), buttonAt);
+        QTest::mouseClick(rig.window, Qt::LeftButton, {}, outlineButton->mapToScene(QPointF(10, 10)).toPoint());
+        QTRY_VERIFY(outline->isVisible());
 
         // A click on the summary opens the points it sums up, under it.
         auto *point = rig.find("summary1_0_0");

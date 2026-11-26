@@ -37,6 +37,8 @@ Surface::Surface(const QString &stateFile, QObject *parent)
                 m_listHidden = parts[1] == "hidden";
             else if (parts[0] == "view")
                 m_overviewShown = parts[1] == "overview";
+            else if (parts[0] == "outline")
+                m_outlineHidden = parts[1] == "hidden";
         }
     }
 }
@@ -65,15 +67,24 @@ void Surface::setOverviewShown(bool shown) {
     emit panelStateChanged();
 }
 
+void Surface::setOutlineHidden(bool hidden) {
+    if (hidden == m_outlineHidden)
+        return;
+    m_outlineHidden = hidden;
+    savePanelState();
+    emit panelStateChanged();
+}
+
 void Surface::savePanelState() {
     QDir().mkpath(QFileInfo(m_panelFile).absolutePath());
     QSaveFile file(m_panelFile);
     if (!file.open(QIODevice::WriteOnly))
         return;
-    file.write(QStringLiteral("fullscreen %1\nlist %2\nview %3\n")
+    file.write(QStringLiteral("fullscreen %1\nlist %2\nview %3\noutline %4\n")
                    .arg(m_fullscreen ? 1 : 0)
                    .arg(m_listHidden ? "hidden" : "shown")
                    .arg(m_overviewShown ? "overview" : "agent")
+                   .arg(m_outlineHidden ? "hidden" : "shown")
                    .toUtf8());
     file.commit();
 }

@@ -24,15 +24,36 @@ Rectangle {
     // The agent asks something: its terminal is where to answer.
     signal answerWanted()
     readonly property int readable: 900
-    // The outline on the left, where the panel leaves room beside the text.
+    // The outline on the right, where the panel leaves room beside the text.
     readonly property int outlineWidth: 280
-    readonly property bool outlined: claude && width >= outlineWidth + 32 + 640
-    // The text's room: right of the outline when it shows, then in its middle.
-    readonly property real textLeft: outlined ? outlineWidth + 32 : 0
-    readonly property real textWidth: Math.min(width - textLeft - 32, readable)
-    readonly property real textX: textLeft + (width - textLeft - textWidth) / 2
+    // Room for it, and whether it shows (its button hides it).
+    readonly property bool outlineFits: claude && width >= outlineWidth + 32 + 640
+    readonly property bool outlined: outlineFits && !surface.outlineHidden
+    // The text's room: left of the outline when it shows, then in its middle.
+    readonly property real textRight: outlined ? outlineWidth + 32 : 0
+    readonly property real textWidth: Math.min(width - textRight - 32, readable)
+    readonly property real textX: (width - textRight - textWidth) / 2
     // The turn at the top of the view, for the outline to mark.
-    readonly property int topTurn: { list.contentY; list.count; return Math.max(0, list.indexAt(list.width / 2, list.contentY + 24)) }
+    // At the end, the newest; else the one at the top.
+    readonly property int topTurn: {
+        list.contentY; list.count; list.contentHeight
+        return list.atYEnd ? list.count - 1 : Math.max(0, list.indexAt(list.width / 2, list.contentY + 24))
+    }
+    // A page up or down (PgUp, PgDn), or to the start or the end.
+    function page(step) {
+        const top = list.originY - list.headerItem.height
+        const bottom = Math.max(top, list.originY + list.contentHeight - list.height)
+        list.follow = false
+        list.contentY = Math.max(top, Math.min(bottom, list.contentY + step * (list.height - 40)))
+        list.follow = list.contentY >= bottom - 1
+    }
+    function toEnd(end) {
+        list.follow = end
+        if (end)
+            list.positionViewAtEnd()
+        else
+            list.positionViewAtBeginning()
+    }
     // How many of a turn's newest points show before the rest is asked for:
     // a long turn's hundreds would take a while to draw, at every change.
     readonly property int newest: 6
@@ -713,10 +734,10 @@ Rectangle {
         id: outline
         objectName: "outline"
         visible: overview.outlined
-        x: 16
+        x: overview.width - width - 16
         width: overview.outlineWidth
         anchors.top: parent.top
-        anchors.topMargin: 16
+        anchors.topMargin: 52
         anchors.bottom: composer.top
         anchors.bottomMargin: 8
         clip: true
@@ -806,6 +827,18 @@ Rectangle {
         }
     }
 
+    // The outline's own button, in the same place whether it shows or not.
+    IconButton {
+        objectName: "outlineButton"
+        visible: overview.outlineFits
+        x: overview.width - width - 16
+        y: 12
+        icon: "\uf03a"
+        tint: overview.outlined ? theme.foreground : overview.dim
+        hint: overview.outlined ? qsTr("Hide the outline") : qsTr("Show the outline")
+        onClicked: surface.outlineHidden = !surface.outlineHidden
+    }
+
     // A message to the agent: Enter sends it, Shift+Enter starts a new line.
     // Always the same height, so nothing above it moves as you type.
     Item {
@@ -871,8 +904,20 @@ Rectangle {
                             }
                         }
                     }
-                    // A picture pasted goes as a file the agent can open.
+                    // A picture pasted goes as a file the agent can open; PgUp and
+                    // PgDn page the conversation, Ctrl+Home and Ctrl+End go to
+                    // its start and end.
                     Keys.onPressed: (event) => {
+                        if (event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown) {
+                            overview.page(event.key === Qt.Key_PageUp ? -1 : 1)
+                            event.accepted = true
+                            return
+                        }
+                        if ((event.modifiers & Qt.ControlModifier) && (event.key === Qt.Key_Home || event.key === Qt.Key_End)) {
+                            overview.toEnd(event.key === Qt.Key_End)
+                            event.accepted = true
+                            return
+                        }
                         if (event.matches(StandardKey.Paste)) {
                             const path = backend.saveClipboardImage()
                             if (path !== "") {

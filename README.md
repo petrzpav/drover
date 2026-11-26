@@ -157,9 +157,11 @@ attached beneath. It is read from the transcript in `~/.claude/projects`, only
 its end at first, then what is appended, and only while it shows; drover
 remembers the view, and `Alt+E` comes back to it from the editor.
 
-On the left, where the panel has room, an outline lists the turns like a
+On the right, where the panel has room, an outline lists the turns like a
 document's: each one's time, prompt and headline, the one in view marked and
-the one at work with a bobbing robot; a click goes to a turn. When Claude
+the one at work with a bobbing robot; a click goes to a turn, and its button
+hides it. `PgUp` and `PgDn` page the conversation, also from the message
+field; `Ctrl+Home` and `Ctrl+End` go to its start and end. When Claude
 parks a conversation as a job in the background, the overview follows it to
 its new transcript.
 
