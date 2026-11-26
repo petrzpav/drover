@@ -487,6 +487,19 @@ private slots:
         QCOMPARE(timeline.index(1).data(Timeline::PromptRole).toString(), QString("And the gate"));
     }
 
+    void aReleaseCountsOnceItWentThrough()
+    {
+        const auto parser = parsed(prompt("Ship it")
+            + bash("r1", "gh release create v1.0 a.zst", "Publish the release") + result("r1", "HTTP 422", true)
+            + bash("r2", "gh release create v1.1 a.zst", "Publish the release") + result("r2", "https://x/v1.1")
+            + bash("r3", "codex exec -m astra -s read-only review", "Review it with Astra") + result("r3", "ok"));
+        const auto &items = parser.turns().last().items;
+        QCOMPARE(items[0].release, QString());
+        QCOMPARE(items[1].release, QString("v1.1"));
+        QVERIFY(items[2].branch);
+        QVERIFY(!items[0].branch);
+    }
+
     void theTimelineKnowsWhatChangesTheWorld()
     {
         QVERIFY(TimelineParser::isMilestone("git commit -m x"));
@@ -509,6 +522,10 @@ private slots:
         QCOMPARE(TimelineParser::releaseOf("git tag -a v1.2 -m x && git push --tags"), QString("v1.2"));
         QCOMPARE(TimelineParser::releaseOf("git commit -qam \"Release 0.9.0\n\nCo-Authored-By: x\" && git push"), QString("v0.9.0"));
         QCOMPARE(TimelineParser::releaseOf("git commit -m \"Fix the gate\" && git push"), QString());
+        // Only what makes a release, and the whole version.
+        QCOMPARE(TimelineParser::releaseOf("git tag -l v1.2"), QString());
+        QCOMPARE(TimelineParser::releaseOf("git tag -d v1.2"), QString());
+        QCOMPARE(TimelineParser::releaseOf("gh release create v1.2.0-rc1"), QString("v1.2.0-rc1"));
         QCOMPARE(TimelineParser::toolLabel("mcp__claude-in-chrome__computer", {}), QString("Chrome"));
     }
 

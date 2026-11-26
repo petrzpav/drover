@@ -115,9 +115,10 @@ QString TimelineParser::milestoneText(const QJsonObject &input) {
 
 QString TimelineParser::releaseOf(const QString &command) {
     static const QRegularExpression patterns[] = {
-        QRegularExpression("\\bgh\\s+release\\s+create\\s+v?(\\d+(?:\\.\\d+)+)"),
-        QRegularExpression("\\bgit(?:\\s+-C\\s+\\S+)?\\s+tag\\s+(?:-[a-z]\\s+)*v?(\\d+(?:\\.\\d+)+)"),
-        QRegularExpression("\\bcommit\\b[^\\n]*-[a-zA-Z]*m\\s+[\"']?Release\\s+v?(\\d+(?:\\.\\d+)+)")};
+        QRegularExpression("\\bgh\\s+release\\s+create\\s+v?(\\d+(?:\\.\\d+)+(?:[-+][\\w.]+)?)(?![\\w.-])"),
+        QRegularExpression("\\bgit(?:\\s+-C\\s+\\S+)?\\s+tag\\s+(?!-[ldv]\\b|--list|--delete|--verify)"
+                           "(?:-[asf]\\s+)*v?(\\d+(?:\\.\\d+)+(?:[-+][\\w.]+)?)(?![\\w.-])"),
+        QRegularExpression("\\bcommit\\b[^\\n]*-[a-zA-Z]*m\\s+[\"']?Release\\s+v?(\\d+(?:\\.\\d+)+(?:[-+][\\w.]+)?)(?![\\w.-])")};
     for (const auto &pattern : patterns)
         if (const auto found = pattern.match(command); found.hasMatch())
             return QStringLiteral("v") + found.captured(1);
@@ -270,7 +271,10 @@ void TimelineParser::toolUse(const QJsonObject &block, const QDateTime &time) {
     if (name == QLatin1String("Bash")) {
         const bool milestone = isMilestone(input.value("command").toString());
         item.text = milestone ? milestoneText(input) : commandText(input);
-        item.release = milestone ? releaseOf(input.value("command").toString()) : QString();
+        item.releasing = milestone ? releaseOf(input.value("command").toString()) : QString();
+        static const QRegularExpression review("\\bcodex\\s+exec\\b|\\bgh\\s+pr\\s+review\\b");
+        item.branch = review.match(input.value("command").toString()).hasMatch();
+        item.alone = item.alone || item.branch;
         item.kind = milestone ? QStringLiteral("milestone") : QStringLiteral("command");
         activity = item.text;
     } else if (name == QLatin1String("Edit") || name == QLatin1String("Write") || name == QLatin1String("MultiEdit")
@@ -294,6 +298,7 @@ void TimelineParser::toolUse(const QJsonObject &block, const QDateTime &time) {
         activity = tr("Asks you");
     } else if (name == QLatin1String("Agent") || name == QLatin1String("Task")) {
         item.kind = QStringLiteral("agent");
+        item.branch = true;
         item.text = shortened(input.value("description").toString(), 160);
         activity = tr("A subagent: %1").arg(item.text);
     } else if (name == QLatin1String("WebSearch")) {
@@ -308,6 +313,7 @@ void TimelineParser::toolUse(const QJsonObject &block, const QDateTime &time) {
         item.kind = QStringLiteral("tool");
         item.text = toolLabel(name, input);
         activity = item.text;
+        item.branch = name == QLatin1String("Skill") && input.value("skill").toString().contains(QLatin1String("review"));
     }
     addItem(item, id, activity);
 }
@@ -343,6 +349,8 @@ void TimelineParser::toolResult(const QString &id, bool error, const QString &co
             answers << it.value().toString();
         item.detail = shortened(!answers.isEmpty() ? answers.join(QStringLiteral("; ")) : firstLine(content), 2000);
     }
+    if (!error && !item.releasing.isEmpty())
+        item.release = item.releasing;
     if (!error) {
         // Started in the background: it runs on until its notification.
         if (item.alone && (content.startsWith(QLatin1String("Async agent launched"))
@@ -752,17 +760,34 @@ QVariant Timeline::data(const QModelIndex &index, int role) const {
     return m_rows.at(index.row()).value(QString::fromLatin1(names.value(role)));
 }
 
+// The session to read: where the conversation went, once its transcript is
+// there; a parked job whose record is gone for a moment (rewritten, the
+// job ending) stays followed while its transcript is there.
+QString Timeline::resolveFollowed() const {
+    const QString followed = followSession(m_sessions, m_session);
+    const bool stay = !m_followed.isEmpty() && m_followed != m_session && !findTranscript(m_projects, m_followed).isEmpty();
+    if (followed == m_session && stay)
+        return m_followed;
+    if (followed != m_session && findTranscript(m_projects, followed).isEmpty())
+        return stay ? m_followed : m_session;
+    return followed;
+}
+
 QString Timeline::followSession(const QString &sessions, const QString &session) {
-    if (sessions.isEmpty() || session.isEmpty())
+    static const QRegularExpression valid("^[A-Za-z0-9_-]+$");
+    if (sessions.isEmpty() || !valid.match(session).hasMatch())
         return session;
     QHash<QString, QString> parked, jobs;  // session -> parked job; job -> session
     const QDir dir(sessions);
     for (const QString &name : dir.entryList({"*.json"}, QDir::Files)) {
         QFile file(dir.filePath(name));
-        if (!file.open(QIODevice::ReadOnly))
+        // Its records are a few hundred bytes; anything else is not one.
+        if (file.size() > 16 * 1024 || !file.open(QIODevice::ReadOnly))
             continue;
         const QJsonObject object = QJsonDocument::fromJson(file.readAll()).object();
         const QString id = object.value("sessionId").toString();
+        if (!valid.match(id).hasMatch())
+            continue;
         if (const QString job = object.value("parkedJobId").toString(); !job.isEmpty())
             parked.insert(id, job);
         if (const QString job = object.value("jobId").toString(); !job.isEmpty())
@@ -791,6 +816,7 @@ void Timeline::setSession(const QString &session) {
     if (session == m_session)
         return;
     m_session = session;
+    m_followed.clear();
     emit sessionChanged();
     restart();
 }
@@ -874,12 +900,12 @@ void Timeline::poll() {
     if (m_session.isEmpty() || m_loading || m_settle.isActive())
         return;
     // Now and then: has the conversation moved on to another session?
-    if (!m_path.isEmpty() && ++m_ticks % 6 == 0 && followSession(m_sessions, m_session) != m_followed) {
+    if (!m_path.isEmpty() && ++m_ticks % 6 == 0 && resolveFollowed() != m_followed) {
         restart();
         return;
     }
     if (m_path.isEmpty()) {
-        m_followed = followSession(m_sessions, m_session);
+        m_followed = resolveFollowed();
         m_path = findTranscript(m_projects, m_followed);
         if (m_path.isEmpty()) {
             setState(QStringLiteral("missing"));
@@ -921,7 +947,7 @@ QVariantMap Timeline::rowOf(const TimelineParser::Turn &turn) const {
     for (const auto &item : turn.items)
         items << QVariantMap{{"id", item.id}, {"kind", item.kind}, {"text", item.text}, {"detail", item.detail},
                              {"state", item.state}, {"steps", item.steps}, {"background", item.background},
-                             {"release", item.release}};
+                             {"release", item.release}, {"branch", item.branch}};
     // The summary's points stand in for the points they cover.
     QVariantList points, batches;
     int covered = 0;
@@ -1118,7 +1144,8 @@ void Timeline::loadSummaries() {
 
 QHash<QString, QList<Timeline::Batch>> Timeline::readCache(const QString &cache, const QString &session) {
     QHash<QString, QList<Batch>> summaries;
-    if (session.isEmpty() || cache.isEmpty())
+    static const QRegularExpression valid("^[A-Za-z0-9_-]+$");
+    if (!valid.match(session).hasMatch() || cache.isEmpty())
         return summaries;
     QFile file(cache + '/' + session + ".json");
     if (!file.open(QIODevice::ReadOnly))
@@ -1137,7 +1164,8 @@ QHash<QString, QList<Timeline::Batch>> Timeline::readCache(const QString &cache,
 }
 
 void Timeline::saveSummaries(const QString &session, const QHash<QString, QList<Batch>> &summaries) const {
-    if (m_cache.isEmpty() || session.isEmpty())
+    static const QRegularExpression valid("^[A-Za-z0-9_-]+$");
+    if (m_cache.isEmpty() || !valid.match(session).hasMatch())
         return;
     QJsonObject turns;
     for (auto it = summaries.begin(); it != summaries.end(); ++it) {

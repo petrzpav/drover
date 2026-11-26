@@ -1015,6 +1015,17 @@ private slots:
         Surface again(rig.dir.filePath("position"));
         QVERIFY(again.overviewShown());
 
+        // Back from another agent with the pointer over the list: to the end.
+        auto *list = rig.find("overviewList");
+        QTest::mouseMove(rig.window, list->mapToScene(QPointF(list->width() / 2, list->height() / 2)).toPoint());
+        QMetaObject::invokeMethod(list, "positionViewAtBeginning");
+        list->setProperty("follow", false);
+        QTest::keyClick(rig.window, Qt::Key_Down, Qt::AltModifier);
+        QTRY_COMPARE(rig.backend->selected(), QString("w2:p1"));
+        QTest::keyClick(rig.window, Qt::Key_Up, Qt::AltModifier);
+        QTRY_COMPARE(rig.backend->selected(), QString("w1:p1"));
+        QTRY_VERIFY(list->property("atYEnd").toBool());
+
         // Another kind of agent: no points, but a message still goes; each
         // agent keeps its own draft.
         rig.type("for one");
@@ -1184,8 +1195,9 @@ private slots:
             QVariant metro;
             const QVariantList stops{
                 QVariantMap{{"kind", "milestone"}, {"text", "Bump to 0.9.0"}, {"steps", QStringList{}}, {"release", "v0.9.0"}},
-                QVariantMap{{"kind", "agent"}, {"text", "Fable review of it"}, {"steps", QStringList{}}},
-                QVariantMap{{"kind", "command"}, {"text", "Run the tests"}, {"steps", QStringList{}}},
+                QVariantMap{{"kind", "agent"}, {"text", "Fable review of it"}, {"steps", QStringList{}}, {"branch", true}},
+                QVariantMap{{"kind", "command"}, {"text", "Start preview server"}, {"steps", QStringList{}}},
+                QVariantMap{{"kind", "command"}, {"text", "Run the tests"}, {"steps", QStringList{}}, {"state", "failed"}},
                 QVariantMap{{"kind", "interrupted"}, {"text", "You interrupted it"}, {"steps", QStringList{}}}};
             QMetaObject::invokeMethod(rig.find("overview"), "metroOf", Q_RETURN_ARG(QVariant, metro),
                                       Q_ARG(QVariant, stops), Q_ARG(QVariant, QVariantList{}));

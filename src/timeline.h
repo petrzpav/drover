@@ -44,8 +44,12 @@ public:
         bool alone = false;
         // It went on in the background (it stays in sight when it fails).
         bool background = false;
-        // The version a release, a tag or a "Release x.y" commit made.
-        QString release;
+        // The version a release, a tag or a "Release x.y" commit made (once
+        // it went through), and the one it is to make.
+        QString release, releasing;
+        // A side trip: a subagent, a review (a review skill, codex exec,
+        // gh pr review).
+        bool branch = false;
     };
     struct Turn {
         qint64 serial = 0;
@@ -175,6 +179,7 @@ public:
     // its own transcript (the session with that jobId), while herdr still
     // knows the first.
     static QString followSession(const QString &sessions, const QString &session);
+    QString resolveFollowed() const;
     // How often the transcript is checked for more, in milliseconds.
     void setInterval(int milliseconds) { m_poll.setInterval(milliseconds); }
     // How much of a transcript's end is read at first.

@@ -37,15 +37,56 @@ Rectangle {
     // At the end, the newest; else the one at the top.
     readonly property int topTurn: {
         list.contentY; list.count; list.contentHeight
-        return list.atYEnd ? list.count - 1 : Math.max(0, list.indexAt(list.width / 2, list.contentY + 24))
+        if (list.atYEnd)
+            return list.count - 1
+        // The first turn in view, past a gap between two.
+        for (let dy = 24; dy < list.height; dy += 12) {
+            const at = list.indexAt(list.width / 2, list.contentY + dy)
+            if (at >= 0)
+                return at
+        }
+        return 0
     }
     // A page up or down (PgUp, PgDn), or to the start or the end.
     function page(step) {
-        const top = list.originY - list.headerItem.height
+        const top = list.originY
         const bottom = Math.max(top, list.originY + list.contentHeight - list.height)
         list.follow = false
         list.contentY = Math.max(top, Math.min(bottom, list.contentY + step * (list.height - 40)))
         list.follow = list.contentY >= bottom - 1
+    }
+    // Keys in text selected to copy: Ctrl+C copies it as written (without
+    // the zero-width spaces that keep its Markdown safe), PgUp/PgDn and
+    // Ctrl+Home/End page, and what you type goes on in the message field.
+    function outputKeys(event, edit) {
+        if (event.matches(StandardKey.Copy)) {
+            if (edit.selectedText !== "")
+                backend.copyText(edit.selectedText.replace(/\u200b/g, ""))
+            event.accepted = true
+        } else if ((event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown) && event.modifiers === Qt.NoModifier) {
+            page(event.key === Qt.Key_PageUp ? -1 : 1)
+            event.accepted = true
+        } else if (event.modifiers === Qt.ControlModifier && (event.key === Qt.Key_Home || event.key === Qt.Key_End)) {
+            toEnd(event.key === Qt.Key_End)
+            event.accepted = true
+        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            focusInput()
+            event.accepted = true
+        } else if (event.text !== "" && event.text >= " " && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
+            focusInput()
+            input.insert(input.cursorPosition, event.text)
+            event.accepted = true
+        }
+    }
+    // A theme switch: Markdown keeps the link color it was laid out with, so
+    // the agent's words opened are laid out again.
+    property bool relayout: false
+    Connections {
+        target: theme
+        function onChanged() {
+            overview.relayout = true
+            Qt.callLater(() => overview.relayout = false)
+        }
     }
     function toEnd(end) {
         list.follow = end
@@ -188,9 +229,12 @@ Rectangle {
 
     Connections {
         target: timeline
+        // Another conversation: to its end, pointer or not, as it loads.
         function onSessionChanged() {
             overview.opened = ({})
             list.follow = true
+            list.arriving = true
+            arrived.restart()
         }
         // Read again from the start: the points are new ones.
         function onStateChanged() {
@@ -290,12 +334,14 @@ Rectangle {
                 elide: Text.ElideRight
             }
             Loader {
-                active: row.open && row.point.kind === "said"
+                active: row.open && row.point.kind === "said" && !overview.relayout
                 visible: active
                 width: parent.width
                 // Selectable, to copy from.
                 sourceComponent: TextEdit {
+                    id: words
                     objectName: "pointWords" + row.point.id
+                    Keys.onPressed: (event) => overview.outputKeys(event, words)
                     width: body.width
                     readOnly: true
                     selectByMouse: true
@@ -366,10 +412,25 @@ Rectangle {
         // At the end, the list stays there as points come; scrolled up, it
         // stays where you are.
         property bool follow: true
-        // Not while the pointer is over it: nothing moves under the pointer.
+        // Not while the pointer is over it: nothing moves under the pointer,
+        // except while another conversation comes in.
+        property bool arriving: false
         function settle() {
-            if (follow && !listHover.hovered)
+            if (follow && (!listHover.hovered || arriving))
                 positionViewAtEnd()
+        }
+        // Loaded and drawn: from then on the pointer holds it again.
+        Timer {
+            id: arrived
+            interval: 1200
+            onTriggered: {
+                if (timeline.state !== "ready" && timeline.state !== "none" && timeline.state !== "missing") {
+                    restart()
+                    return
+                }
+                list.settle()
+                list.arriving = false
+            }
         }
         onMovementEnded: follow = atYEnd
         onContentHeightChanged: Qt.callLater(settle)
@@ -556,6 +617,7 @@ Rectangle {
                                     interactive: contentWidth > width
                                     TextEdit {
                                         id: visualText
+                                        Keys.onPressed: (event) => overview.outputKeys(event, visualText)
                                         objectName: "visualText" + turn.serial + "_0_" + summaryRow.index
                                         text: summaryRow.visual !== "" ? overview.drawing(summaryRow.visual) : ""
                                         textFormat: TextEdit.RichText
@@ -692,6 +754,7 @@ Rectangle {
                         }
                         TextEdit {
                             id: commandText
+                            Keys.onPressed: (event) => overview.outputKeys(event, commandText)
                             x: 32
                             y: 6
                             width: parent.width - 32 - copyButton.width - 12
@@ -747,23 +810,28 @@ Rectangle {
     FontMetrics { id: metroMetrics }
     readonly property real metroIndent: metroMetrics.advanceWidth("00:00 ")
     function metroOf(items, batches) {
-        let version = "", failed = false
+        let version = "", failed = false, lastWork = null
         const reviews = []
-        for (const point of items) {
+        for (let i = items.length - 1; i >= 0; --i) {
+            const point = items[i]
             // The version a release, a tag or a "Release x.y" commit made.
             if (point.release && version === "")
                 version = point.release
             if (point.kind === "interrupted")
                 failed = true
-            const reviewing = point.kind === "agent" || (point.kind === "tool" && /^Skill: .*review/i.test(point.text))
-                              || /review/i.test(point.text)
-            if (reviewing && (point.kind === "agent" || point.kind === "tool" || point.kind === "command")
-                    && reviews.indexOf(point.text) < 0)
-                reviews.push(point.text)
+            // The newest two side trips.
+            if (point.branch && reviews.length < 2 && reviews.indexOf(point.text) < 0)
+                reviews.unshift(point.text)
+            if (lastWork === null && (point.kind === "command" || point.kind === "milestone"
+                                      || point.kind === "tool" || point.kind === "web"))
+                lastWork = point
         }
+        // Out of service: its last step failed (not one retried after), it was
+        // interrupted, or its summary says something failed.
         const summary = batches.length > 0 ? batches[batches.length - 1].points : []
-        failed = failed || (summary.length > 0 && summary[0].kind === "fail")
-        return { version: version, failed: failed, reviews: reviews.slice(-2),
+        failed = failed || (lastWork !== null && (lastWork.state === "failed" || lastWork.state === "denied"))
+                 || summary.some(point => point.kind === "fail")
+        return { version: version, failed: failed, reviews: reviews,
                  headline: summary.length > 0 ? summary[0].text : "" }
     }
 
@@ -778,14 +846,19 @@ Rectangle {
         anchors.bottom: composer.top
         anchors.bottomMargin: 8
         clip: true
-        model: overview.claude ? timeline : null
+        model: overview.outlined ? timeline : null
         spacing: 0
+        HoverHandler { id: outlineHover }
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
         // The turn in view stays in the outline's view.
         Connections {
             target: overview
-            function onTopTurnChanged() { outline.positionViewAtIndex(overview.topTurn, ListView.Contain) }
+            function onTopTurnChanged() {
+                // Not under the pointer, or while it moves.
+                if (!outlineHover.hovered && !outline.moving)
+                    outline.positionViewAtIndex(overview.topTurn, ListView.Contain)
+            }
         }
 
         delegate: Item {
@@ -979,12 +1052,12 @@ Rectangle {
                     // PgDn page the conversation, Ctrl+Home and Ctrl+End go to
                     // its start and end.
                     Keys.onPressed: (event) => {
-                        if (event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown) {
+                        if ((event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown) && event.modifiers === Qt.NoModifier) {
                             overview.page(event.key === Qt.Key_PageUp ? -1 : 1)
                             event.accepted = true
                             return
                         }
-                        if ((event.modifiers & Qt.ControlModifier) && (event.key === Qt.Key_Home || event.key === Qt.Key_End)) {
+                        if (event.modifiers === Qt.ControlModifier && (event.key === Qt.Key_Home || event.key === Qt.Key_End)) {
                             overview.toEnd(event.key === Qt.Key_End)
                             event.accepted = true
                             return
