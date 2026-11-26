@@ -3,9 +3,19 @@
 # $DROVER_TEST_DIR, and sums up any turn in one point about step 2; it gives
 # points without words while $DROVER_TEST_DIR/empty exists, fails like a
 # usage limit while $DROVER_TEST_DIR/fail does, and answers with
-# $DROVER_TEST_DIR/reply.json while that exists.
+# $DROVER_TEST_DIR/reply.json while that exists (or, by the turn's prompt,
+# with a file in $DROVER_TEST_DIR/replies).
 echo "$@" >> "$DROVER_TEST_DIR/calls"
-cat >> "$DROVER_TEST_DIR/input"
+input=$(cat)
+printf '%s\n' "$input" >> "$DROVER_TEST_DIR/input"
+# A reply per turn: each file in $DROVER_TEST_DIR/replies answers the input
+# that has its name in it.
+for reply in "$DROVER_TEST_DIR"/replies/*; do
+  [ -f "$reply" ] || continue
+  case "$input" in
+    *"$(basename "$reply")"*) cat "$reply"; exit 0 ;;
+  esac
+done
 # A slow model, while $DROVER_TEST_DIR/slow exists.
 [ -e "$DROVER_TEST_DIR/slow" ] && sleep 1
 if [ -e "$DROVER_TEST_DIR/reply.json" ]; then

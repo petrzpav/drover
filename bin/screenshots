@@ -1,9 +1,10 @@
 #!/bin/sh
-# Draws the README's pictures into docs/ against a made-up herd: the panel
-# (screenshot.png) and each indicator style watching the herd change
-# (pill-dots.gif, pill-bars.gif, pill-sheep.gif), an agent's question on
-# the stage (stage.png), and the conversation in points (overview.png).
-# Needs ffmpeg.
+# Draws the README's pictures into docs/ against a made-up herd at work on a
+# shop, in the Monokai Pro theme: a tour of the overview (overview.gif) with
+# two close ups (summary.png, metro.png), the panel (screenshot.png), an
+# agent's question on the stage (stage.png), all at 2x, and each indicator
+# style watching the herd change (pill-dots.gif, pill-bars.gif,
+# pill-sheep.gif). Needs ffmpeg.
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
@@ -14,16 +15,25 @@ mkdir -p "$ROOT/build/tests/drover_ui_tests"
 cd "$ROOT/build/tests/drover_ui_tests"
 qmake6 "$ROOT/tests/drover_ui_tests.pro" >/dev/null
 make -j"$(nproc)" >/dev/null
-DROVER_SCREENSHOTS="$OUT" QT_QPA_PLATFORM=offscreen ./drover_ui_tests screenshots >/dev/null
 
-cp "$OUT/screenshot.png" "$ROOT/docs/screenshot.png"
-cp "$OUT/overview.png" "$ROOT/docs/overview.png"
-cp "$OUT/stage.png" "$ROOT/docs/stage.png"
+# The stills at twice the size, on a screen big enough for them.
+echo '{"screens":[{"name":"s","x":0,"y":0,"width":7680,"height":4320,"logicalDpi":96,"logicalBaseDpi":96,"dpr":1}]}' > "$OUT/screen.json"
+DROVER_SCREENSHOTS="$OUT/stills" DROVER_SCREENSHOTS_ONLY=stills QT_SCALE_FACTOR=2 \
+  QT_QPA_PLATFORM="offscreen:configfile=$OUT/screen.json" ./drover_ui_tests screenshots >/dev/null
+DROVER_SCREENSHOTS="$OUT/pills" DROVER_SCREENSHOTS_ONLY=pills QT_QPA_PLATFORM=offscreen \
+  ./drover_ui_tests screenshots >/dev/null
+
+for picture in screenshot summary metro stage; do
+  cp "$OUT/stills/$picture.png" "$ROOT/docs/$picture.png"
+done
+ffmpeg -loglevel error -y -framerate 20 -i "$OUT/stills/tour/%04d.png" \
+  -vf "split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle" \
+  "$ROOT/docs/overview.gif"
 for style in dots bars sheep; do
   # The frames span four steps of 2.2 s each.
-  rate=$(ls "$OUT/$style" | wc -l | awk '{ printf "%.2f", $1 / 8.8 }')
-  ffmpeg -loglevel error -y -framerate "$rate" -i "$OUT/$style/%04d.png" \
+  rate=$(ls "$OUT/pills/$style" | wc -l | awk '{ printf "%.2f", $1 / 8.8 }')
+  ffmpeg -loglevel error -y -framerate "$rate" -i "$OUT/pills/$style/%04d.png" \
     -vf "scale=iw*2:ih*2:flags=neighbor,split[a][b];[a]palettegen[p];[b][p]paletteuse=dither=none" \
     "$ROOT/docs/pill-$style.gif"
 done
-echo "Drew docs/screenshot.png, docs/overview.png, docs/stage.png and docs/pill-{dots,bars,sheep}.gif"
+echo "Drew docs/{overview.gif,summary.png,metro.png,screenshot.png,stage.png,pill-dots.gif,pill-bars.gif,pill-sheep.gif}"

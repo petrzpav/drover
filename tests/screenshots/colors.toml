@@ -1,0 +1,34 @@
+# Monokai Pro (classic filter): the theme the README pictures are drawn in
+mode = "dark"
+
+accent = "#ffd866"
+selection = "#5b595c"
+muted = "#727072"
+
+hyprland_active_border = "#c1c0c0"
+
+background = "#2d2a2e"
+dark_background = "#221f22"
+darker_background = "#19181a"
+lighter_background = "#403e41"
+
+foreground = "#fcfcfa"
+dark_foreground = "#939293"
+light_foreground = "#c1c0c0"
+bright_foreground = "#fcfcfa"
+
+red = "#ff6188"
+yellow = "#ffd866"
+orange = "#fc9867"
+green = "#a9dc76"
+cyan = "#78dce8"
+blue = "#fc9867"
+magenta = "#ab9df2"
+brown = "#8f6b4a"
+
+bright_red = "#ff7a9b"
+bright_yellow = "#ffe28a"
+bright_green = "#bce592"
+bright_cyan = "#95e5ee"
+bright_blue = "#fdad86"
+bright_magenta = "#c0b5f5"

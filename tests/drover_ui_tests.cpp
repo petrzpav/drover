@@ -194,13 +194,27 @@ esac
     }
 };
 
-// Four agents of a made-up garden herd, in the given states, for screenshots.
+// Four agents of a made-up garden herd, in the given states.
 QByteArray garden(const QStringList &states) {
     static const char *tasks[][2] = {{"Plant the tomato beds", "garden"}, {"Repaint the shed door", "shed"},
                                      {"Fix the fence gate", "fence"}, {"Clean up the pond pump", "pond"}};
     QStringList rows;
     for (int i = 0; i < 4; ++i)
         rows << QString(R"({"agent":"claude","agent_session":{"kind":"id","value":"garden-%3"},)"
+                        R"("agent_status":"%1","cwd":"/home/ann/Work/%2","pane_id":"w%3:p1",)"
+                        R"("terminal_id":"term_%3","terminal_title_stripped":"%4","workspace_id":"w%3"})")
+                    .arg(states[i], tasks[i][1]).arg(i + 1).arg(tasks[i][0]);
+    return "{\"result\":{\"agents\":[" + rows.join(",").toUtf8() + "]}}";
+}
+
+// Four agents of a made-up herd at work on a shop, in the given states, for
+// the README's pictures.
+QByteArray shop(const QStringList &states) {
+    static const char *tasks[][2] = {{"Fix double charges at checkout", "shop-api"}, {"Speed up the CI pipeline", "shop-ci"},
+                                     {"Passkeys for the admin login", "shop-admin"}, {"Release notes for 2.4", "shop-docs"}};
+    QStringList rows;
+    for (int i = 0; i < 4; ++i)
+        rows << QString(R"({"agent":"claude","agent_session":{"kind":"id","value":"shop-%3"},)"
                         R"("agent_status":"%1","cwd":"/home/ann/Work/%2","pane_id":"w%3:p1",)"
                         R"("terminal_id":"term_%3","terminal_title_stripped":"%4","workspace_id":"w%3"})")
                     .arg(states[i], tasks[i][1]).arg(i + 1).arg(tasks[i][0]);
@@ -512,147 +526,293 @@ private slots:
     }
 
     // Not a test: with DROVER_SCREENSHOTS=<dir> (bin/screenshots), draws
-    // the README's pictures there, a still of the panel and frames of each
-    // indicator style watching the herd change.
+    // the README's pictures there against a made-up herd at work on a shop:
+    // the panel, the overview (frames of a tour through it and two close
+    // ups), an agent's question on the stage, and frames of each indicator
+    // style watching the herd change. DROVER_SCREENSHOTS_ONLY=stills or
+    // pills draws only one half (the stills at 2x, the pills at 1x).
     void screenshots()
     {
         const QString out = qEnvironmentVariable("DROVER_SCREENSHOTS");
         if (out.isEmpty())
             QSKIP("set DROVER_SCREENSHOTS to a directory to draw the README's pictures");
+        const QString only = qEnvironmentVariable("DROVER_SCREENSHOTS_ONLY");
         QDir().mkpath(out);
         // As drover itself: everything in the terminal's font and size.
         const QFont font = QGuiApplication::font();
         QGuiApplication::setFont(TerminalFont::read(QDir::homePath()));
         const auto restore = qScopeGuard([&] { QGuiApplication::setFont(font); });
 
-        Rig rig(garden({"working", "blocked", "done", "idle"}), 4);
-        // The selected agent's terminal shows a short exchange.
-        write(rig.dir.filePath("transcript"), QByteArray(
-            "\r\n\033[97m\xe2\x97\x8f\033[0m Reading \033[1mbeds.md\033[0m and the planting calendar.\r\n\r\n"
-            "\033[97m\xe2\x97\x8f\033[0m The south bed gets the most sun, so the tomatoes go there;\r\n"
-            "  basil between the rows keeps pests off.\r\n\r\n"
-            "\033[92m\xe2\x97\x8f\033[0m \033[1mUpdate\033[0m(beds.md)\r\n"
-            "  \xe2\x8e\xbf  Added \033[92m6\033[0m lines\r\n\r\n"
-            "\033[2m\xe2\x80\xbb recap: \033[3mplanting plan ready for review\033[0m\r\n"
-            "\033[90m\xe2\x9d\xaf\033[0m \r\n"
-            "  \033[33m\xe2\x8f\xb5\xe2\x8f\xb5 auto mode on\033[0m\033[1A\033[3G"));
-        QFile script(rig.dir.filePath("herdr"));
-        QVERIFY(script.open(QIODevice::ReadOnly));
-        QString text = QString::fromUtf8(script.readAll());
-        script.close();
-        text.replace("  \"terminal attach\")\n", QString("  \"terminal attach\")\n    cat '%1/transcript'; exec sleep 60 ;;\n  \"terminal attach-old\")\n").arg(rig.dir.path()));
-        write(rig.dir.filePath("herdr"), text.toUtf8());
+        Rig rig(shop({"working", "working", "blocked", "idle"}), 4);
+        // A theme of its own (Monokai Pro), whatever the desktop's is.
+        QDir(rig.dir.path()).mkpath("theme");
+        QFile::copy(TESTS_DIR "/screenshots/colors.toml", rig.dir.filePath("theme/colors.toml"));
+        write(rig.dir.filePath("ws.json"), R"({"result":{"workspaces":[{"workspace_id":"w1","label":"shop"},{"workspace_id":"w2","label":"ci"}]}})");
+        rig.backend->refresh();
 
-        // Its conversation so far, for the overview beside the terminal.
-        {
-            QDir(rig.dir.path()).mkpath("projects/-home-ann-Work-garden");
-            QByteArray transcript;
-            const auto add = [&](QJsonObject object) {
-                object.insert("timestamp", "2026-11-26T08:" + QString::number(10 + transcript.count('\n')) + ":00.000Z");
-                transcript += QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n';
-            };
-            const auto prompt = [&](const QString &text) {
-                add({{"type", "user"}, {"uuid", "u" + QString::number(transcript.count('\n'))}, {"origin", QJsonObject{{"kind", "human"}}},
-                     {"message", QJsonObject{{"content", text}}}});
-            };
-            const auto says = [&](const QString &text) {
-                add({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{QJsonObject{{"type", "text"}, {"text", text}}}}}}});
-            };
-            const auto runs = [&](const QString &id, const QString &name, const QJsonObject &input, const QString &out = "ok",
-                                  bool error = false) {
-                add({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
-                    QJsonObject{{"type", "tool_use"}, {"id", id}, {"name", name}, {"input", input}}}}}}});
-                if (!out.isEmpty())
-                    add({{"type", "user"}, {"message", QJsonObject{{"content", QJsonArray{QJsonObject{
-                        {"type", "tool_result"}, {"tool_use_id", id}, {"content", out}, {"is_error", error}}}}}}});
-            };
-            prompt("Plan the tomato beds for this spring, the south side gets the most sun");
-            runs("a", "Bash", {{"command", "ls"}, {"description", "List the beds and their soil tests"}});
-            runs("b", "Bash", {{"command", "cat"}, {"description", "Read last year's harvest notes"}});
-            runs("c", "Bash", {{"command", "make"}, {"description", "Check the planting calendar"}},
-                 "Exit code 1\ncalendar.ics: no events after March", true);
-            says("Last year's calendar ends in March, so I planned from the soil tests alone.");
-            runs("d", "AskUserQuestion", {{"questions", QJsonArray{QJsonObject{{"question", "Basil between the tomato rows?"}}}}}, "");
-            add({{"type", "user"}, {"toolUseResult", QJsonObject{{"answers", QJsonObject{{"Basil between the tomato rows?", "Yes, it keeps pests off"}}}}},
-                 {"message", QJsonObject{{"content", QJsonArray{QJsonObject{{"type", "tool_result"}, {"tool_use_id", "d"}, {"content", "answered"}}}}}}});
-            runs("e", "Edit", {{"file_path", "/home/ann/Work/garden/beds.md"}});
-            runs("f", "Write", {{"file_path", "/home/ann/Work/garden/calendar.ics"}});
-            runs("g", "Bash", {{"command", "git commit -m \"Plan the tomato beds\" && git push"}});
-            says("The plan is in beds.md: tomatoes on the south bed, basil between the rows, sowing from April 12.");
-            prompt("Order the seeds we're missing");
-            says("Looking at what's left in the seed box first.");
-            runs("h", "Bash", {{"command", "grep"}, {"description", "Count the seeds left in the box"}}, "");
-            write(rig.dir.filePath("projects/-home-ann-Work-garden/garden-1.jsonl"), transcript);
-        }
-
-        // The window is see-through; the pictures put it on a black desktop.
+        // The window is see-through; the pictures put it on a dark desktop.
         const auto grab = [&](const QRect &rect) {
-            QImage image(rect.size(), QImage::Format_RGB32);
-            image.fill(Qt::black);
+            QImage shot = rig.window->grabWindow();
+            const qreal d = rig.window->devicePixelRatio();
+            shot.setDevicePixelRatio(1);
+            // The rect may reach past the window's edge: the desktop goes on.
+            QImage image((rect.size().toSizeF() * d).toSize(), QImage::Format_RGB32);
             QPainter painter(&image);
-            painter.drawImage(0, 0, rig.window->grabWindow().copy(rect));
+            QRadialGradient desktop(image.rect().center(), qMax(image.width(), image.height()) * 0.7);
+            desktop.setColorAt(0, QColor("#3a3346"));
+            desktop.setColorAt(1, QColor("#141215"));
+            painter.fillRect(image.rect(), desktop);
+            painter.drawImage(-(rect.topLeft().toPointF() * d), shot);
+            painter.end();
             return image;
         };
         const auto pillRect = [&] {
             return QRect(rig.window->property("pillX").toInt(), rig.window->property("pillY").toInt(), 176, 36);
         };
 
-        // The panel, open on the first agent, with the bars beside it.
-        rig.expand();
-        QTest::qWait(1500);
-        const QRect panel = rig.window->property("panelRect").toRectF().toAlignedRect();
-        grab(panel.united(pillRect()).adjusted(-24, -24, 24, 24)).save(out + "/screenshot.png");
-        QMetaObject::invokeMethod(rig.window, "setExpanded", Q_ARG(QVariant, false));
+        if (only != "pills") {
+            // The selected agent's terminal: it drafts an email.
+            write(rig.dir.filePath("transcript"), QByteArray(
+                "\r\n\033[90m\xe2\x9d\xaf\033[0m Yes, show me the email first\r\n\r\n"
+                "\033[97m\xe2\x97\x8f\033[0m \033[1mRead\033[0m(support/tickets/4812.md)\r\n"
+                "  \xe2\x8e\xbf  Read \033[1m38\033[0m lines\r\n\r\n"
+                "\033[97m\xe2\x97\x8f\033[0m Drafting it in the tone of our support replies: short, a clear\r\n"
+                "  sorry, the refund date.\r\n\r\n"
+                "\033[92m\xe2\x97\x8f\033[0m \033[1mWrite\033[0m(mail/apology-double-charge.md)\r\n"
+                "  \xe2\x8e\xbf  Wrote \033[92m14\033[0m lines to mail/apology-double-charge.md\r\n"
+                "     \033[2mSubject: We charged you twice, and your refund is on its way\033[0m\r\n"
+                "     \033[2mHi {first_name}, on {date} a double click on Pay charged you\033[0m\r\n"
+                "     \033[2mtwice for order {order}. That was our bug, it is fixed, and\033[0m\r\n"
+                "     \033[2m{amount} is back on your card by {refund_date}. Sorry.\033[0m\r\n\r\n"
+                "\033[38;5;216m\xe2\x9c\xbb\033[0m \033[38;5;216mDrafting the apology\xe2\x80\xa6\033[0m \033[2m(esc to interrupt)\033[0m\r\n\r\n"
+                "\033[90m\xe2\x9d\xaf\033[0m \r\n"
+                "  \033[33m\xe2\x8f\xb5\xe2\x8f\xb5 auto mode on\033[0m\033[1A\033[3G"));
+            QFile script(rig.dir.filePath("herdr"));
+            QVERIFY(script.open(QIODevice::ReadOnly));
+            QString text = QString::fromUtf8(script.readAll());
+            script.close();
+            text.replace("  \"terminal attach\")\n", QString("  \"terminal attach\")\n    cat '%1/transcript'; exec sleep 60 ;;\n  \"terminal attach-old\")\n").arg(rig.dir.path()));
+            write(rig.dir.filePath("herdr"), text.toUtf8());
 
-        // The same agent's conversation in points, its first turn summed up.
-        {
-            const QJsonArray points{
-                QJsonObject{{"text", "The plan is in beds.md: tomatoes on the south bed, basil between the rows"},
-                            {"kind", "done"}, {"step", 9}},
-                QJsonObject{{"text", "Last year's planting calendar ends in March, so the plan rests on the soil tests"},
-                            {"kind", "fail"}, {"step", 3}},
-                QJsonObject{{"text", "Committed and pushed as \"Plan the tomato beds\""}, {"kind", "ship"}, {"step", 8},
-                            {"visual", "south bed   T · B · T · B · T · B · T      T tomatoes\n"
-                                       "            ─────────────────────────      B basil\n"
-                                       "calendar    [fail]January – March only[/] → plan from soil tests\n"
-                                       "sowing      [ok]April 12[/]   soil tests [ok]✓[/]   beds.md [ok]✓[/]"}}};
-            write(rig.dir.filePath("reply.json"), QJsonDocument(QJsonObject{{"type", "result"}, {"is_error", false},
-                {"result", QString::fromUtf8(QJsonDocument(QJsonObject{{"points", points}, {"category", "design"}})
-                    .toJson(QJsonDocument::Compact))}}).toJson(QJsonDocument::Compact));
+            // Its conversation so far, for the overview.
+            QDir(rig.dir.path()).mkpath("projects/-home-ann-Work-shop-api");
+            QByteArray transcript;
+            int hour = 8, minute = 0, uid = 0;
+            const auto at = [&](int h, int m) { hour = h; minute = m; };
+            const auto add = [&](QJsonObject object) {
+                object.insert("timestamp", QString("2026-11-26T%1:%2:00.000Z").arg(hour, 2, 10, QChar('0')).arg(minute++, 2, 10, QChar('0')));
+                transcript += QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n';
+            };
+            const auto prompt = [&](const QString &text) {
+                add({{"type", "user"}, {"uuid", "u" + QString::number(++uid)}, {"origin", QJsonObject{{"kind", "human"}}},
+                     {"message", QJsonObject{{"content", text}}}});
+            };
+            const auto says = [&](const QString &text) {
+                add({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{QJsonObject{{"type", "text"}, {"text", text}}}}}}});
+            };
+            const auto runs = [&](const QString &id, const QString &name, const QJsonObject &input, const QString &result = "ok",
+                                  bool error = false) {
+                add({{"type", "assistant"}, {"message", QJsonObject{{"content", QJsonArray{
+                    QJsonObject{{"type", "tool_use"}, {"id", id}, {"name", name}, {"input", input}}}}}}});
+                if (!result.isEmpty())
+                    add({{"type", "user"}, {"message", QJsonObject{{"content", QJsonArray{QJsonObject{
+                        {"type", "tool_result"}, {"tool_use_id", id}, {"content", result}, {"is_error", error}}}}}}});
+            };
+            const auto ends = [&](int ms) { add({{"type", "system"}, {"subtype", "turn_duration"}, {"durationMs", ms}}); };
+            const QString root = "/home/ann/Work/shop-api/";
+            const auto run = [](const QString &command, const QString &description) {
+                return QJsonObject{{"command", command}, {"description", description}};
+            };
+
+            at(8, 12);
+            prompt("Some customers get charged twice when they double-click Pay. Find out why and fix it");
+            runs("a1", "Grep", {{"pattern", "charge("}, {"path", root + "app"}});
+            runs("a2", "Bash", run("grep -c duplicate storage/logs/payments.log", "Look for duplicate charges in the payment log"));
+            says("Two requests for the same order passed the \"already paid?\" check 40 ms apart, and nothing stopped the second one.");
+            runs("a3", "Edit", {{"file_path", root + "app/Checkout/ChargeOrder.php"}});
+            runs("a4", "Write", {{"file_path", root + "database/migrations/2026_11_26_add_idempotency_key.php"}});
+            runs("a5", "Write", {{"file_path", root + "tests/Feature/DoubleChargeTest.php"}});
+            runs("a6", "Bash", run("php artisan test --filter=DoubleCharge", "Run the new double-charge test"),
+                 "FAILED  Tests\\Feature\\DoubleChargeTest > twenty parallel clicks charge once\nExpected 1 charge, got 2", true);
+            runs("a7", "Edit", {{"file_path", root + "app/Checkout/ChargeOrder.php"}});
+            runs("a8", "Bash", run("php artisan test --filter=DoubleCharge", "Run the new double-charge test"));
+            says("Fixed. ChargeOrder now takes a row lock on the order and sends Stripe an idempotency key, so a second click waits and then sees the order already paid.");
+            ends(412000);
+
+            at(8, 31);
+            prompt("Run everything and ship it");
+            runs("b1", "Bash", run("php artisan test --parallel", "Run the whole test suite"));
+            runs("b2", "Bash", run("php artisan migrate --env=staging", "Migrate staging"));
+            runs("b3", "Bash", run("k6 run load/checkout.js", "Load-test checkout on staging"));
+            runs("b4", "Bash", {{"command", "git commit -am \"Charge an order once, however many clicks\" && git tag v2.4.1 && git push --follow-tags"}});
+            runs("b5", "Bash", run("./deploy production", "Deploy to production"));
+            says("v2.4.1 is live.");
+            ends(388000);
+
+            at(8, 47);
+            prompt("Did it already hit real customers? Check the last 30 days");
+            runs("c1", "Bash", run("psql -f queries/duplicate_charges.sql", "Find orders charged more than once in 30 days"));
+            says("Found 7 orders charged twice since October 27. Checking whether any were refunded.");
+            runs("c2", "Bash", run("stripe refunds list --limit 100", "Match them against Stripe refunds"));
+            runs("c3", "Bash", run("grep -ril 'charged twice' support/tickets", "Look for support tickets about it"));
+            says("Refund all 7 now and email each of them an apology? I can show you the email first.");
+            ends(201000);
+
+            at(8, 52);
+            prompt("Yes, show me the email first");
+            runs("d1", "Read", {{"file_path", root + "support/tickets/4812.md"}});
+            says("Drafting it in the tone of our support replies: short, a clear sorry, the refund date.");
+            runs("d2", "Write", {{"file_path", root + "mail/apology-double-charge.md"}}, "");
+            write(rig.dir.filePath("projects/-home-ann-Work-shop-api/shop-1.jsonl"), transcript);
+
+            // What the model makes of each turn, by a few words of its prompt.
+            const auto reply = [&](const QString &key, const QJsonArray &points, const QString &category) {
+                QDir(rig.dir.path()).mkpath("replies");
+                write(rig.dir.filePath("replies/" + key), QJsonDocument(QJsonObject{{"type", "result"}, {"is_error", false},
+                    {"result", QString::fromUtf8(QJsonDocument(QJsonObject{{"points", points}, {"category", category}})
+                        .toJson(QJsonDocument::Compact))}}).toJson(QJsonDocument::Compact));
+            };
+            reply("double-click Pay", {
+                QJsonObject{{"text", "Fixed: one charge per order, guarded by a row lock and an idempotency key"},
+                            {"kind", "done"}, {"step", 7},
+                            {"visual", "before  click 1 ─ paid? no ─ charge          [fail]$49[/]\n"
+                                       "        click 2 ─ paid? no ─ charge          [fail]$49  charged twice[/]\n"
+                                       "after   click 1 ─ lock ─ paid? no ─ charge   [ok]$49[/]\n"
+                                       "        click 2 ─ lock ─ [dim]waits ─ paid? yes[/]   [ok]charged once[/]"}},
+                QJsonObject{{"text", "Cause: two Pay clicks raced past the \"already paid?\" check, 40 ms apart"},
+                            {"kind", "fail"}, {"step", 2}},
+                QJsonObject{{"text", "New test fires 20 parallel clicks; exactly one charge goes through"},
+                            {"kind", "change"}, {"step", 3}}}, "fix");
+            reply("ship it", {
+                QJsonObject{{"text", "v2.4.1 is live in production, the migration ran without downtime"},
+                            {"kind", "ship"}, {"step", 2},
+                            {"visual", "tests [ok]612 ✓[/] → staging [ok]✓[/] → load [ok]p95 180 ms[/] → prod [ok]v2.4.1[/]"}}},
+                "release");
+            reply("last 30 days", {
+                QJsonObject{{"text", "7 customers were charged twice in 30 days, $412 in total"}, {"kind", "done"}, {"step", 2},
+                            {"visual", "Nov 03  ██             1\n"
+                                       "Nov 11  ██████         3   [warn]2 wrote to support[/]\n"
+                                       "Nov 19  ████           2\n"
+                                       "Nov 24  ██             1   [dim]the last one, before the fix[/]\n"
+                                       "refunded so far        [fail]0 of 7[/]"}}},
+                "question");
+
+            // The panel, open on the agent's terminal, with the sheep beside it,
+            // on a smaller screen so the terminal isn't mostly empty.
+            rig.backend->setIndicator("sheep");
+            const QSize window = rig.window->size();
+            rig.window->resize(1440, 760);
+            QTest::qWait(300);
+            rig.expand();
+            QTest::qWait(1500);
+            const QRect panel = rig.window->property("panelRect").toRectF().toAlignedRect();
+            grab(panel.united(pillRect()).adjusted(-24, -24, 24, 24)).save(out + "/screenshot.png");
+            QMetaObject::invokeMethod(rig.window, "setExpanded", Q_ARG(QVariant, false));
+            rig.window->resize(window);
+
+            // The overview over the whole screen, every turn summed up.
             qputenv("DROVER_TEST_DIR", rig.dir.path().toUtf8());
             rig.timeline->setCacheDirectory(rig.dir.filePath("cache"));
             rig.timeline->setSummaryProgram(TESTS_DIR "/fake_claude.sh");
             rig.timeline->setSummaryModel("sonnet");
             rig.surface->setOverviewShown(true);
+            rig.window->resize(1920, 1080);
+            rig.surface->setFullscreen(true);
             rig.expand();
-            QTRY_VERIFY_WITH_TIMEOUT(rig.timeline->index(0).data(Timeline::PointsRole).toList().size() == 3, 10000);
-            QTest::qWait(800);
-            grab(panel.united(pillRect()).adjusted(-24, -24, 24, 24)).save(out + "/overview.png");
+            QTRY_VERIFY_WITH_TIMEOUT(rig.timeline->rowCount() == 4
+                && !rig.timeline->index(0).data(Timeline::PointsRole).toList().isEmpty()
+                && !rig.timeline->index(1).data(Timeline::PointsRole).toList().isEmpty()
+                && !rig.timeline->index(2).data(Timeline::PointsRole).toList().isEmpty(), 15000);
+            QTest::qWait(1500);
+            // The older turns opened, so their drawings show.
+            rig.find("overview")->setProperty("opened", QVariantMap{{"turn1", true}, {"turn2", true}});
+            QTest::qWait(1500);
+            const QRect screen(QPoint(0, 0), rig.window->size());
+            const QImage full = grab(screen);
+            const qreal d = rig.window->devicePixelRatio();
+            const auto scene = [&](const QString &name) {
+                auto *item = Rig::find(rig.window->contentItem(), name);
+                return item ? item->mapRectToScene(QRectF(0, 0, item->width(), item->height())) : QRectF();
+            };
+            const auto pixels = [&](const QRectF &r) {
+                return QRect((r.topLeft() * d).toPoint(), (r.size() * d).toSize());
+            };
+            QRectF summary = scene("prompt1");
+            for (int i = 0; i < 3; ++i)
+                summary = summary.united(scene(QString("summary1_0_%1").arg(i)));
+            QRectF metro = scene("outline");
+            metro.setHeight(qMin(metro.height(), 230.0));
+            // Close ups: the first turn summed up, and the metro line.
+            full.copy(pixels(summary.adjusted(-16, -16, 16, 16))).save(out + "/summary.png");
+            full.copy(pixels(metro.adjusted(-16, -12, 16, 0))).save(out + "/metro.png");
+
+            // A tour: the whole screen, the summaries, the metro line, back.
+            const QSize size(1280, 720);
+            const qreal aspect = qreal(size.width()) / size.height();
+            const auto framed = [&](QRectF r, qreal minWidth) {
+                r = r.adjusted(-24, -24, 24, 24);
+                qreal w = qMax(r.width(), minWidth), h = w / aspect;
+                if (h < r.height()) {
+                    h = r.height();
+                    w = h * aspect;
+                }
+                QRectF f(r.center().x() - w / 2, r.center().y() - h / 2, w, h);
+                f.moveLeft(qBound(0.0, f.left(), screen.width() - f.width()));
+                f.moveTop(qBound(0.0, f.top(), screen.height() - f.height()));
+                return f;
+            };
+            // Where, and how many frames (of 20 a second) it stays there.
+            const QList<QPair<QRectF, int>> stops = {
+                {QRectF(screen), 40}, {framed(summary, 0), 120}, {framed(metro, 660), 80}, {QRectF(screen), 20}};
+            const int move = 22;
+            QDir().mkpath(out + "/tour");
+            int n = 0;
+            const auto frame = [&](const QRectF &r) {
+                full.copy(pixels(r)).scaled(size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                    .save(QString("%1/tour/%2.png").arg(out).arg(n++, 4, 10, QChar('0')));
+            };
+            for (int k = 0; k < stops.size(); ++k) {
+                for (int i = 0; i < stops[k].second; ++i)
+                    frame(stops[k].first);
+                if (k + 1 == stops.size())
+                    break;
+                const QRectF a = stops[k].first, b = stops[k + 1].first;
+                for (int i = 1; i < move; ++i) {
+                    const qreal t = qreal(i) / move;
+                    const qreal e = t < 0.5 ? 4 * t * t * t : 1 - std::pow(-2 * t + 2, 3) / 2;
+                    frame(QRectF(a.x() + (b.x() - a.x()) * e, a.y() + (b.y() - a.y()) * e,
+                                 a.width() + (b.width() - a.width()) * e, a.height() + (b.height() - a.height()) * e));
+                }
+            }
             QMetaObject::invokeMethod(rig.window, "setExpanded", Q_ARG(QVariant, false));
+            rig.surface->setFullscreen(false);
             rig.surface->setOverviewShown(false);
             rig.timeline->setSummaryModel("");
-        }
+            rig.window->resize(window);
+            QTest::qWait(400);
 
-        // An agent's question on the stage, with the sheep in the pill.
-        {
-            rig.backend->setIndicator("sheep");
-            const QJsonObject question{{"hook_event_name", "PreToolUse"}, {"tool_name", "AskUserQuestion"},
-                {"tool_input", QJsonObject{{"questions", QJsonArray{QJsonObject{
-                    {"question", "Which database should the planting log use?"}, {"header", "Database"},
-                    {"multiSelect", false},
-                    {"options", QJsonArray{
-                        QJsonObject{{"label", "PostgreSQL (Recommended)"}, {"description", "what the other apps run on"}},
-                        QJsonObject{{"label", "SQLite"}, {"description", "one file, no server"}},
-                        QJsonObject{{"label", "MySQL"}, {"description", "the old server has it"}}}}}}}}}};
-            AskingHook hook(question, "w2:p1", rig.askServer, rig.asker.get());
-            auto *stage = rig.find("askStage");
-            QTRY_VERIFY(stage->isVisible());
-            QMetaObject::invokeMethod(rig.window, "toggle");
-            QTest::qWait(1200);
-            const QRect area = QRectF(stage->x(), stage->y(), stage->width(), stage->height()).toAlignedRect();
-            grab(area.united(pillRect()).adjusted(-24, -64, 24, 24)).save(out + "/stage.png");
+            // Another agent's question on the stage, its sheep on the fence.
+            {
+                const QJsonObject question{{"hook_event_name", "PreToolUse"}, {"tool_name", "AskUserQuestion"},
+                    {"tool_input", QJsonObject{{"questions", QJsonArray{QJsonObject{
+                        {"question", "Keep password login as a fallback for admins?"}, {"header", "Fallback"},
+                        {"multiSelect", false},
+                        {"options", QJsonArray{
+                            QJsonObject{{"label", "For 30 days (Recommended)"}, {"description", "until all admins switch"}},
+                            QJsonObject{{"label", "Passkeys only"}, {"description", "simplest, locks out old phones"}},
+                            QJsonObject{{"label", "Keep it forever"}, {"description", "nothing changes for anyone"}}}}}}}}}};
+                AskingHook hook(question, "w3:p1", rig.askServer, rig.asker.get());
+                auto *stage = rig.find("askStage");
+                QTRY_VERIFY(stage->isVisible());
+                QMetaObject::invokeMethod(rig.window, "toggle");
+                QTest::qWait(1200);
+                const QRect area = QRectF(stage->x(), stage->y(), stage->width(), stage->height()).toAlignedRect();
+                grab(area.united(pillRect()).adjusted(-24, -64, 24, 24)).save(out + "/stage.png");
+            }
+            QTest::qWait(400);
         }
-        QTest::qWait(400);
+        if (only == "stills")
+            return;
 
         // Each style, while one agent finishes, one gets to work and one asks.
         const QList<QStringList> story = {
@@ -660,7 +820,7 @@ private slots:
             {"done", "working", "done", "working"}, {"done", "blocked", "done", "working"},
         };
         for (const char *style : {"dots", "bars", "sheep"}) {
-            write(rig.dir.filePath("agents.json"), garden(story[0]));
+            write(rig.dir.filePath("agents.json"), shop(story[0]));
             rig.backend->setIndicator(style);
             QTest::qWait(2500);
             const QString frames = out + "/" + style;
@@ -670,7 +830,7 @@ private slots:
             clock.start();
             for (int step = 1; step <= story.size(); ++step) {
                 if (step < story.size())
-                    write(rig.dir.filePath("agents.json"), garden(story[step]));
+                    write(rig.dir.filePath("agents.json"), shop(story[step]));
                 while (clock.elapsed() < step * 2200) {
                     grab(pillRect().adjusted(-10, -10, 10, 10)).save(QString("%1/%2.png").arg(frames).arg(frame++, 4, 10, QChar('0')));
                     QTest::qWait(40);
