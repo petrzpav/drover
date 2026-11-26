@@ -1216,6 +1216,14 @@ private slots:
             const QVariantMap stop = metro.toMap();
             QCOMPARE(stop.value("version").toString(), QString("v0.9.0"));
             QCOMPARE(stop.value("reviews").toStringList(), QStringList{"Fable review of it"});
+            QVERIFY(stop.value("running").toStringList().isEmpty());
+            // What still runs in the background is on the line as well.
+            QVariantList withJob = stops;
+            withJob.append(QVariantMap{{"kind", "command"}, {"text", "Collect the prices"}, {"steps", QStringList{}},
+                                       {"state", "background"}, {"background", true}});
+            QMetaObject::invokeMethod(rig.find("overview"), "metroOf", Q_RETURN_ARG(QVariant, metro),
+                                      Q_ARG(QVariant, withJob), Q_ARG(QVariant, QVariantList{}));
+            QCOMPARE(metro.toMap().value("running").toStringList(), QStringList{"Collect the prices"});
             QVERIFY(stop.value("failed").toBool());
         }
 

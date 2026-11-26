@@ -140,7 +140,7 @@ Rectangle {
     Timer {
         interval: 330
         repeat: true
-        running: overview.visible && (overview.working || timeline.summarizing)
+        running: overview.visible && (overview.working || timeline.summarizing || timeline.backgroundRunning)
         onTriggered: overview.beat = !overview.beat
         onRunningChanged: overview.beat = false
     }
@@ -887,7 +887,7 @@ Rectangle {
     readonly property real metroIndent: metroMetrics.advanceWidth("00:00 ")
     function metroOf(items, batches) {
         let version = "", failed = false, lastWork = null
-        const reviews = []
+        const reviews = [], running = []
         for (let i = items.length - 1; i >= 0; --i) {
             const point = items[i]
             // The version a release, a tag or a "Release x.y" commit made.
@@ -895,8 +895,11 @@ Rectangle {
                 version = point.release
             if (point.kind === "interrupted")
                 failed = true
-            // The newest two side trips.
-            if (point.branch && reviews.length < 2 && reviews.indexOf(point.text) < 0)
+            // What still runs in the background, all of it; and the newest
+            // two side trips besides.
+            if (point.state === "background")
+                running.unshift(point.text)
+            else if (point.branch && reviews.length < 2 && reviews.indexOf(point.text) < 0)
                 reviews.unshift(point.text)
             if (lastWork === null && (point.kind === "command" || point.kind === "milestone"
                                       || point.kind === "tool" || point.kind === "web"))
@@ -909,7 +912,7 @@ Rectangle {
         failed = failed || (lastWork !== null && (lastWork.state === "failed" || lastWork.state === "denied"))
                  || (summary.length > 0 && summary[0].kind === "fail")
         const last = batches.length > 0 ? batches[batches.length - 1] : null
-        return { version: version, failed: failed, reviews: reviews,
+        return { version: version, failed: failed, reviews: reviews, running: running,
                  icon: last && last.icon && last.icon.length === 9 ? last.icon : [],
                  motifs: last && last.motifs ? last.motifs.filter(rows => rows.length === 9) : [],
                  headline: summary.length > 0 ? summary[0].text : "" }
@@ -1031,6 +1034,40 @@ Rectangle {
                                 list.positionViewAtEnd()
                             else
                                 list.positionViewAtIndex(entry.index, ListView.Beginning)
+                        }
+                    }
+                }
+                // What it left running in the background, the robot at work on it.
+                Repeater {
+                    model: entry.metro.running
+                    delegate: Item {
+                        required property string modelData
+                        required property int index
+                        objectName: "running" + entry.index + "_" + index
+                        x: overview.metroIndent
+                        width: stops.width - x
+                        height: runningText.implicitHeight
+                        Text {
+                            id: runningBranch
+                            text: "│ └"
+                            color: theme.accent
+                        }
+                        Text {
+                            id: runningRobot
+                            x: runningBranch.implicitWidth
+                            y: overview.beat ? -2 : 0
+                            text: overview.robot
+                            color: theme.accent
+                        }
+                        Text {
+                            id: runningText
+                            x: runningRobot.x + runningRobot.implicitWidth + 4
+                            width: parent.width - x
+                            text: modelData
+                            textFormat: Text.PlainText
+                            color: theme.accent
+                            elide: Text.ElideRight
+                            maximumLineCount: 1
                         }
                     }
                 }

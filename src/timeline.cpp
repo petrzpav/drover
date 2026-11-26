@@ -1533,9 +1533,14 @@ void Timeline::publish() {
     if (m_rows.size() != before)
         emit countChanged();
     const QString activity = m_parser.activity(), said = m_parser.lastSaid();
-    if (activity != m_activity || said != m_lastSaid) {
+    bool background = false;
+    for (const auto &turn : m_parser.turns())
+        for (const auto &item : turn.items)
+            background = background || item.state == QLatin1String("background");
+    if (activity != m_activity || said != m_lastSaid || background != m_backgroundRunning) {
         m_activity = activity;
         m_lastSaid = said;
+        m_backgroundRunning = background;
         emit progressChanged();
     }
     if (!m_child)

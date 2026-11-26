@@ -159,7 +159,8 @@ remembers the view, and `Alt+E` comes back to it from the editor.
 
 On the right, where the panel has room, the turns run as a metro line: a
 station per turn with its time and headline, a release an interchange
-(`◉═══ v0.9.0`), a subagent or review a branch that comes back (`└◇`), a
+(`◉═══ v0.9.0`), a subagent or review a branch that comes back (`└◇`), what
+still runs in the background a branch with the robot at work on it, a
 failed or interrupted turn a station out of service (`✗`), and at its end
 `▼ now`, with the robot bobbing on the station at work. A plain station
 shows a little 9×9 pixel picture the model draws with the turn's summary (a

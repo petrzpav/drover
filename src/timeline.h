@@ -144,6 +144,8 @@ class Timeline : public QAbstractListModel {
     Q_PROPERTY(QString lastSaid READ lastSaid NOTIFY progressChanged)
     // The model is summing up a turn right now.
     Q_PROPERTY(bool summarizing READ summarizing NOTIFY summarizingChanged)
+    // Something the agent started still runs in the background.
+    Q_PROPERTY(bool backgroundRunning READ backgroundRunning NOTIFY progressChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
 
 public:
@@ -168,6 +170,7 @@ public:
     QString activity() const { return m_activity; }
     QString lastSaid() const { return m_lastSaid; }
     bool summarizing() const { return !m_child.isNull(); }
+    bool backgroundRunning() const { return m_backgroundRunning; }
     int count() const { return m_rows.size(); }
 
     // Where Claude keeps its transcripts, ~/.claude/projects; tests use their own.
@@ -256,6 +259,7 @@ private:
     TimelineParser m_parser;
     QList<QVariantMap> m_rows;
     QString m_activity, m_lastSaid;
+    bool m_backgroundRunning = false;
     // Summaries.
     struct Batch {
         int to = 0;
