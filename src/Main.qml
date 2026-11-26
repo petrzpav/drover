@@ -194,7 +194,7 @@ ApplicationWindow {
         function onAnswerInPanel(pane) {
             backend.select(pane)
             // The question is in its terminal.
-            panel.showView("agent")
+            panel.answer()
             win.expanded = true
             win.focusForAgent()
         }

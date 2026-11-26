@@ -803,20 +803,58 @@ QString Timeline::summaryInstructions(bool more) {
               "Technical limits: at most %1 lines of at most %2 characters, no tabs; use any characters "
               "(box drawing, arrows, blocks, check marks). Mark parts with [ok]...[/] (good, green), "
               "[fail]...[/] (wrong, red), [warn]...[/] (needs attention) or [dim]...[/] (quiet); "
-              "nothing else is markup. Marks take no room on screen: line things up as if they weren't there.").arg(VisualLines).arg(VisualColumns);
+              "nothing else is markup; a mark ends with its line. Marks take no room on screen: line things up "
+              "as if they weren't there. No emoji: they don't line up.").arg(VisualLines).arg(VisualColumns);
 }
 
-// A drawing as the overview can show it: at most VisualLines lines of
-// VisualColumns characters (marks not counted), no tabs or control
-// characters, no empty lines around it.
-QString Timeline::fitVisual(const QString &visual) {
+namespace {
+
+// How many cells a character takes in a monospace font: two for wide East
+// Asian characters and emoji, one for the rest.
+int cellsOf(char32_t c) {
+    static const char32_t wide[][2] = {
+        {0x1100, 0x115F}, {0x231A, 0x231B}, {0x23E9, 0x23EC}, {0x23F0, 0x23F0}, {0x23F3, 0x23F3},
+        {0x25FD, 0x25FE}, {0x2614, 0x2615}, {0x2648, 0x2653}, {0x267F, 0x267F}, {0x2693, 0x2693},
+        {0x26A1, 0x26A1}, {0x26AA, 0x26AB}, {0x26BD, 0x26BE}, {0x26C4, 0x26C5}, {0x26CE, 0x26CE},
+        {0x26D4, 0x26D4}, {0x26EA, 0x26EA}, {0x26F2, 0x26F3}, {0x26F5, 0x26F5}, {0x26FA, 0x26FA},
+        {0x26FD, 0x26FD}, {0x2705, 0x2705}, {0x270A, 0x270B}, {0x2728, 0x2728}, {0x274C, 0x274C},
+        {0x274E, 0x274E}, {0x2753, 0x2755}, {0x2757, 0x2757}, {0x2795, 0x2797}, {0x27B0, 0x27B0},
+        {0x27BF, 0x27BF}, {0x2B1B, 0x2B1C}, {0x2B50, 0x2B50}, {0x2B55, 0x2B55}, {0x2E80, 0x303E},
+        {0x3041, 0x33FF}, {0x3400, 0x4DBF}, {0x4E00, 0x9FFF}, {0xA000, 0xA4CF}, {0xAC00, 0xD7A3},
+        {0xF900, 0xFAFF}, {0xFE30, 0xFE4F}, {0xFF00, 0xFF60}, {0xFFE0, 0xFFE6}, {0x1F300, 0x1F64F},
+        {0x1F680, 0x1F6FF}, {0x1F900, 0x1F9FF}, {0x1FA70, 0x1FAFF}, {0x20000, 0x3FFFD}};
+    for (const auto &range : wide)
+        if (c >= range[0] && c <= range[1])
+            return 2;
+    return 1;
+}
+
+const QRegularExpression &visualMark() {
     static const QRegularExpression mark("\\[(?:ok|fail|warn|dim|/)\\]");
+    return mark;
+}
+
+// The cells a line of a drawing takes, its marks not counted.
+int cellsOfLine(const QString &line) {
+    int cells = 0;
+    for (const char32_t c : QString(line).remove(visualMark()).toUcs4())
+        cells += cellsOf(c);
+    return cells;
+}
+
+} // namespace
+
+// A drawing as the overview can show it: at most VisualLines lines of
+// VisualColumns cells (marks not counted, a character never cut in half), no
+// tabs or control characters, no empty lines around it.
+QString Timeline::fitVisual(const QString &visual) {
+    const QRegularExpression &mark = visualMark();
     QStringList lines;
     for (QString line : QString(visual).replace('\t', QStringLiteral("    ")).split('\n')) {
         line.remove('\r');
         QString fitted;
         int shown = 0, at = 0;
-        while (at < line.size() && shown < VisualColumns) {
+        while (at < line.size()) {
             const auto found = mark.match(line, at, QRegularExpression::NormalMatch,
                                           QRegularExpression::AnchorAtOffsetMatchOption);
             if (found.hasMatch()) {
@@ -824,11 +862,23 @@ QString Timeline::fitVisual(const QString &visual) {
                 at = found.capturedEnd();
                 continue;
             }
-            const QChar c = line.at(at++);
-            if (c.category() == QChar::Other_Control)
+            char32_t c = line.at(at).unicode();
+            int units = 1;
+            if (line.at(at).isHighSurrogate() && at + 1 < line.size() && line.at(at + 1).isLowSurrogate()) {
+                c = QChar::surrogateToUcs4(line.at(at), line.at(at + 1));
+                units = 2;
+            } else if (line.at(at).isSurrogate()) {
+                ++at;
                 continue;
-            fitted += c;
-            ++shown;
+            }
+            const int cells = cellsOf(c);
+            if (shown + cells > VisualColumns)
+                break;
+            if (QChar::category(c) != QChar::Other_Control) {
+                fitted += line.mid(at, units);
+                shown += cells;
+            }
+            at += units;
         }
         lines << (fitted.trimmed().isEmpty() ? QString() : fitted);
         if (lines.size() == VisualLines + 2)
@@ -840,34 +890,33 @@ QString Timeline::fitVisual(const QString &visual) {
         lines.removeLast();
     lines = lines.mid(0, VisualLines);
 
-    // A box's right edge, a character or two off (models count poorly, and
-    // count the marks): lined up with where most of its lines end.
+    // A box's right edge a cell or two off (models count poorly, marks
+    // included): a content line (a space before its edge) is lined up with
+    // the box's last border line above it (a line, not a space, before its
+    // edge). Border lines stay as they are, and so does what isn't a box.
     static const QString edges = QStringLiteral("│┃║┤┨╣┐┓╗┘┛╝┼╋╬|");
-    const auto shown = [](const QString &line) { return QString(line).remove(mark).size(); };
-    QHash<int, int> ends;
-    for (const QString &line : lines)
-        if (!line.isEmpty() && edges.contains(line.back()))
-            ++ends[shown(line)];
-    int edge = -1, most = 0;
-    for (auto it = ends.cbegin(); it != ends.cend(); ++it)
-        if (it.value() > most || (it.value() == most && it.key() > edge))
-            edge = it.key(), most = it.value();
-    if (most >= 2) {
-        for (QString &line : lines) {
-            if (line.isEmpty() || !edges.contains(line.back()))
-                continue;
-            int off = shown(line) - edge;
-            if (off < 0 && off >= -3) {
-                line.insert(line.size() - 1, QString(-off, ' '));
-            } else if (off > 0 && off <= 3) {
-                // Only spaces give way, right before the edge.
-                int at = line.size() - 1;
-                while (off > 0 && at > 0 && line.at(at - 1) == ' ' && at - 1 > 0) {
-                    line.remove(at - 1, 1);
-                    --at;
-                    --off;
-                }
-            }
+    int border = -1;
+    for (QString &line : lines) {
+        const QString bare = QString(line).remove(mark).trimmed();
+        if (bare.size() < 2 || !edges.contains(bare.back())) {
+            border = -1;
+            continue;
+        }
+        if (bare.at(bare.size() - 2) != ' ') {
+            border = cellsOfLine(line);
+            continue;
+        }
+        const int off = cellsOfLine(line) - border;
+        if (border < 0 || off == 0 || qAbs(off) > 3)
+            continue;
+        const int edge = line.lastIndexOf(bare.back());
+        if (off < 0) {
+            line.insert(edge, QString(-off, ' '));
+        } else {
+            // Only spaces give way, right before the edge.
+            int at = edge;
+            for (int left = off; left > 0 && at > 1 && line.at(at - 1) == ' ' && line.at(at - 2) == ' '; --left)
+                line.remove(--at, 1);
         }
     }
     return lines.join('\n');

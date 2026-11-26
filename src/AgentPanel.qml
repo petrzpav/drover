@@ -87,8 +87,24 @@ Rectangle {
     // What the conversation side shows: "agent" (its terminal), "overview"
     // (its conversation in points) or "editor". The overview is kept for the
     // next start, and Alt+E comes back to it from the editor.
-    readonly property string view: backend.editing ? "editor" : surface.overviewShown ? "overview" : "agent"
+    readonly property string view: backend.editing ? "editor"
+                                 : surface.overviewShown && !answering ? "overview" : "agent"
+    // To the terminal for an agent's question, for now: the overview stays
+    // the view kept, and comes back with the next agent or view picked.
+    property bool answering: false
+    Connections {
+        target: backend
+        function onSelectedChanged() { panel.answering = false }
+    }
+    function answer() {
+        if (backend.editing)
+            backend.toggleEditor()
+        answering = true
+        if (attached && !helpVisible && !picker.open)
+            Qt.callLater(focusTerminal)
+    }
     function showView(name) {
+        answering = false
         if (name === "editor") {
             if (!backend.editing)
                 backend.toggleEditor()
@@ -626,7 +642,7 @@ Rectangle {
                     objectName: "overview"
                     anchors.fill: parent
                     visible: panel.view === "overview" && backend.selected !== ""
-                    onAnswerWanted: panel.showView("agent")
+                    onAnswerWanted: panel.answer()
                 }
 
                 // Why there is no terminal, in the terminal's middle: on a card

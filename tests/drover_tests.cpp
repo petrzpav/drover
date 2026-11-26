@@ -368,6 +368,13 @@ private slots:
         // A box's right edge lined up where most of its lines end, marks aside.
         QCOMPARE(Timeline::fitVisual("┌────┐\n│ [ok]a[/] │\n│ b  │\n│ c   │\n└────┘"),
                  QString("┌────┐\n│ [ok]a[/]  │\n│ b  │\n│ c  │\n└────┘"));
+        // Boxes of their own widths, each right, stay as they are.
+        const QString stages = "┌────────┐\n│ parse  │\n└────────┘\n   ↓\n┌──────────┐\n│ release  │\n└──────────┘";
+        QCOMPARE(Timeline::fitVisual(stages), stages);
+        // Wide characters take two cells; none is cut in half.
+        QCOMPARE(Timeline::fitVisual("┌──────┐\n│ ✅ ok │\n└──────┘"), QString("┌──────┐\n│ ✅ ok │\n└──────┘"));
+        const QString wide = Timeline::fitVisual(QString("x").repeated(Timeline::VisualColumns - 1) + "😀z");
+        QCOMPARE(wide, QString("x").repeated(Timeline::VisualColumns - 1));
         // The model is told the limits.
         QVERIFY(Timeline::summaryInstructions(false).contains(QString("at most %1 lines of at most %2 characters")
                                                                   .arg(Timeline::VisualLines).arg(Timeline::VisualColumns)));

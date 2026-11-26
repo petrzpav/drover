@@ -18,6 +18,8 @@ Rectangle {
     // What you were writing to each agent, by pane, while you look at another.
     property var drafts: ({})
     property string draftPane: ""
+    // What went out last, so only that is cleared once it went.
+    property string sending: ""
     readonly property bool asking: backend.selectedStatus === "blocked"
     // The agent asks something: its terminal is where to answer.
     signal answerWanted()
@@ -39,14 +41,17 @@ Rectangle {
         opened = next
     }
     function send() {
-        if (input.text.trim() !== "" && backend.busy === "" && !asking)
-            backend.sendPrompt(backend.selected, input.text.trim())
+        if (input.text.trim() !== "" && backend.busy === "" && !asking) {
+            sending = input.text.trim()
+            backend.sendPrompt(backend.selected, sending)
+        }
     }
-    // The agent's words as Markdown, safely: pictures as links (nothing is
-    // fetched), no raw HTML elements that load anything.
+    // The agent's words as Markdown, safely: outside code, no raw HTML (a
+    // "<" shows as itself) and no pictures (their alt text as a link), so
+    // nothing is ever fetched.
     function markdown(text) {
-        return text.replace(/!\[([^\]]*)\]\(([^)]*)\)/g, "[$1]($2)")
-                   .replace(/<\s*\/?\s*(img|iframe|object|embed|video|audio|source|link|style|script)\b[^>]*>/gi, "")
+        return text.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/).map((part, i) =>
+            i % 2 === 1 ? part : part.replace(/</g, "&lt;").replace(/!\[/g, "[")).join("")
     }
     function openLink(link) {
         if (/^https?:\/\//i.test(link))
@@ -137,7 +142,7 @@ Rectangle {
         function onPromptSent(pane, sent) {
             if (!sent)
                 return
-            if (pane === overview.draftPane)
+            if (pane === overview.draftPane && input.text.trim() === overview.sending)
                 input.clear()
             const next = Object.assign({}, overview.drafts)
             delete next[pane]
@@ -151,6 +156,7 @@ Rectangle {
             overview.drafts = next
             overview.draftPane = backend.selected
             input.text = next[backend.selected] || ""
+            input.cursorPosition = input.length
         }
     }
     Component.onCompleted: draftPane = backend.selected
@@ -197,20 +203,34 @@ Rectangle {
             Text {
                 id: pointText
                 objectName: "pointText" + row.point.id
+                // The agent's words, opened, are Markdown in an item of their own.
+                visible: !(row.open && row.point.kind === "said")
                 width: parent.width
-                textFormat: row.open && row.point.kind === "said" ? Text.MarkdownText : Text.StyledText
-                text: row.open && row.point.kind === "said" ? overview.markdown(row.point.text)
-                    : overview.escaped(row.point.text)
+                textFormat: Text.StyledText
+                text: overview.escaped(row.point.text)
                       + (row.more > 0 && row.point.kind !== "edit" && !row.open
                          ? "  <font color=\"" + Qt.tint(theme.background, overview.dim) + "\">+" + row.more + "</font>" : "")
                 color: row.failed ? theme.urgent
-                     : row.point.kind === "said" && !row.open ? Qt.alpha(theme.foreground, 0.8)
+                     : row.point.kind === "said" ? Qt.alpha(theme.foreground, 0.8)
                      : theme.foreground
-                linkColor: theme.accent
                 wrapMode: Text.Wrap
                 maximumLineCount: row.open ? 100000 : row.point.detail !== "" ? 1 : 2
                 elide: Text.ElideRight
-                onLinkActivated: (link) => overview.openLink(link)
+            }
+            Loader {
+                active: row.open && row.point.kind === "said"
+                visible: active
+                width: parent.width
+                sourceComponent: Text {
+                    objectName: "pointWords" + row.point.id
+                    width: body.width
+                    textFormat: Text.MarkdownText
+                    text: overview.markdown(row.point.text)
+                    color: theme.foreground
+                    linkColor: theme.accent
+                    wrapMode: Text.Wrap
+                    onLinkActivated: (link) => overview.openLink(link)
+                }
             }
             Text {
                 id: detailText
@@ -261,6 +281,7 @@ Rectangle {
             policy: ScrollBar.AsNeeded
             onPressedChanged: if (!pressed) list.follow = list.atYEnd
         }
+        HoverHandler { id: listHover }
 
         // At the end, the list stays there as points come; scrolled up, it
         // stays where you are.
@@ -286,13 +307,13 @@ Rectangle {
             width: ListView.view.width
             height: column.implicitHeight
             // The summary as shown: as it is when the turn comes into view,
-            // then held while the pointer is over this turn, so nothing moves
-            // under it.
+            // then held while the pointer is over the list and the turn in
+            // view, so nothing moves under the pointer.
             property var shownBatches: []
             property int shownCovered: 0
-            HoverHandler { id: turnHover }
-            Binding on shownBatches { value: turn.batches; when: !turnHover.hovered; restoreMode: Binding.RestoreNone }
-            Binding on shownCovered { value: turn.covered; when: !turnHover.hovered; restoreMode: Binding.RestoreNone }
+            readonly property bool held: listHover.hovered && y + height > list.contentY && y < list.contentY + list.height
+            Binding on shownBatches { value: turn.batches; when: !turn.held; restoreMode: Binding.RestoreNone }
+            Binding on shownCovered { value: turn.covered; when: !turn.held; restoreMode: Binding.RestoreNone }
             Component.onCompleted: {
                 shownBatches = batches
                 shownCovered = covered
