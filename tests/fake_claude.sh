@@ -20,4 +20,4 @@ if [ -e "$DROVER_TEST_DIR/fail" ]; then
   echo '{"type":"result","is_error":true,"result":"Usage limit reached"}'
   exit 1
 fi
-echo '{"type":"result","is_error":false,"result":"Here: {\"points\":[{\"text\":\"Done it\",\"kind\":\"done\",\"step\":2}],\"icon\":[\"..ffff..\",\".f....f.\",\"f.a..a.f\",\"f......f\",\"f.g..g.f\",\"f..gg..f\",\".f....f.\",\"..ffff..\"],\"motifs\":[[\"..aaaa..\",\".a....a.\",\".a....a.\",\"..aaaa..\",\"...aa...\",\"...aa...\",\"...aaa..\",\"...aa...\"]]}"}'
+echo '{"type":"result","is_error":false,"result":"Here: {\"points\":[{\"text\":\"Done it\",\"kind\":\"done\",\"step\":2}],\"icon\":[\"....w....\",\"..wwyww..\",\"wwyyyyyww\",\"yywyyywYY\",\"yyyywYYYY\",\"yyyywYYYY\",\"yyyywYYYY\",\"..yywYY..\",\"....w....\"],\"motifs\":[[\"..lll....\",\".lawwl...\",\"lawaaam..\",\"lwaaaam..\",\"laaaaAm..\",\".maaAm...\",\"..mmmmk..\",\"......mk.\",\".......kk\"]]}"}'

@@ -212,12 +212,13 @@ public:
     static constexpr int VisualLines = 10, VisualColumns = 64;
     // The icons' style: a summary whose icons are of an older one gets new
     // icons, drawn alone from its summary.
-    static constexpr int IconStyle = 2;
+    static constexpr int IconStyle = 3;
     static QString iconInstructions();
     static QString iconsOnlyInstructions();
     static QString fitVisual(const QString &visual);
-    // A turn's icon as the model drew it, 8 rows of 8 keys (. f a g r d),
-    // or none when it isn't one.
+    // A turn's icon as the model drew it: 9 rows of 9 keys (. empty; w l m
+    // k o light to dark; a g r y accent, green, red, yellow lit, A G R Y in
+    // shade), or none when it isn't one.
     static QStringList fitIcon(const QJsonValue &icon);
 
 signals:

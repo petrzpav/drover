@@ -281,30 +281,78 @@ Rectangle {
         onClicked: overview.focusInput()
     }
 
-    // A model's little 8×8 picture: each key a pixel two pixels wide, in the
-    // theme's colors.
+    // The icons' colors from the theme, by lightness first (themes recolor
+    // hues, so the art reads in grey too): w l m k o light to dark, from the
+    // theme's text and background; a g r y lit and A G R Y in shade, each
+    // lifted until it stands out on any background.
+    function iconPalette(background, foreground, accent, green, red, yellow) {
+        const hex = s => [1, 3, 5].map(i => parseInt(String(s).slice(i, i + 2), 16))
+        const mix = (a, b, t) => a.map((v, i) => Math.floor(v + (b[i] - v) * t + .5))
+        const lum = c => {
+            const f = v => (v /= 255) <= .04045 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4)
+            return .2126 * f(c[0]) + .7152 * f(c[1]) + .0722 * f(c[2])
+        }
+        const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05) }
+        const str = c => "#" + c.map(v => v.toString(16).padStart(2, "0")).join("")
+        const bg = hex(background), fg = hex(foreground)
+        const dark = lum(bg) < lum(fg)
+        const paper = mix(dark ? fg : bg, [255, 255, 255], .6)
+        const ink = mix(dark ? bg : fg, [0, 0, 0], .5)
+        const floor = dark ? bg : ink
+        const lift = (c, need) => {
+            for (let n = 0; n <= 20; ++n) {
+                const out = mix(c, paper, n / 20)
+                if (contrast(out, floor) >= need)
+                    return out
+            }
+            return paper
+        }
+        const keys = { w: paper, l: mix(paper, ink, .2), m: mix(paper, ink, .42), k: lift(mix(paper, ink, .62), 3), o: ink }
+        for (const [key, color] of [["a", accent], ["g", green], ["r", red], ["y", yellow]]) {
+            keys[key] = lift(hex(color), 3.5)
+            keys[key.toUpperCase()] = lift(mix(keys[key], ink, .4), 2.2)
+        }
+        for (const key in keys)
+            keys[key] = str(keys[key])
+        return keys
+    }
+    readonly property var iconColors: {
+        const palette = theme.terminalPalette
+        return iconPalette(theme.background, theme.foreground, theme.accent, theme.success, theme.urgent,
+                           palette.length > 3 ? palette[3] : theme.accent)
+    }
+
+    // A model's little 9×9 picture: each key a pixel two pixels wide, in the
+    // colors above, with drover's own dark contour a pixel wide around it.
     component PixelIcon: Canvas {
         id: pixels
         property var rows: []
-        width: 16
-        height: 16
+        width: 20
+        height: 20
+        smooth: false
+        antialiasing: false
         onRowsChanged: requestPaint()
         Connections {
-            target: theme
-            function onChanged() { pixels.requestPaint() }
+            target: overview
+            function onIconColorsChanged() { pixels.requestPaint() }
         }
         onPaint: {
             const context = getContext("2d")
             context.clearRect(0, 0, width, height)
-            const colors = { f: theme.foreground, a: theme.accent, g: theme.success, r: theme.urgent,
-                             d: Qt.tint(theme.background, overview.dim) }
+            const colors = overview.iconColors
+            // The contour: every filled pixel, a pixel wider all round, in ink.
+            context.fillStyle = colors.o
+            for (let y = 0; y < rows.length; ++y)
+                for (let x = 0; x < rows[y].length; ++x)
+                    if (rows[y][x] !== "." && colors[rows[y][x]])
+                        context.fillRect(2 * x, 2 * y, 4, 4)
             for (let y = 0; y < rows.length; ++y)
                 for (let x = 0; x < rows[y].length; ++x) {
                     const key = rows[y][x]
                     if (key === "." || !colors[key])
                         continue
                     context.fillStyle = colors[key]
-                    context.fillRect(x * 2, y * 2, 2, 2)
+                    context.fillRect(1 + 2 * x, 1 + 2 * y, 2, 2)
                 }
         }
     }
@@ -862,8 +910,8 @@ Rectangle {
                  || (summary.length > 0 && summary[0].kind === "fail")
         const last = batches.length > 0 ? batches[batches.length - 1] : null
         return { version: version, failed: failed, reviews: reviews,
-                 icon: last && last.icon && last.icon.length === 8 ? last.icon : [],
-                 motifs: last && last.motifs ? last.motifs.filter(rows => rows.length === 8) : [],
+                 icon: last && last.icon && last.icon.length === 9 ? last.icon : [],
+                 motifs: last && last.motifs ? last.motifs.filter(rows => rows.length === 9) : [],
                  headline: summary.length > 0 ? summary[0].text : "" }
     }
 
@@ -917,7 +965,7 @@ Rectangle {
                     id: station
                     objectName: "station" + entry.index
                     width: parent.width
-                    height: stationText.implicitHeight + 4
+                    height: Math.max(stationText.implicitHeight + 4, 22)
                     HoverHandler { id: stationHover }
                     // The station in view, marked.
                     Rectangle {
@@ -940,10 +988,10 @@ Rectangle {
                         id: stationIcon
                         objectName: "stationIcon" + entry.index
                         rows: entry.metro.icon
-                        visible: rows.length === 8 && !stationMark.busy && !entry.metro.failed && entry.metro.version === ""
-                        // Centred on the line.
-                        x: overview.metroIndent + metroMetrics.advanceWidth("│") / 2 - width / 2
-                        y: (parent.height - height) / 2
+                        visible: rows.length === 9 && !stationMark.busy && !entry.metro.failed && entry.metro.version === ""
+                        // Centred on the line, on whole pixels.
+                        x: Math.round(overview.metroIndent + metroMetrics.advanceWidth("│") / 2 - width / 2)
+                        y: Math.round((parent.height - height) / 2)
                     }
                     Text {
                         id: stationMark
@@ -960,7 +1008,7 @@ Rectangle {
                     Text {
                         id: stationText
                         objectName: "stationText" + entry.index
-                        x: overview.metroIndent + Math.max(metroMetrics.advanceWidth("● "), 20)
+                        x: overview.metroIndent + Math.max(metroMetrics.advanceWidth("● "), 24)
                         y: 2
                         width: parent.width - x
                         text: entry.metro.version !== "" ? "═══ " + entry.metro.version
@@ -1004,7 +1052,7 @@ Rectangle {
                 // the turn touched beside it.
                 Item {
                     width: stops.width
-                    height: Math.max(lineText.implicitHeight, entry.metro.motifs.length > 0 ? 18 : 0)
+                    height: Math.max(lineText.implicitHeight, entry.metro.motifs.length > 0 ? 22 : 0)
                     Text {
                         id: lineText
                         x: overview.metroIndent
@@ -1013,9 +1061,9 @@ Rectangle {
                         color: overview.dim
                     }
                     Row {
-                        x: overview.metroIndent + Math.max(metroMetrics.advanceWidth("● "), 20)
+                        x: Math.round(overview.metroIndent + Math.max(metroMetrics.advanceWidth("● "), 22))
                         anchors.verticalCenter: parent.verticalCenter
-                        spacing: 6
+                        spacing: 4
                         Repeater {
                             model: entry.metro.motifs
                             delegate: PixelIcon {

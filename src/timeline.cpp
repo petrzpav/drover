@@ -989,15 +989,33 @@ QString Timeline::readSummaryModel(const QString &configFile) {
 // The icons, as the model is to draw them.
 QString Timeline::iconInstructions() {
     return QStringLiteral(
-        "Icons, as \"icon\":[\"..ffff..\",\".f....f.\",\"f.a..a.f\",\"f......f\",\"f.g..g.f\",\"f..gg..f\",\".f....f.\",\"..ffff..\"] and "
-        "\"motifs\":[[8 such strings],[8 such strings]].\n"
-        "Icon: a tiny 8 by 8 pixel picture of what the turn was about, for its station on a timeline: a "
+        "Icons, as \"icon\":[9 strings of 9 characters] and \"motifs\":[[9 such strings],[9 such strings]].\n"
+        "Icon: a tiny 9 by 9 pixel-art picture of what the turn was about, for its station on a timeline: a "
         "rocket for a release, a magnifier for a review, a bug for a fix, a gear, a page, a chart, a sheep, "
-        "whatever fits; simple and readable at 16 pixels. Each character is a pixel: . empty, f the text "
-        "color, a the accent, g green, r red, d quiet grey.\n"
+        "whatever fits. It is shown 18 pixels tall beside a line of text.\n"
         "Motifs: one or two more such tiny pictures of other things the turn touched or met (a key, an "
-        "envelope, a window, ice for a freeze, a package, a test tube), shown beside the timeline after "
-        "the station; an array of icons, each an array of 8 strings; [] when nothing fits.\n");
+        "envelope, a window, ice for a freeze, a package, a test tube), shown beside the timeline after the "
+        "station; [] when nothing fits.\n"
+        "Each character is a pixel: . empty; neutrals from light to dark: w white, l light grey, m mid grey, "
+        "k dark grey, o ink (near black); colours, lowercase lit and UPPERCASE the same colour in shade: a/A "
+        "accent, g/G green, r/R red, y/Y yellow.\n"
+        "Style: Draw one recognisable object with one unmistakable feature (a rocket's fins, a magnifier's "
+        "open lens, a sheep's wool and feet). Build a bold silhouette first, centred and filling most of the "
+        "9x9 grid; drover adds the dark outline, so draw none and leave no margin. Main masses at least 2 "
+        "pixels thick; 1-pixel parts only for legs, teeth, antennae or a glint, touching the body; holes that "
+        "matter (a lens, a gear's bore) at least 2 pixels wide. Then shade: light comes from the top-left, so "
+        "upper and left edges take the lighter key (w, l or a lowercase colour), the lower-right face the "
+        "darker (m, k or the uppercase colour) in one connected patch. Themes recolour hues, so neighbouring "
+        "areas must differ in lightness, not only in hue. Use o only inside the shape: seams, eyes, spots. "
+        "Use 2 to 5 keys besides '.', at most one colour family, where it says what the thing is. No "
+        "dithering, no letters, no pixels floating free.\n"
+        "Examples:\n"
+        "rocket: [\"......rrR\",\"....wwlrR\",\"...wwawlR\",\"..wwaAwl.\",\"r.wwwwlm.\",\"rrlwwlm..\",\".RRllm...\",\"yw.RR....\",\"ry..R....\"]\n"
+        "magnifier: [\"..mmm....\",\".mwwwm...\",\"mw...mk..\",\"mw...mk..\",\"mw...mk..\",\".mwmmk...\",\"..kkkkm..\",\"......amA\",\".......AA\"]\n"
+        "bug: [\"..k...k..\",\"...kkk...\",\"..rrorr..\",\"krwrorrRk\",\".rrrorrR.\",\"krororoRk\",\".rrrorRR.\",\"k.rRoRR.k\",\"...RoR...\"]\n"
+        "gear: [\"....w....\",\".w.wwl.l.\",\"..wlllm..\",\".wl...mm.\",\"wll...mmk\",\".ll...mk.\",\"..lmmmk..\",\".l.mmk.k.\",\"....k....\"]\n"
+        "package: [\"....w....\",\"..wwyww..\",\"wwyyyyyww\",\"yywyyywYY\",\"yyyywYYYY\",\"yyyywYYYY\",\"yyyywYYYY\",\"..yywYY..\",\"....w....\"]\n"
+        "sheep: [\".........\",\".ww.ww...\",\"wwwwwww..\",\"wwwwwkkk.\",\"wwwwlkwkk\",\"lwwllkkk.\",\".lllllm..\",\".k..k....\",\".k..k....\"]\n");
 }
 
 QString Timeline::iconsOnlyInstructions() {
@@ -1085,7 +1103,7 @@ int cellsOfLine(const QString &line) {
 // VisualColumns cells (marks not counted, a character never cut in half), no
 // tabs or control characters, no empty lines around it.
 QStringList Timeline::fitIcon(const QJsonValue &icon) {
-    static const QRegularExpression row("^[.fagrd]{1,8}$");
+    static const QRegularExpression row("^[.wlmkoaAgGrRyY]{1,9}$");
     QStringList rows;
     // Its rows, or one string of rows on lines of their own.
     QJsonArray lines = icon.toArray();
@@ -1096,14 +1114,14 @@ QStringList Timeline::fitIcon(const QJsonValue &icon) {
         const QString line = value.toString().trimmed();
         if (!row.match(line).hasMatch())
             return {};
-        rows << line.leftJustified(8, '.');
+        rows << line.leftJustified(9, '.');
     }
-    // A row or three short (models count poorly): empty rows make it 8.
-    if (rows.size() < 5 || rows.size() > 8)
+    // A row or three short (models count poorly): empty rows make it 9.
+    if (rows.size() < 6 || rows.size() > 9)
         return {};
-    while (rows.size() < 8)
-        rows << QStringLiteral("........");
-    if (rows.join(QString()).count('.') == 64)
+    while (rows.size() < 9)
+        rows << QStringLiteral(".........");
+    if (rows.join(QString()).count('.') == 81)
         return {};
     return rows;
 }
@@ -1210,8 +1228,12 @@ QHash<QString, QList<Timeline::Batch>> Timeline::readCache(const QString &cache,
         for (const QJsonValue &motif : object.value("motifs").toArray())
             if (const QStringList rows = fitIcon(motif); !rows.isEmpty() && motifs.size() < 2)
                 motifs << QVariant(rows);
+        // Icons of an older style mean other keys: none until drawn again.
+        const int style = object.value("iconStyle").toInt(1);
+        if (style < IconStyle)
+            motifs.clear();
         summaries.insert(it.key(), {{object.value("to").toInt(), object.value("points").toArray().toVariantList(),
-                                     fitIcon(object.value("icon")), motifs, object.value("iconStyle").toInt(1)}});
+                                     style < IconStyle ? QStringList() : fitIcon(object.value("icon")), motifs, style}});
     }
     return summaries;
 }

@@ -617,12 +617,12 @@ private slots:
                                        "calendar    [fail]January – March only[/] → plan from soil tests\n"
                                        "sowing      [ok]April 12[/]   soil tests [ok]✓[/]   beds.md [ok]✓[/]"}}};
             // A seedling for the station.
-            const QJsonArray seedling{"...gg...", "..g..g..", "...gg.g.", ".gg.g...", "g...g...", "....g...", "..dddd..", ".dddddd."};
+            const QJsonArray seedling{"...gg....", "..gGg.gg.", "..gGgggG.", "...gGgG..", "....m....", "....m....", "..yyyyy..", "..YyyyY..", "...YYY..."};
             write(rig.dir.filePath("reply.json"), QJsonDocument(QJsonObject{{"type", "result"}, {"is_error", false},
                 {"result", QString::fromUtf8(QJsonDocument(QJsonObject{{"points", points}, {"icon", seedling},
                     // A calendar and a watering can beside the line.
-                    {"motifs", QJsonArray{QJsonArray{"ffffffff", "f.r..r.f", "ffffffff", "f......f", "f.d.d.df", "f......f", "f.d.d.af", "ffffffff"},
-                                          QJsonArray{"........", "....aa..", "...a..a.", "aaaaaa..", ".affff..", ".affff.a", ".afffffa", "..ffff.."}}}})
+                    {"motifs", QJsonArray{QJsonArray{"wwwwwwwww", "wrrrrrrrw", "wlllllllw", "wl.l.l.lw", "wlllllllw", "wl.l.l.lw", "wlllllllw", "mmmmmmmmm", "........."},
+                                          QJsonArray{"....aa...", "...a..a..", "aaaaaa...", ".aAAAAa..", ".aAAAAa.a", ".aAAAAaa.", "..AAAA...", ".........", "........."}}}})
                     .toJson(QJsonDocument::Compact))}})
                 .toJson(QJsonDocument::Compact));
             qputenv("DROVER_TEST_DIR", rig.dir.path().toUtf8());
