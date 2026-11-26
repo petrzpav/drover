@@ -42,7 +42,7 @@ who needs you, and you answer them without leaving what you're doing.
 ## Install
 
 ```sh
-sudo pacman -U https://github.com/petrzpav/drover/releases/download/v0.9.0/drover-0.9.0-1-x86_64.pkg.tar.zst
+sudo pacman -U https://github.com/petrzpav/drover/releases/download/v0.9.1/drover-0.9.1-1-x86_64.pkg.tar.zst
 ```
 
 It needs `herdr`; `fresh-editor` (AUR) adds the editor. To build from source,
