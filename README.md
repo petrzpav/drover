@@ -165,8 +165,12 @@ pointer is off the overview, so nothing moves under it; the newest points
 show as they come until the next batch (four more points and a minute later,
 or the turn's end). Each batch is made once and kept in
 `~/.cache/drover/summaries`. A short turn needs no summary, and an older one
-gets it when you scroll to it. After a failed call or a usage limit,
-summaries rest for a while; `summary = off` in the config turns them off.
+gets it when you scroll to it. When a picture explains a turn better than
+words (a flow of steps, a tree of files, numbers before and after, a little
+chart), the model draws one under a point, in plain text of at most 10 lines
+of 64 characters, colored where it matters. After a failed call or a usage
+limit, summaries rest for a while; `summary = off` in the config turns them
+off.
 
 The points themselves: commands in a row become one line, with the number of
 the others after it. A failed or refused command gets a red line of its own,
@@ -177,14 +181,15 @@ answers, what you typed while it worked, what it said and Claude's recaps are
 there as well. Reading and searching are left out.
 
 Click a point to open it where it is: the agent's words in full (as
-Markdown), the error, every command of a run, or under a summary point the
-points it sums up. The list stays at the bottom as the agent goes on, unless
+Markdown, its pictures as links, nothing fetched), the error, every command
+of a run, or under a summary point the points it sums up. The list stays at the bottom as the agent goes on, unless
 you scrolled up.
 
 The field below sends the agent a message (`herdr agent prompt`): `Enter`
 sends it, `Shift+Enter` starts a new line. An agent at work takes it as it
-goes on, as when typed; not while it asks you something, and not over a draft
-in its own prompt.
+goes on, as when typed; not over a draft in its own prompt, and not while it
+asks you something: then the field says so, and a click on it takes you to the
+terminal. Each agent keeps its own draft.
 
 Any other key goes to the agent, as in herdr. In the agent view, `Ctrl+B` is
 drover's, not Claude's (run in the background); the editor and the shell keep

@@ -193,6 +193,8 @@ ApplicationWindow {
         // An answer from the stage couldn't be typed: the agent, in the panel.
         function onAnswerInPanel(pane) {
             backend.select(pane)
+            // The question is in its terminal.
+            panel.showView("agent")
             win.expanded = true
             win.focusForAgent()
         }

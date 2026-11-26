@@ -167,6 +167,10 @@ public:
     Q_INVOKABLE void want(qint64 serial);
     // The instructions the model gets.
     static QString summaryInstructions(bool more);
+    // A summary point may come with a drawing in plain text: its limits,
+    // and the drawing cut to them.
+    static constexpr int VisualLines = 10, VisualColumns = 64;
+    static QString fitVisual(const QString &visual);
 
 signals:
     void sessionChanged();

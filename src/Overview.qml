@@ -15,6 +15,12 @@ Rectangle {
     readonly property bool claude: backend.selectedKind === "claude"
     // Opened points: "prompt3", "point12" (by id), "batch3_0" (a summary's points).
     property var opened: ({})
+    // What you were writing to each agent, by pane, while you look at another.
+    property var drafts: ({})
+    property string draftPane: ""
+    readonly property bool asking: backend.selectedStatus === "blocked"
+    // The agent asks something: its terminal is where to answer.
+    signal answerWanted()
     readonly property int readable: 900
 
     color: theme.background
@@ -23,6 +29,8 @@ Rectangle {
         input.forceActiveFocus()
     }
     function toggle(key) {
+        // What opens stays where it is, rather than the list following its end.
+        list.follow = false
         const next = Object.assign({}, opened)
         if (next[key])
             delete next[key]
@@ -31,11 +39,42 @@ Rectangle {
         opened = next
     }
     function send() {
-        if (input.text.trim() !== "" && backend.busy === "")
+        if (input.text.trim() !== "" && backend.busy === "" && !asking)
             backend.sendPrompt(backend.selected, input.text.trim())
+    }
+    // The agent's words as Markdown, safely: pictures as links (nothing is
+    // fetched), no raw HTML elements that load anything.
+    function markdown(text) {
+        return text.replace(/!\[([^\]]*)\]\(([^)]*)\)/g, "[$1]($2)")
+                   .replace(/<\s*\/?\s*(img|iframe|object|embed|video|audio|source|link|style|script)\b[^>]*>/gi, "")
+    }
+    function openLink(link) {
+        if (/^https?:\/\//i.test(link))
+            Qt.openUrlExternally(link)
     }
     function escaped(text) {
         return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    }
+    // A summary's drawing as styled text: its spaces kept, its marks
+    // ([ok] [fail] [warn] [dim] … [/]) in the theme's colors.
+    function drawing(text) {
+        const colors = { ok: theme.success, fail: theme.urgent, warn: theme.accent, dim: Qt.tint(theme.background, dim) }
+        return text.split("\n").map(line => {
+            let out = "", open = 0
+            for (const part of line.split(/(\[(?:ok|fail|warn|dim|\/)\])/)) {
+                const mark = part.match(/^\[(ok|fail|warn|dim|\/)\]$/)
+                if (!mark) {
+                    out += escaped(part).replace(/ /g, "&nbsp;")
+                } else if (mark[1] !== "/") {
+                    out += "<font color=\"" + colors[mark[1]] + "\">"
+                    ++open
+                } else if (open > 0) {
+                    out += "</font>"
+                    --open
+                }
+            }
+            return out + "</font>".repeat(open)
+        }).join("<br>")
     }
     function glyph(kind) {
         switch (kind) {
@@ -95,15 +134,35 @@ Rectangle {
     }
     Connections {
         target: backend
-        function onPromptSent(sent) {
-            if (sent)
+        function onPromptSent(pane, sent) {
+            if (!sent)
+                return
+            if (pane === overview.draftPane)
                 input.clear()
+            const next = Object.assign({}, overview.drafts)
+            delete next[pane]
+            overview.drafts = next
+        }
+        // Each agent keeps its own draft.
+        function onSelectedChanged() {
+            const next = Object.assign({}, overview.drafts)
+            if (overview.draftPane !== "")
+                next[overview.draftPane] = input.text
+            overview.drafts = next
+            overview.draftPane = backend.selected
+            input.text = next[backend.selected] || ""
         }
     }
+    Component.onCompleted: draftPane = backend.selected
 
-    // Nothing moves under the pointer: a summary takes the place of its
-    // points once the pointer has left the overview.
-    HoverHandler { id: hover }
+    // Clicks and the wheel stay here, never reaching the terminal beneath;
+    // a click on nothing in particular goes to the message field.
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.AllButtons
+        onWheel: (wheel) => wheel.accepted = true
+        onClicked: overview.focusInput()
+    }
 
     // One point: its mark, its text in two lines at most, and opened, all of
     // it: the whole text (the agent's words as Markdown), its answer or
@@ -140,7 +199,7 @@ Rectangle {
                 objectName: "pointText" + row.point.id
                 width: parent.width
                 textFormat: row.open && row.point.kind === "said" ? Text.MarkdownText : Text.StyledText
-                text: row.open && row.point.kind === "said" ? row.point.text
+                text: row.open && row.point.kind === "said" ? overview.markdown(row.point.text)
                     : overview.escaped(row.point.text)
                       + (row.more > 0 && row.point.kind !== "edit" && !row.open
                          ? "  <font color=\"" + Qt.tint(theme.background, overview.dim) + "\">+" + row.more + "</font>" : "")
@@ -151,7 +210,7 @@ Rectangle {
                 wrapMode: Text.Wrap
                 maximumLineCount: row.open ? 100000 : row.point.detail !== "" ? 1 : 2
                 elide: Text.ElideRight
-                onLinkActivated: (link) => Qt.openUrlExternally(link)
+                onLinkActivated: (link) => overview.openLink(link)
             }
             Text {
                 id: detailText
@@ -227,11 +286,13 @@ Rectangle {
             width: ListView.view.width
             height: column.implicitHeight
             // The summary as shown: as it is when the turn comes into view,
-            // then held while the pointer is over the overview.
+            // then held while the pointer is over this turn, so nothing moves
+            // under it.
             property var shownBatches: []
             property int shownCovered: 0
-            Binding on shownBatches { value: turn.batches; when: !hover.hovered; restoreMode: Binding.RestoreNone }
-            Binding on shownCovered { value: turn.covered; when: !hover.hovered; restoreMode: Binding.RestoreNone }
+            HoverHandler { id: turnHover }
+            Binding on shownBatches { value: turn.batches; when: !turnHover.hovered; restoreMode: Binding.RestoreNone }
+            Binding on shownCovered { value: turn.covered; when: !turnHover.hovered; restoreMode: Binding.RestoreNone }
             Component.onCompleted: {
                 shownBatches = batches
                 shownCovered = covered
@@ -318,8 +379,9 @@ Rectangle {
                                 required property int index
                                 objectName: "summary" + turn.serial + "_" + batch.index + "_" + index
                                 width: batch.width
-                                height: summaryText.implicitHeight + 6
+                                height: summaryBody.implicitHeight + 6
                                 radius: theme.radius
+                                readonly property string visual: modelData.visual || ""
                                 color: batch.open || summaryHover.hovered ? Qt.alpha(theme.foreground, 0.05) : "transparent"
                                 HoverHandler { id: summaryHover }
                                 Text {
@@ -329,17 +391,52 @@ Rectangle {
                                     text: overview.summaryGlyph(summary.modelData.kind)
                                     color: overview.summaryTint(summary.modelData.kind)
                                 }
-                                Text {
-                                    id: summaryText
+                                Column {
+                                    id: summaryBody
                                     x: 32
                                     y: 3
                                     width: parent.width - 32 - 8
-                                    text: summary.modelData.text
-                                    textFormat: Text.PlainText
-                                    color: summary.modelData.kind === "fail" ? theme.urgent : theme.foreground
-                                    wrapMode: Text.Wrap
-                                    maximumLineCount: 2
-                                    elide: Text.ElideRight
+                                    spacing: 6
+                                    Text {
+                                        id: summaryText
+                                        width: parent.width
+                                        text: summary.modelData.text
+                                        textFormat: Text.PlainText
+                                        color: summary.modelData.kind === "fail" ? theme.urgent : theme.foreground
+                                        wrapMode: Text.Wrap
+                                        maximumLineCount: 2
+                                        elide: Text.ElideRight
+                                    }
+                                    // The model's drawing, when it made one: as drawn,
+                                    // sideways scrolling when wider than the overview.
+                                    Rectangle {
+                                        objectName: "visual" + turn.serial + "_" + batch.index + "_" + summary.index
+                                        visible: summary.visual !== ""
+                                        width: parent.width
+                                        height: visualText.implicitHeight + 16
+                                        radius: theme.radius
+                                        color: Qt.alpha(theme.foreground, 0.04)
+                                        border.width: 1
+                                        border.color: overview.line
+                                        Flickable {
+                                            anchors.fill: parent
+                                            anchors.margins: 8
+                                            clip: true
+                                            contentWidth: visualText.implicitWidth
+                                            contentHeight: visualText.implicitHeight
+                                            flickableDirection: Flickable.HorizontalFlick
+                                            boundsBehavior: Flickable.StopAtBounds
+                                            interactive: contentWidth > width
+                                            Text {
+                                                id: visualText
+                                                objectName: "visualText" + turn.serial + "_" + batch.index + "_" + summary.index
+                                                text: summary.visual !== "" ? overview.drawing(summary.visual) : ""
+                                                textFormat: Text.StyledText
+                                                color: theme.foreground
+                                                wrapMode: Text.NoWrap
+                                            }
+                                        }
+                                    }
                                 }
                                 TapHandler {
                                     cursorShape: Qt.PointingHandCursor
@@ -425,7 +522,8 @@ Rectangle {
                     objectName: "overviewInput"
                     wrapMode: TextEdit.Wrap
                     color: theme.foreground
-                    placeholderText: qsTr("Message to the agent · Enter sends, Shift+Enter starts a new line")
+                    placeholderText: overview.asking ? qsTr("It asks you something: answer it in its terminal (Ctrl+Alt+B)")
+                                                     : qsTr("Message to the agent · Enter sends, Shift+Enter starts a new line")
                     placeholderTextColor: overview.dim
                     selectionColor: Qt.alpha(theme.foreground, 0.35)
                     selectedTextColor: theme.foreground
@@ -433,7 +531,7 @@ Rectangle {
                     padding: 0
                     topPadding: 4
                     bottomPadding: 4
-                    enabled: backend.selected !== ""
+                    enabled: backend.selected !== "" && !overview.asking
                     Keys.onReturnPressed: (event) => {
                         if (event.modifiers & Qt.ShiftModifier)
                             event.accepted = false
@@ -452,9 +550,18 @@ Rectangle {
                 icon: ""
                 hint: qsTr("Send it to the agent")
                 shortcut: "Enter"
-                enabled: input.text.trim() !== "" && backend.selected !== ""
+                enabled: input.text.trim() !== "" && backend.selected !== "" && !overview.asking
+                         && (backend.busy === "" || backend.busy === "prompt")
                 busy: backend.busy === "prompt"
                 onClicked: overview.send()
+            }
+            // While it asks, a click here goes to its terminal.
+            MouseArea {
+                anchors.fill: parent
+                z: 2
+                enabled: overview.asking
+                cursorShape: Qt.PointingHandCursor
+                onClicked: overview.answerWanted()
             }
         }
     }

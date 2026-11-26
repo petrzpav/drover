@@ -609,7 +609,11 @@ private slots:
                             {"kind", "done"}, {"step", 9}},
                 QJsonObject{{"text", "Last year's planting calendar ends in March, so the plan rests on the soil tests"},
                             {"kind", "fail"}, {"step", 3}},
-                QJsonObject{{"text", "Committed and pushed as \"Plan the tomato beds\""}, {"kind", "ship"}, {"step", 8}}};
+                QJsonObject{{"text", "Committed and pushed as \"Plan the tomato beds\""}, {"kind", "ship"}, {"step", 8},
+                            {"visual", "south bed   T · B · T · B · T · B · T      T tomatoes\n"
+                                       "            ─────────────────────────      B basil\n"
+                                       "calendar    [fail]January – March only[/] → plan from soil tests\n"
+                                       "sowing      [ok]April 12[/]   soil tests [ok]✓[/]   beds.md [ok]✓[/]"}}};
             write(rig.dir.filePath("reply.json"), QJsonDocument(QJsonObject{{"type", "result"}, {"is_error", false},
                 {"result", QString::fromUtf8(QJsonDocument(QJsonObject{{"points", points}}).toJson(QJsonDocument::Compact))}})
                 .toJson(QJsonDocument::Compact));
@@ -945,6 +949,22 @@ private slots:
         QCOMPARE(said->property("textFormat").toInt(), int(Qt::MarkdownText));
         QTRY_VERIFY(input->hasActiveFocus());
 
+        // The agent's words fetch nothing: pictures become links.
+        QVariant safe;
+        QMetaObject::invokeMethod(overview, "markdown", Q_RETURN_ARG(QVariant, safe),
+                                  Q_ARG(QVariant, "a ![map](http://x/m.png) <img src=\"http://x/i.png\"> b"));
+        QCOMPARE(safe.toString(), QString("a [map](http://x/m.png)  b"));
+
+        // The opened point stays in place, rather than the list following its end.
+        QVERIFY(!rig.find("overviewList")->property("follow").toBool());
+
+        // A click on nothing in particular keeps the keyboard off the agent.
+        auto *field = input->parentItem()->parentItem()->parentItem();
+        QTest::mouseClick(rig.window, Qt::LeftButton, {}, field->mapToScene(QPointF(-12, field->height() / 2)).toPoint());
+        QTest::mouseClick(rig.window, Qt::RightButton, {}, row->mapToScene(QPointF(row->width() / 2, 10)).toPoint());
+        QTRY_VERIFY(input->hasActiveFocus());
+        QVERIFY(!panel->property("terminalFocused").toBool());
+
         // A message to the agent: Enter sends it, and the field empties.
         rig.type("hello");
         QTest::keyClick(rig.window, Qt::Key_Return, Qt::ShiftModifier);
@@ -966,11 +986,28 @@ private slots:
         Surface again(rig.dir.filePath("position"));
         QVERIFY(again.overviewShown());
 
-        // Another kind of agent: no points, but a message still goes.
+        // Another kind of agent: no points, but a message still goes; each
+        // agent keeps its own draft.
+        rig.type("for one");
         QTest::keyClick(rig.window, Qt::Key_Down, Qt::AltModifier);
         QTRY_COMPARE(rig.backend->selected(), QString("w2:p1"));
         QTRY_COMPARE(rig.timeline->session(), QString());
         QVERIFY(overview->isVisible());
+        QCOMPARE(input->property("text").toString(), QString());
+        QTest::keyClick(rig.window, Qt::Key_Up, Qt::AltModifier);
+        QTRY_COMPARE(rig.backend->selected(), QString("w1:p1"));
+        QCOMPARE(input->property("text").toString(), QString("for one"));
+        QTest::keyClick(rig.window, Qt::Key_Down, Qt::AltModifier);
+        QTRY_COMPARE(rig.backend->selected(), QString("w2:p1"));
+
+        // An agent that asks: the field says where to answer, and takes you there.
+        rig.backend->setAsking({"w2:p1"});
+        QTRY_VERIFY(!input->isEnabled());
+        QTest::mouseClick(rig.window, Qt::LeftButton, {}, field->mapToScene(QPointF(field->width() / 2, field->height() / 2)).toPoint());
+        QTRY_COMPARE(panel->property("view").toString(), QString("agent"));
+        rig.backend->setAsking({});
+        QTest::keyClick(rig.window, Qt::Key_B, Qt::ControlModifier | Qt::AltModifier);
+        QTRY_COMPARE(panel->property("view").toString(), QString("overview"));
 
         // Ctrl+Alt+B: back to the terminal, with the keyboard.
         QTest::keyClick(rig.window, Qt::Key_B, Qt::ControlModifier | Qt::AltModifier);
@@ -1030,10 +1067,9 @@ private slots:
         QTest::qWait(100);
         QCOMPARE(anchor->mapToScene(QPointF(0, 0)).y(), before);
 
-        // In view, under the pointer: the points stay until the pointer leaves.
-        // (the turn summed up afresh while the pointer is here: the cached
-        // summary is dropped and comes again)
-        QTest::mouseMove(rig.window, list->mapToScene(QPointF(list->width() / 2, list->height() - 20)).toPoint());
+        // In view, under the pointer: the points stay until the pointer leaves
+        // the turn. (The turn summed up afresh: the cached summary is dropped
+        // and comes again.)
         rig.timeline->setSummaryModel("");
         QFile::remove(rig.dir.filePath("cache/s-1.json"));
         rig.timeline->reload();
@@ -1041,6 +1077,7 @@ private slots:
         QMetaObject::invokeMethod(list, "positionViewAtBeginning");
         list->setProperty("follow", false);
         QTRY_VERIFY(rig.find("point2"));
+        QTest::mouseMove(rig.window, rig.find("point2")->mapToScene(QPointF(40, 5)).toPoint());
         QTest::qWait(100);
         rig.timeline->setSummaryModel("sonnet");
         QTRY_COMPARE(rig.timeline->index(0).data(Timeline::PointsRole).toList().size(), 1);
@@ -1058,6 +1095,28 @@ private slots:
         QMetaObject::invokeMethod(list, "positionViewAtBeginning");
         QTRY_VERIFY(rig.find("summary1_0_0") && rig.find("summary1_0_0")->isVisible());
         QVERIFY(!rig.find("point2") || !rig.find("point2")->isVisible());
+
+        // The drawing the model made, as drawn, in the theme's colors.
+        write(rig.dir.filePath("reply.json"), QJsonDocument(QJsonObject{{"type", "result"}, {"is_error", false},
+            {"result", QString::fromUtf8(QJsonDocument(QJsonObject{{"points", QJsonArray{QJsonObject{
+                {"text", "Noted"}, {"kind", "done"}, {"step", 1}, {"visual", "a  [ok]b[/] <c>"}}}}}).toJson(QJsonDocument::Compact))}})
+            .toJson(QJsonDocument::Compact));
+        QFile more(rig.dir.filePath("projects/-a/s-1.jsonl"));
+        QVERIFY(more.open(QIODevice::Append));
+        more.write(entry({{"type", "user"}, {"uuid", "u9"}, {"origin", QJsonObject{{"kind", "human"}}},
+                          {"message", QJsonObject{{"content", "Draw it"}}}})
+                   + said("One.") + said("Two.") + said("Three.")
+                   + entry({{"type", "system"}, {"subtype", "turn_duration"}, {"durationMs", 1000}}));
+        more.close();
+        QTRY_VERIFY_WITH_TIMEOUT(rig.timeline->index(21).data(Timeline::PointsRole).toList().size() == 1, 10000);
+        QMetaObject::invokeMethod(list, "positionViewAtEnd");
+        QTRY_VERIFY(rig.find("visualText22_0_0"));
+        const QString drawn = rig.find("visualText22_0_0")->property("text").toString();
+        QVERIFY(drawn.startsWith("a&nbsp;&nbsp;<font color=\""));
+        QVERIFY(drawn.endsWith("b</font>&nbsp;&lt;c&gt;"));
+        QFile::remove(rig.dir.filePath("reply.json"));
+        QMetaObject::invokeMethod(list, "positionViewAtBeginning");
+        QTRY_VERIFY(rig.find("summary1_0_0"));
 
         // A click on the summary opens the points it sums up, under it.
         auto *point = rig.find("summary1_0_0");

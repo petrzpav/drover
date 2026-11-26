@@ -223,7 +223,7 @@ signals:
     void listed(const QList<Agent> &agents);
     // An answer couldn't be typed for the user; they answer in the panel.
     void answerInPanel(const QString &pane);
-    void promptSent(bool sent);
+    void promptSent(const QString &pane, bool sent);
     // The folder picker opens over the desktop, so the panel steps aside.
     void folderPickerOpened();
     void folderPickerClosed(bool chosen, const QString &text);

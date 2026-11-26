@@ -350,6 +350,29 @@ private slots:
         QVERIFY(timeline.index(0).data(Timeline::CoveredRole).toInt() <= 5);
     }
 
+    void aSummaryDrawingFitsItsLimits()
+    {
+        // Marks don't count, tabs are spaces, control characters go.
+        QCOMPARE(Timeline::fitVisual("\n\n[ok]build ✓[/] → [fail]test ✗[/]\tdone\x07\n\n"),
+                 QString("[ok]build ✓[/] → [fail]test ✗[/]    done"));
+        // At most so many lines, each at most so many characters.
+        QStringList many;
+        for (int i = 0; i < 20; ++i)
+            many << QString("line %1 ").arg(i) + QString("─").repeated(100);
+        const QStringList fitted = Timeline::fitVisual(many.join('\n')).split('\n');
+        QCOMPARE(fitted.size(), Timeline::VisualLines);
+        for (const QString &line : fitted)
+            QCOMPARE(line.size(), Timeline::VisualColumns);
+        QCOMPARE(Timeline::fitVisual("[warn]" + QString("x").repeated(70) + "[/]"),
+                 "[warn]" + QString("x").repeated(Timeline::VisualColumns));
+        // A box's right edge lined up where most of its lines end, marks aside.
+        QCOMPARE(Timeline::fitVisual("┌────┐\n│ [ok]a[/] │\n│ b  │\n│ c   │\n└────┘"),
+                 QString("┌────┐\n│ [ok]a[/]  │\n│ b  │\n│ c  │\n└────┘"));
+        // The model is told the limits.
+        QVERIFY(Timeline::summaryInstructions(false).contains(QString("at most %1 lines of at most %2 characters")
+                                                                  .arg(Timeline::VisualLines).arg(Timeline::VisualColumns)));
+    }
+
     void theTimelineKnowsWhatChangesTheWorld()
     {
         QVERIFY(TimelineParser::isMilestone("git commit -m x"));
@@ -1738,6 +1761,10 @@ echo ok
         QVERIFY(Backend::promptIsEmpty("\xe2\x9d\xaf\xc2\xa0\x1b[0m\x1b[2mTry \"edit backend.cpp to...\"\x1b[0m\r\n────\n"));
         QVERIFY(!Backend::promptIsEmpty("\x1b[1m\xe2\x9d\xaf\x1b[0m\xc2\xa0draft\r\n"));
         QVERIFY(Backend::promptIsEmpty(empty));
+        // A draft only where there is Claude's input line with text in it.
+        QVERIFY(Backend::promptHasDraft("\x1b[1m\xe2\x9d\xaf\x1b[0m\xc2\xa0draft\r\n"));
+        QVERIFY(!Backend::promptHasDraft("\xe2\x9d\xaf\xc2\xa0\r\n"));
+        QVERIFY(!Backend::promptHasDraft("codex> \r\n$ \r\n"));
         QVERIFY(!Backend::promptIsEmpty(draft));
         QVERIFY(!Backend::promptIsEmpty("$ \n"));  // no Claude prompt at all
         agentList("done", "s1");

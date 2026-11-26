@@ -792,7 +792,85 @@ QString Timeline::summaryInstructions(bool more) {
               "characters, no Markdown. Lead with outcomes: what was decided, done, changed or shipped, what failed, "
               "what is open or waits for the user. Leave out routine steps such as reading files or tests that passed.\n"
               "Reply with JSON only: {\"points\":[{\"text\":\"...\",\"kind\":\"done|change|ship|fail|ask|open|note\","
-              "\"step\":N}]} where step is the number of the step the point is mostly about.");
+              "\"step\":N,\"visual\":\"...\"}]} where step is the number of the step the point is mostly about "
+              "and visual is optional (below).\n"
+              "Pictures: the user takes in a picture faster than sentences. When the turn went through stages "
+              "(where it stands now), touched several files or parts (a tree), changed numbers (before and after) "
+              "or compared things (a chart), add \"visual\" to the point it belongs to: a small drawing in plain "
+              "text, shown in a monospace font under the point. Draw whatever explains it best; be creative, but "
+              "it must be understood at a glance and add to the points, not repeat them. Leave it out for a turn "
+              "of a few plain steps. "
+              "Technical limits: at most %1 lines of at most %2 characters, no tabs; use any characters "
+              "(box drawing, arrows, blocks, check marks). Mark parts with [ok]...[/] (good, green), "
+              "[fail]...[/] (wrong, red), [warn]...[/] (needs attention) or [dim]...[/] (quiet); "
+              "nothing else is markup. Marks take no room on screen: line things up as if they weren't there.").arg(VisualLines).arg(VisualColumns);
+}
+
+// A drawing as the overview can show it: at most VisualLines lines of
+// VisualColumns characters (marks not counted), no tabs or control
+// characters, no empty lines around it.
+QString Timeline::fitVisual(const QString &visual) {
+    static const QRegularExpression mark("\\[(?:ok|fail|warn|dim|/)\\]");
+    QStringList lines;
+    for (QString line : QString(visual).replace('\t', QStringLiteral("    ")).split('\n')) {
+        line.remove('\r');
+        QString fitted;
+        int shown = 0, at = 0;
+        while (at < line.size() && shown < VisualColumns) {
+            const auto found = mark.match(line, at, QRegularExpression::NormalMatch,
+                                          QRegularExpression::AnchorAtOffsetMatchOption);
+            if (found.hasMatch()) {
+                fitted += found.captured();
+                at = found.capturedEnd();
+                continue;
+            }
+            const QChar c = line.at(at++);
+            if (c.category() == QChar::Other_Control)
+                continue;
+            fitted += c;
+            ++shown;
+        }
+        lines << (fitted.trimmed().isEmpty() ? QString() : fitted);
+        if (lines.size() == VisualLines + 2)
+            break;
+    }
+    while (!lines.isEmpty() && lines.first().isEmpty())
+        lines.removeFirst();
+    while (!lines.isEmpty() && lines.last().isEmpty())
+        lines.removeLast();
+    lines = lines.mid(0, VisualLines);
+
+    // A box's right edge, a character or two off (models count poorly, and
+    // count the marks): lined up with where most of its lines end.
+    static const QString edges = QStringLiteral("│┃║┤┨╣┐┓╗┘┛╝┼╋╬|");
+    const auto shown = [](const QString &line) { return QString(line).remove(mark).size(); };
+    QHash<int, int> ends;
+    for (const QString &line : lines)
+        if (!line.isEmpty() && edges.contains(line.back()))
+            ++ends[shown(line)];
+    int edge = -1, most = 0;
+    for (auto it = ends.cbegin(); it != ends.cend(); ++it)
+        if (it.value() > most || (it.value() == most && it.key() > edge))
+            edge = it.key(), most = it.value();
+    if (most >= 2) {
+        for (QString &line : lines) {
+            if (line.isEmpty() || !edges.contains(line.back()))
+                continue;
+            int off = shown(line) - edge;
+            if (off < 0 && off >= -3) {
+                line.insert(line.size() - 1, QString(-off, ' '));
+            } else if (off > 0 && off <= 3) {
+                // Only spaces give way, right before the edge.
+                int at = line.size() - 1;
+                while (off > 0 && at > 0 && line.at(at - 1) == ' ' && at - 1 > 0) {
+                    line.remove(at - 1, 1);
+                    --at;
+                    --off;
+                }
+            }
+        }
+    }
+    return lines.join('\n');
 }
 
 void Timeline::loadSummaries() {
@@ -983,7 +1061,8 @@ void Timeline::summaryDone(int code) {
         const int step = point.value("step").toInt(1);
         // The point it is mostly about.
         batch.points << QVariantMap{{"text", text}, {"kind", kinds.contains(kind) ? kind : QStringLiteral("note")},
-                                    {"index", qBound(job.from, job.from + step - 1, job.to - 1)}};
+                                    {"index", qBound(job.from, job.from + step - 1, job.to - 1)},
+                                    {"visual", fitVisual(point.value("visual").toString())}};
     }
     if (batch.points.isEmpty()) {
         // Points without words: as good as no reply.

@@ -626,6 +626,7 @@ Rectangle {
                     objectName: "overview"
                     anchors.fill: parent
                     visible: panel.view === "overview" && backend.selected !== ""
+                    onAnswerWanted: panel.showView("agent")
                 }
 
                 // Why there is no terminal, in the terminal's middle: on a card

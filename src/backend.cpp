@@ -240,28 +240,40 @@ void Backend::sendPrompt(const QString &pane, const QString &text) {
     const int row = m_model.indexOf(pane);
     if (program.isEmpty() || text.trimmed().isEmpty() || row < 0 || !m_busy.isEmpty())
         return;
-    const QString title = m_model.agents().at(row).title;
+    const Agent &agent = m_model.agents().at(row);
+    const QString title = agent.title;
+    if (agent.status == QLatin1String("blocked")) {
+        setNotice(tr("%1 is asking you something, so answer it first.").arg(title), true);
+        emit promptSent(pane, false);
+        return;
+    }
     setBusy(QStringLiteral("prompt"));
     run(program, {"pane", "read", pane, "--source", "visible", "--format", "ansi"},
-        [this, program, pane, text, title](int code, const QByteArray &out, const QByteArray &) {
+        [this, program, pane, text, title](int code, const QByteArray &out, const QByteArray &err) {
+            if (code != 0) {
+                setBusy(QString());
+                setNotice(tr("Couldn't send it to %1: %2").arg(title, commandError(out, err, code)), true);
+                emit promptSent(pane, false);
+                return;
+            }
             // Sending after a draft would send the two together.
-            if (code != 0 || promptHasDraft(out)) {
+            if (promptHasDraft(out)) {
                 setBusy(QString());
                 setNotice(tr("%1 has unsent text in its prompt, so send it there.").arg(title), true);
-                emit promptSent(false);
+                emit promptSent(pane, false);
                 return;
             }
             run(program, {"agent", "prompt", pane, text},
-                [this, title](int code, const QByteArray &out, const QByteArray &err) {
+                [this, pane, title](int code, const QByteArray &out, const QByteArray &err) {
                     setBusy(QString());
                     if (code != 0) {
                         const bool asking = errorCode(out, err) == QLatin1String("agent_blocked");
                         setNotice(asking ? tr("%1 is asking you something, so answer it first.").arg(title)
                                          : tr("Couldn't send it to %1: %2").arg(title, commandError(out, err, code)), true);
-                        emit promptSent(false);
+                        emit promptSent(pane, false);
                         return;
                     }
-                    emit promptSent(true);
+                    emit promptSent(pane, true);
                 });
         });
 }

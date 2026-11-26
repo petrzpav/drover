@@ -89,6 +89,7 @@
   "In the agent view: show or hide the agent list": "U agenta: zobrazit či skrýt seznam agentů",
   "In the editor: show or hide a terminal below it (Ctrl+W closes it)": "V editoru: ukázat či skrýt terminál pod ním (Ctrl+W ho zavře)",
   "In the picker: close a workspace (press twice)": "Ve výběru: zavřít workspace (stiskněte dvakrát)",
+  "It asks you something: answer it in its terminal (Ctrl+Alt+B)": "Ptá se tě na něco: odpověz v jeho terminálu (Ctrl+Alt+B)",
   "Keyboard shortcuts": "Klávesové zkratky",
   "Message to %1": "Zpráva pro %1",
   "Message to the agent · Enter sends, Shift+Enter starts a new line": "Zpráva agentovi · Enter odešle, Shift+Enter nový řádek",
